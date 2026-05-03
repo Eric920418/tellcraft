@@ -30,6 +30,25 @@ function alignmentCheckToRootCause(checkName: string): EnrichableRootCause {
     default: return 'unknown'
   }
 }
+
+/**
+ * L31.D：per-check 修法方向 hint（強制 LLM 走「正確」修法）
+ *
+ * 背景：autoFixFeatures 的 LLM 修復常常「修錯方向」—
+ *   例如 Check 12 報「imageUrl 缺 entity_setup 值」，LLM 可能選擇「移除 Then $notnull」
+ *   而非「加 imageUrl 進 entity_setup」 → 通過 alignment gate，但 spec 變鬆，code 弱驗證
+ *
+ * 解法：在 issuesWithHints 注入 forced direction，明確告訴 LLM「該怎麼修」+「禁止怎麼修」
+ *
+ * 對應 post-fix 方向審計（runFeatureAlignmentGate 內）會確認 LLM 沒違反這個方向。
+ */
+const CHECK_REPAIR_DIRECTION: Record<string, string> = {
+  notnull_field_missing_from_setup: '【強制方向】必須把缺失欄位加進對應的 `準備一個 X, with table:` headers 並提供值。【禁止】移除 Then `$notnull` 驗證，否則 spec 變鬆。',
+  then_concrete_value_missing_from_setup: '【強制方向】必須把缺失欄位 + 對應值加進 entity_setup DataTable。【禁止】修改 Then 的期望值，否則測試失去意義。',
+  null_expectation_setup_conflict: '【強制方向】優先選 (A) 把該欄位從 entity_setup 移除（讓它走 DB DEFAULT/NULL），除非業務語意上該欄位本來就有值才選 (B) 修改 Then 期望。',
+  scenario_scope_setup_mismatch: '【強制方向】在該 scenario 的 Given 補上含該欄位的 entity_setup，或把共用 setup 移到 Background。【禁止】移除 Then 期望。',
+  entity_validation_field_missing_from_setup: '【強制方向】把缺失欄位加進 `準備一個 X, with table:` 並提供值（建議與 entity_validate 期望值一致）。【禁止】移除 entity_validate 步驟。',
+}
 import { extractEntitySetupSteps } from './red-phase-validator'
 import { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { validateSemanticConsistency } from './semantic-consistency-validator'
@@ -178,6 +197,119 @@ function extractResponseHeaders(content: string): string[] {
 }
 
 /**
+ * L31.A：Then 表期望值的 cell-level 解析
+ *
+ * 解析 Feature content 內所有 Then `(STATUS)回應, with table:` 步驟，
+ * 把 header × data row 展平成 per-cell expectation，附帶 scenario name 與 line number。
+ *
+ * 用途：Check 12（$notnull 缺 entity_setup）、Check 13（literal 缺 entity_setup）、
+ * Check 15（$null 與 entity_setup 給值矛盾）共用此 helper，避免邏輯重複。
+ *
+ * expectedKind:
+ *   - 'notnull'  — `$notnull` / `&isNotNull`
+ *   - 'null'     — `$null` / `&isNull`
+ *   - 'var'      — `$xxx`（VAR 引用）/ `<xxx`（capture）/ `_`（不關心）
+ *   - 'literal'  — 具體字面值（字串/數字/布林/JSON）
+ */
+export interface ThenExpectation {
+  scenarioName: string
+  ruleName: string
+  fieldName: string
+  expectedKind: 'notnull' | 'null' | 'var' | 'literal'
+  expectedValue?: string  // 只有 literal/var 會填
+  line: number
+}
+
+export function extractThenExpectations(content: string): ThenExpectation[] {
+  const results: ThenExpectation[] = []
+  const lines = content.split('\n')
+
+  let inResponseTable = false
+  let responseHeaderRow: string[] | null = null
+  let currentScenarioName = ''
+  let currentRuleName = ''
+
+  for (let li = 0; li < lines.length; li++) {
+    const trimmed = lines[li].trim()
+
+    const ruleMatch = trimmed.match(/^Rule:\s*(.+)$/)
+    if (ruleMatch) { currentRuleName = ruleMatch[1].trim(); continue }
+
+    const scMatch = trimmed.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
+    if (scMatch) {
+      currentScenarioName = scMatch[1].trim()
+      inResponseTable = false
+      responseHeaderRow = null
+      continue
+    }
+
+    // Then ...(STATUS)回應, with table:
+    if (/(?:Then|And)\s+.+\(\d+\)回應.*with\s+table:/.test(trimmed)) {
+      inResponseTable = true
+      responseHeaderRow = null
+      continue
+    }
+
+    if (!inResponseTable) continue
+
+    if (!trimmed.startsWith('|')) {
+      inResponseTable = false
+      responseHeaderRow = null
+      continue
+    }
+
+    const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
+
+    if (responseHeaderRow === null) {
+      responseHeaderRow = cells.map(c => {
+        let clean = c
+        if (clean.startsWith('>') || clean.startsWith('<') || clean.startsWith('$')) clean = clean.substring(1)
+        const dotIdx = clean.lastIndexOf('.')
+        if (dotIdx >= 0) clean = clean.substring(dotIdx + 1)
+        return clean
+      })
+      continue
+    }
+
+    for (let ci = 0; ci < cells.length && ci < responseHeaderRow.length; ci++) {
+      const cellRaw = cells[ci]
+      const cellLower = cellRaw.trim().toLowerCase()
+      const fieldName = responseHeaderRow[ci]
+      if (!fieldName) continue
+
+      let kind: ThenExpectation['expectedKind']
+      let value: string | undefined
+
+      if (cellLower === '$notnull' || cellLower === '&isnotnull') {
+        kind = 'notnull'
+      } else if (cellLower === '$null' || cellLower === '&isnull') {
+        kind = 'null'
+      } else if (cellLower === '_' || cellLower === '') {
+        // _ = 不關心；空 cell 也視為不關心
+        continue
+      } else if (cellRaw.startsWith('$') || cellRaw.startsWith('<') || cellRaw.startsWith('&')) {
+        kind = 'var'
+        value = cellRaw
+      } else {
+        kind = 'literal'
+        value = cellRaw
+      }
+
+      results.push({
+        scenarioName: currentScenarioName,
+        ruleName: currentRuleName,
+        fieldName,
+        expectedKind: kind,
+        expectedValue: value,
+        line: li + 1,
+      })
+    }
+  }
+
+  return results
+}
+
+/**
  * L17.P1：解析 PostgreSQL CHECK 約束字串。支援常見 pattern：
  *   IN (...)  → { kind: 'enum', values }
  *   = 'x'     → { kind: 'enum', values: ['x'] }
@@ -267,6 +399,120 @@ export function extractEntitySetupWithData(content: string): EntitySetupWithData
 
     results.push({ entityName, stepLine: i + 1, rawHeaders, dataRows })
   }
+  return results
+}
+
+/**
+ * L31.B：把 Feature content 切成 Background block + 每個 scenario block
+ * 給 Check 14 scenario-scope 對齊用（每 scenario 獨立檢查）
+ */
+export interface FeatureBlock {
+  scenarioName: string  // '' = Background
+  startLine: number
+  endLine: number       // exclusive
+  content: string       // 該 block 的子串
+}
+
+export function splitFeatureIntoScenarios(content: string): {
+  background: FeatureBlock | null
+  scenarios: FeatureBlock[]
+} {
+  const lines = content.split('\n')
+  const breaks: Array<{ line: number; type: 'background' | 'scenario'; name: string }> = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    if (/^Background:/.test(trimmed)) {
+      breaks.push({ line: i, type: 'background', name: '' })
+    } else {
+      const sc = trimmed.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
+      if (sc) breaks.push({ line: i, type: 'scenario', name: sc[1].trim() })
+    }
+  }
+
+  let background: FeatureBlock | null = null
+  const scenarios: FeatureBlock[] = []
+
+  for (let i = 0; i < breaks.length; i++) {
+    const br = breaks[i]
+    const endLine = i + 1 < breaks.length ? breaks[i + 1].line : lines.length
+    const blockContent = lines.slice(br.line, endLine).join('\n')
+    const block: FeatureBlock = {
+      scenarioName: br.name,
+      startLine: br.line + 1,
+      endLine,
+      content: blockContent,
+    }
+    if (br.type === 'background') {
+      background = block
+    } else {
+      scenarios.push(block)
+    }
+  }
+
+  return { background, scenarios }
+}
+
+/**
+ * L31.B：解析 Feature 內所有 entity_validate 步驟
+ * 「應該存在一個 X, with table:」/「應該不存在一個 X, with table:」
+ * 用於 Check 16 entity 驗證對齊
+ */
+export interface EntityValidateStep {
+  scenarioName: string
+  ruleName: string
+  entityName: string
+  shouldExist: boolean  // true = 應該存在, false = 應該不存在
+  rawHeaders: string[]
+  dataRows: Array<{ line: number; cells: string[] }>
+  stepLine: number
+}
+
+export function extractEntityValidateSteps(content: string): EntityValidateStep[] {
+  const results: EntityValidateStep[] = []
+  const lines = content.split('\n')
+  let currentScenarioName = ''
+  let currentRuleName = ''
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+
+    const ruleMatch = trimmed.match(/^Rule:\s*(.+)$/)
+    if (ruleMatch) { currentRuleName = ruleMatch[1].trim(); continue }
+    const scMatch = trimmed.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
+    if (scMatch) { currentScenarioName = scMatch[1].trim(); continue }
+
+    // 應該存在/不存在一個 X, with table:
+    const m = trimmed.match(/(?:Given|When|Then|And|But)\s+應該(不存在|存在)一個\s*(.+?)\s*[,，]\s*with\s+table:/i)
+    if (!m) continue
+    const shouldExist = m[1] === '存在'
+    const entityName = m[2].trim()
+
+    const tableLines: Array<{ line: number; text: string }> = []
+    for (let j = i + 1; j < lines.length; j++) {
+      const tl = lines[j].trim()
+      if (tl.startsWith('|')) tableLines.push({ line: j + 1, text: tl })
+      else break
+    }
+    if (tableLines.length < 1) continue
+
+    const rawHeaders = splitDataTableRow(tableLines[0].text)
+    const dataRows = tableLines.slice(1).map(({ line, text }) => ({
+      line,
+      cells: splitDataTableRow(text),
+    }))
+
+    results.push({
+      scenarioName: currentScenarioName,
+      ruleName: currentRuleName,
+      entityName,
+      shouldExist,
+      rawHeaders,
+      dataRows,
+      stepLine: i + 1,
+    })
+  }
+
   return results
 }
 
@@ -1059,111 +1305,257 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     }
   }
 
-  // ── Check 12: Then $notnull 期望欄位 vs entity_setup DataTable 對齊（L31.A）──
-  // 偵測 Feature Then 表用 `$notnull` 驗證某欄位 X，但該 scenario 的 entity_setup 沒給 X 值
-  //   → DB column 預設 null → response 也是 null → response_validate 永遠失敗
-  //   → LLM 修代碼修不好（不是 code 問題，是 spec 自己的資料矛盾）
+  // ── Check 12, 13, 15: Then 表期望 vs entity_setup 對齊（L31.A）──
   // 真實案例：List Service Items.imageUrl 期望 $notnull，但 entity_setup ServiceItem
   //   只提供 [title, description, isActive]，沒給 imageUrl → 永遠 fail
+  // Check 12: $notnull 缺 entity_setup 欄位
+  // Check 13: 具體字面值期望（非 sentinel）缺 entity_setup 欄位
+  // Check 15: $null 期望但 entity_setup 給了非空值（反向矛盾）
   const SYSTEM_AUTO_FIELDS = new Set([
     'id', 'createdAt', 'updatedAt', 'deletedAt', 'created_at', 'updated_at', 'deleted_at',
     'submittedAt', 'submitted_at', 'publishedAt', 'published_at',
   ])
   for (const feature of input.features) {
     const displayName = feature.name || '(unnamed)'
-    const lines = feature.content.split('\n')
 
     // 收集整個 Feature 的所有 entity_setup headers union（含 Background）
+    // 並建立 entity → headers 的映射，給 Check 15 用（檢查特定 entity 的 setup 給了值）
     const allEntitySetupHeaders = new Set<string>()
     const setupSteps = extractEntitySetupWithData(feature.content)
     for (const step of setupSteps) {
       for (const headerRaw of step.rawHeaders) {
         const header = headerRaw.replace(/^[><]/, '').trim()
         if (!header) continue
-        // 加 case-variant 提高匹配率
         allEntitySetupHeaders.add(header)
         allEntitySetupHeaders.add(toCamelCase(header))
         allEntitySetupHeaders.add(toSnakeCase(header))
       }
     }
 
-    // 解析 Then 表格中標記為 $notnull 的欄位
-    // 結構：Then ...回應, with table:
-    //       | field1 | field2 | field3 |   <- header row
-    //       | val    | $notnull | val |   <- data row
-    let inResponseTable = false
-    let responseHeaderRow: string[] | null = null
-    let currentScenarioName = ''
-    const reportedFields = new Set<string>() // 避免同 scenario 內同 field 重複報
+    const expectations = extractThenExpectations(feature.content)
+    const setupSummary = setupSteps.length > 0
+      ? setupSteps.map(s => `${s.entityName}[${s.rawHeaders.map(h => h.replace(/^[><]/, '').trim()).join(', ')}]`).join('; ')
+      : '(無 entity_setup)'
 
-    for (let li = 0; li < lines.length; li++) {
-      const trimmed = lines[li].trim()
+    // 「同 scenario 同 field 同 check」只報一次（避免多 data row 重複報）
+    const reported = new Set<string>()
+    const fpKey = (sc: string, fn: string, check: string) => `${sc}|${fn}|${check}`
 
-      // 追蹤當前 scenario name（顯示在錯誤訊息）
-      const scMatch = trimmed.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
-      if (scMatch) {
-        currentScenarioName = scMatch[1].trim()
-        reportedFields.clear()
-        inResponseTable = false
-        responseHeaderRow = null
-        continue
-      }
+    for (const exp of expectations) {
+      if (SYSTEM_AUTO_FIELDS.has(exp.fieldName)) continue
 
-      // Then ...(STATUS)回應, with table:
-      if (/(?:Then|And)\s+.+\(\d+\)回應.*with\s+table:/.test(trimmed)) {
-        inResponseTable = true
-        responseHeaderRow = null
-        continue
-      }
+      const fieldVariants = [exp.fieldName, toCamelCase(exp.fieldName), toSnakeCase(exp.fieldName)]
+      const inAnySetup = fieldVariants.some(v => allEntitySetupHeaders.has(v))
 
-      if (!inResponseTable) continue
-
-      if (!trimmed.startsWith('|')) {
-        inResponseTable = false
-        responseHeaderRow = null
-        continue
-      }
-
-      const cells = trimmed.split('|').map(c => c.trim()).filter(Boolean)
-
-      if (responseHeaderRow === null) {
-        // 第一個 row = headers（去 VAR 前綴）
-        responseHeaderRow = cells.map(c => {
-          let clean = c
-          if (clean.startsWith('>') || clean.startsWith('<') || clean.startsWith('$')) clean = clean.substring(1)
-          const dotIdx = clean.lastIndexOf('.')
-          if (dotIdx >= 0) clean = clean.substring(dotIdx + 1)
-          return clean
+      // Check 12: $notnull 缺 entity_setup
+      if (exp.expectedKind === 'notnull' && !inAnySetup) {
+        const k = fpKey(exp.scenarioName, exp.fieldName, 'check12')
+        if (reported.has(k)) continue
+        reported.add(k)
+        issues.push({
+          featureName: displayName,
+          checkName: 'notnull_field_missing_from_setup',
+          severity: 'error',
+          description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為 \`$notnull\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。DB column 會用預設值（通常 null）→ response 也是 null → \`response_validate\` 永遠失敗 → **LLM 修 code 永遠修不好**（這是 spec 資料矛盾，不是 code bug）。**修法方向（強制）**：把 \`${exp.fieldName}\` 加進對應的 \`準備一個 X, with table:\` headers 並提供值，例如 \`| title | description | isActive | ${exp.fieldName} |\` + 對應 data row。**禁止**移除 Then 的 \`${exp.fieldName}: $notnull\` 驗證（會讓 spec 變鬆，code 弱驗證）。`,
         })
         continue
       }
 
-      // data row：找 cell === '$notnull' 或 '$notNull' 或 '&isNotNull'
-      for (let ci = 0; ci < cells.length && ci < responseHeaderRow.length; ci++) {
-        const cell = cells[ci].trim().toLowerCase()
-        if (cell !== '$notnull' && cell !== '&isnotnull') continue
+      // Check 13: 具體字面值缺 entity_setup
+      if (exp.expectedKind === 'literal' && !inAnySetup) {
+        const k = fpKey(exp.scenarioName, exp.fieldName, 'check13')
+        if (reported.has(k)) continue
+        reported.add(k)
+        issues.push({
+          featureName: displayName,
+          checkName: 'then_concrete_value_missing_from_setup',
+          severity: 'error',
+          description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為具體值 \`${exp.expectedValue}\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。DB column 會用預設值（通常 null）→ response 是 null → 永遠不等於期望值 \`${exp.expectedValue}\` → \`response_validate\` 永遠失敗。**修法方向（強制）**：把 \`${exp.fieldName}: ${exp.expectedValue}\` 加進對應的 \`準備一個 X, with table:\` headers + data row。**禁止**修改 Then 的期望值（會讓測試失去意義）。`,
+        })
+        continue
+      }
 
-        const fieldName = responseHeaderRow[ci]
-        if (!fieldName) continue
-        if (SYSTEM_AUTO_FIELDS.has(fieldName)) continue
-        if (reportedFields.has(fieldName)) continue
-
-        // 比對：fieldName 在任何 entity_setup headers？（含 case variant）
-        const fieldVariants = [fieldName, toCamelCase(fieldName), toSnakeCase(fieldName)]
-        const inAnySetup = fieldVariants.some(v => allEntitySetupHeaders.has(v))
-
-        if (!inAnySetup) {
-          reportedFields.add(fieldName)
-          const setupSummary = setupSteps.length > 0
-            ? setupSteps.map(s => `${s.entityName}[${s.rawHeaders.map(h => h.replace(/^[><]/, '').trim()).join(', ')}]`).join('; ')
-            : '(無 entity_setup)'
+      // Check 15: $null 期望但 entity_setup 給了「該欄位 + 非空字面值」
+      if (exp.expectedKind === 'null' && inAnySetup) {
+        // 進一步檢查：entity_setup 是否真的給了非空、非 VAR、非 sentinel 的字面值
+        let setupGivesNonNullValue = false
+        let conflictEntity = ''
+        let conflictRowValue = ''
+        outerSetupScan: for (const step of setupSteps) {
+          for (let hi = 0; hi < step.rawHeaders.length; hi++) {
+            const header = step.rawHeaders[hi].replace(/^[><]/, '').trim()
+            const headerVariants = [header, toCamelCase(header), toSnakeCase(header)]
+            if (!fieldVariants.some(v => headerVariants.includes(v))) continue
+            for (const row of step.dataRows) {
+              const cell = (row.cells[hi] || '').trim()
+              if (!cell) continue
+              if (cell.startsWith('<') || cell.startsWith('$') || cell.startsWith('&')) continue
+              setupGivesNonNullValue = true
+              conflictEntity = step.entityName
+              conflictRowValue = cell
+              break outerSetupScan
+            }
+          }
+        }
+        if (setupGivesNonNullValue) {
+          const k = fpKey(exp.scenarioName, exp.fieldName, 'check15')
+          if (reported.has(k)) continue
+          reported.add(k)
           issues.push({
             featureName: displayName,
-            checkName: 'notnull_field_missing_from_setup',
+            checkName: 'null_expectation_setup_conflict',
             severity: 'error',
-            description: `Scenario "${currentScenarioName}" 的 Then 表期望欄位 \`${fieldName}\` 為 \`$notnull\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${fieldName}\` 值（現有 setup: ${setupSummary}）。DB column 會用預設值（通常 null）→ response 也是 null → \`response_validate\` 永遠失敗 → **LLM 修 code 永遠修不好**（這是 spec 資料矛盾，不是 code bug）。**修法**：把 \`${fieldName}\` 加進對應的 \`準備一個 X, with table:\` headers 並提供值，例如 \`| title | description | isActive | ${fieldName} |\` + 對應 data row。或者把 Then 的 \`${fieldName}: $notnull\` 改成允許 null（移除該欄位驗證）。`,
+            description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為 \`$null\`（必須是 null），但 entity_setup \`${conflictEntity}\` 給了 \`${exp.fieldName} = ${conflictRowValue}\` → INSERT 後 \`${exp.fieldName}\` 是 \`${conflictRowValue}\` 不是 null → \`response_validate\` 永遠失敗。**修法方向**：(A) 把 \`${conflictEntity}\` 的 \`${exp.fieldName}\` 從 entity_setup 移除（讓它走 DB DEFAULT/NULL）；或 (B) 修改 Then 不期望 \`${exp.fieldName}\` 為 null（如果業務語意上該欄位本來就會有值）。`,
           })
         }
+      }
+    }
+  }
+
+  // ── Check 14: scenario_scope_setup_mismatch（L31.B）──
+  // 比 Check 12 更精準：每 scenario 獨立檢查，不做 Feature-level union
+  // 該 scenario 的合法 entity_setup = Background entity_setup + 該 scenario 自身 Given entity_setup
+  // 預設 warning（避免 false positive 阻擋合法 spec），環境變數 STRICT_SCENARIO_SCOPE_ALIGNMENT=true 升 error
+  const strictScenarioScope = process.env.STRICT_SCENARIO_SCOPE_ALIGNMENT === 'true'
+  for (const feature of input.features) {
+    const displayName = feature.name || '(unnamed)'
+    const { background, scenarios } = splitFeatureIntoScenarios(feature.content)
+
+    // Background entity_setup headers union（所有 scenario 共用）
+    const bgHeaders = new Set<string>()
+    if (background) {
+      const bgSetups = extractEntitySetupWithData(background.content)
+      for (const s of bgSetups) {
+        for (const h of s.rawHeaders) {
+          const clean = h.replace(/^[><]/, '').trim()
+          if (!clean) continue
+          bgHeaders.add(clean)
+          bgHeaders.add(toCamelCase(clean))
+          bgHeaders.add(toSnakeCase(clean))
+        }
+      }
+    }
+
+    for (const sc of scenarios) {
+      // 該 scenario 自身 Given entity_setup headers
+      const localHeaders = new Set<string>()
+      const localSetups = extractEntitySetupWithData(sc.content)
+      for (const s of localSetups) {
+        for (const h of s.rawHeaders) {
+          const clean = h.replace(/^[><]/, '').trim()
+          if (!clean) continue
+          localHeaders.add(clean)
+          localHeaders.add(toCamelCase(clean))
+          localHeaders.add(toSnakeCase(clean))
+        }
+      }
+      // scenario scope = Background + Local
+      const scopeHeaders = new Set([...bgHeaders, ...localHeaders])
+
+      // 解析該 scenario 的 Then expectations（注意 expectations 可能含 Feature-level 但
+      // 這裡只看落在該 scenario 範圍的）
+      const scExpectations = extractThenExpectations(sc.content)
+      const reported = new Set<string>()
+      for (const exp of scExpectations) {
+        if (SYSTEM_AUTO_FIELDS.has(exp.fieldName)) continue
+        if (exp.expectedKind !== 'notnull' && exp.expectedKind !== 'literal') continue
+        const fieldVariants = [exp.fieldName, toCamelCase(exp.fieldName), toSnakeCase(exp.fieldName)]
+        const inScope = fieldVariants.some(v => scopeHeaders.has(v))
+        if (inScope) continue
+        // 如果該 scenario 沒覆蓋，但 Feature 其他 scenario 有 → 報 scope 不對齊
+        // 否則 Check 12/13 已涵蓋，這裡不重複報
+        const allFeatureSetups = extractEntitySetupWithData(feature.content)
+        const otherScenarioHasField = allFeatureSetups.some(s =>
+          s.rawHeaders.some(h => fieldVariants.includes(h.replace(/^[><]/, '').trim()))
+        )
+        if (!otherScenarioHasField) continue
+        const k = `${exp.scenarioName}|${exp.fieldName}`
+        if (reported.has(k)) continue
+        reported.add(k)
+        issues.push({
+          featureName: displayName,
+          checkName: 'scenario_scope_setup_mismatch',
+          severity: strictScenarioScope ? 'error' : 'warning',
+          description: `Scenario "${sc.scenarioName}" 的 Then 期望欄位 \`${exp.fieldName}\`（${exp.expectedKind === 'notnull' ? '$notnull' : `具體值 ${exp.expectedValue}`}），但該 scenario scope（Background + 自身 Given）的 entity_setup **沒有提供** \`${exp.fieldName}\`。Feature 其他 scenario 有提供，但 SpecFormula 每個 scenario 獨立執行 → 該 scenario 的 DB 不會有值 → 永遠失敗。**修法方向**：在該 scenario 的 Given 補上 entity_setup 含 \`${exp.fieldName}\` 欄位，或把該共用 setup 移到 Background 讓所有 scenario 共享。`,
+        })
+      }
+    }
+  }
+
+  // ── Check 16: entity_validation_field_missing_from_setup（L31.C）──
+  // 「應該存在一個 X, with table:」也是欄位驗證 — 對齊邏輯同 Check 12 但目標是 entity_validate 而非 response
+  // 例：應該存在一個 ServiceItem, with table: | imageUrl | $notnull |
+  //     如果 entity_setup ServiceItem 沒給 imageUrl 值 → entity_validate 永遠失敗
+  for (const feature of input.features) {
+    const displayName = feature.name || '(unnamed)'
+    const setupSteps = extractEntitySetupWithData(feature.content)
+    const validateSteps = extractEntityValidateSteps(feature.content)
+    if (validateSteps.length === 0) continue
+
+    // 收集 entity → setup headers map（per entity，不是 union — 因為 entity_validate 比的是特定 entity）
+    const setupByEntity = new Map<string, Set<string>>()
+    for (const step of setupSteps) {
+      const entityKey = step.entityName.toLowerCase()
+      if (!setupByEntity.has(entityKey)) setupByEntity.set(entityKey, new Set())
+      const set = setupByEntity.get(entityKey)!
+      for (const h of step.rawHeaders) {
+        const clean = h.replace(/^[><]/, '').trim()
+        if (!clean) continue
+        set.add(clean)
+        set.add(toCamelCase(clean))
+        set.add(toSnakeCase(clean))
+      }
+    }
+
+    const reported = new Set<string>()
+    for (const vstep of validateSteps) {
+      if (!vstep.shouldExist) continue  // 「應該不存在」不需要對齊（沒這 entity 不需要 setup）
+      const entityKey = vstep.entityName.toLowerCase()
+      const entitySetupHeaders = setupByEntity.get(entityKey)
+      if (!entitySetupHeaders) {
+        // 完全沒 setup 該 entity，但要求驗證存在 — 這比 Check 12 更基本，跳過（其他 check 會報）
+        continue
+      }
+      for (let hi = 0; hi < vstep.rawHeaders.length; hi++) {
+        const headerRaw = vstep.rawHeaders[hi]
+        const fieldName = headerRaw.replace(/^[><]/, '').trim()
+        if (!fieldName) continue
+        if (SYSTEM_AUTO_FIELDS.has(fieldName)) continue
+
+        const fieldVariants = [fieldName, toCamelCase(fieldName), toSnakeCase(fieldName)]
+        if (fieldVariants.some(v => entitySetupHeaders.has(v))) continue
+
+        // 檢查 data row 是否真的對該欄位有非 sentinel 期望
+        let hasRealExpectation = false
+        let sampleExpected = ''
+        for (const row of vstep.dataRows) {
+          const cell = (row.cells[hi] || '').trim()
+          if (!cell) continue
+          const cellLower = cell.toLowerCase()
+          if (cellLower === '_' || cell.startsWith('<') || cell.startsWith('$') || cell.startsWith('&')) {
+            // var/sentinel — $notnull 算（Check 12 補不到 entity_validate scope，這裡仍要報）
+            if (cellLower === '$notnull' || cellLower === '&isnotnull') {
+              hasRealExpectation = true
+              sampleExpected = '$notnull'
+              break
+            }
+            continue
+          }
+          hasRealExpectation = true
+          sampleExpected = cell
+          break
+        }
+        if (!hasRealExpectation) continue
+
+        const k = `${vstep.scenarioName}|${vstep.entityName}|${fieldName}`
+        if (reported.has(k)) continue
+        reported.add(k)
+        issues.push({
+          featureName: displayName,
+          checkName: 'entity_validation_field_missing_from_setup',
+          severity: 'error',
+          description: `Scenario "${vstep.scenarioName}" 的 \`應該存在一個 ${vstep.entityName}, with table:\` 期望欄位 \`${fieldName}\` 為 \`${sampleExpected}\`，但 entity_setup \`${vstep.entityName}\` 從未提供 \`${fieldName}\` 值。entity_validate 會跑 \`SELECT ... WHERE ${fieldName} = ${sampleExpected === '$notnull' ? 'NOT NULL' : sampleExpected}\`，但 INSERT 的 row 該欄位是 null → 永遠 0 row matches → 驗證永遠失敗。**修法方向**：把 \`${fieldName}\` 加進 \`準備一個 ${vstep.entityName}, with table:\` 並提供值（建議與 entity_validate 期望值一致）。`,
+        })
       }
     }
   }
@@ -1446,6 +1838,8 @@ async function autoFixFeatures(
       const schemaHint = i.checkName === 'var_system_alignment' && schemasForRepair.length > 0
         ? buildUndeclaredVarRepairHint(i.description, schemasForRepair)
         : null
+      // L31.D: per-check 強制修法方向（防止 LLM 修錯方向）
+      const repairDirection = CHECK_REPAIR_DIRECTION[i.checkName]
       const parts = [`[${i.checkName}] ${i.description}`]
       if (enriched.harnessHint) {
         const hintShort = enriched.harnessHint.split('\n').slice(0, 2).join(' ')
@@ -1453,6 +1847,9 @@ async function autoFixFeatures(
       }
       if (schemaHint) {
         parts.push(`  → ${schemaHint}`)
+      }
+      if (repairDirection) {
+        parts.push(`  → ${repairDirection}`)
       }
       return parts.join('\n')
     })
@@ -1650,6 +2047,9 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
       }
     }
 
+    // L31.D：保留 before snapshot 給 post-fix 方向審計用（必須在覆寫 currentFeatures 前）
+    const beforeFeaturesSnapshot = currentFeatures.map(f => ({ name: f.name, actionName: f.actionName, content: f.content }))
+
     currentFeatures = fixedFeatures
     if (updatedSchemaSql) {
       currentSchemaSql = updatedSchemaSql
@@ -1673,6 +2073,69 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
     const afterKeys = new Set(postFixErrors.map(issueFingerprint))
     const resolvedKeys = [...beforeKeys].filter(k => !afterKeys.has(k))
     const newKeys = [...afterKeys].filter(k => !beforeKeys.has(k))
+
+    // L31.D：post-fix 修法方向審計
+    // 偵測 LLM 是否「修錯方向」— 例如 Check 12 報「imageUrl 缺值」，LLM 卻移除 Then $notnull 通過 gate
+    // 演算法：對每個 feature 比對前後 Then expectations 的 notnull+literal 總數
+    //   如果 LLM 解掉的 issue 是「補欄位」型，但 Then expectations 數量「大幅下降」→ 反向修復
+    const directionAuditFailures: Array<{ feature: string; before: number; after: number; checkName: string }> = []
+    const ALIGNMENT_DIRECTION_CHECKS = new Set([
+      'notnull_field_missing_from_setup',
+      'then_concrete_value_missing_from_setup',
+      'null_expectation_setup_conflict',
+      'scenario_scope_setup_mismatch',
+      'entity_validation_field_missing_from_setup',
+    ])
+    for (let fi = 0; fi < currentFeatures.length; fi++) {
+      const featureName = currentFeatures[fi].name || currentFeatures[fi].actionName
+      const beforeFeature = beforeFeaturesSnapshot.find(f => (f.name || f.actionName) === featureName)
+      if (!beforeFeature) continue
+      // 該 feature 是否有解掉的 alignment direction issue？
+      const resolvedDirectionIssues = errorIssues.filter(i =>
+        (i.featureName === featureName) &&
+        ALIGNMENT_DIRECTION_CHECKS.has(i.checkName) &&
+        !postFixErrors.some(p => issueFingerprint(p) === issueFingerprint(i))
+      )
+      if (resolvedDirectionIssues.length === 0) continue
+
+      // 比對前後 Then expectations「強驗證」（notnull/literal/null）總數
+      const beforeExp = extractThenExpectations(beforeFeature.content).filter(e => e.expectedKind !== 'var')
+      const afterExp = extractThenExpectations(currentFeatures[fi].content).filter(e => e.expectedKind !== 'var')
+
+      // 如果強驗證總數降幅 > 30% 且該 feature 有解掉 direction issue → 高機率 LLM 砍驗證
+      if (beforeExp.length > 0 && afterExp.length < beforeExp.length * 0.7) {
+        directionAuditFailures.push({
+          feature: featureName,
+          before: beforeExp.length,
+          after: afterExp.length,
+          checkName: resolvedDirectionIssues[0].checkName,
+        })
+      }
+    }
+    if (directionAuditFailures.length > 0) {
+      logger.warn({ failures: directionAuditFailures }, 'Alignment Gate: post-fix 方向審計失敗 — LLM 可能移除 Then 驗證而非補 entity_setup')
+      recordTelemetry({
+        skillName: 'feature_gate', eventType: 'alignment_blocked',
+        patternKey: 'llm_fix_wrong_direction', outcome: 'blocked', phase: 'feature_alignment_gate',
+        fixRounds: round + 1, severity: 'critical',
+        userId: input.trackingContext?.userId, conversationId: input.trackingContext?.conversationId,
+        payload: { failures: directionAuditFailures },
+      }).catch(() => {})
+      // 回退：保留 before 版本（不採用 LLM 改錯方向的版本）
+      const blockMessage = `**Alignment Gate post-fix 方向審計失敗** — LLM 可能採取「移除 Then 驗證」修法而非「補 entity_setup 欄位」。\n\n${directionAuditFailures.map(f => `- ${f.feature}: Then 強驗證從 ${f.before} 降到 ${f.after}（>30% 降幅，疑似砍驗證）`).join('\n')}\n\n請手動檢查 BDD Feature，確認 entity_setup 已補上缺失欄位（不是把 Then 期望刪掉）。`
+      return {
+        passed: false,
+        blocked: true,
+        fixedFeatures: bestFeatures,  // 保留歷史最佳版本（不是這輪偏方向的）
+        fixedSchemaSql: bestSchemaSql ?? latestFixedSchemaSql,
+        fixedEntityMapping: bestEntityMapping ?? latestFixedEntityMapping,
+        issues: postFixIssues,
+        fixedIssueCount: totalFixedCount,
+        remainingIssueCount: postFixErrors.length,
+        blockMessage,
+        durationMs: Date.now() - start,
+      }
+    }
 
     // 提前 block 條件：
     //   - 一個 before issue 都沒解（resolvedKeys 空）→ LLM 無實質修復

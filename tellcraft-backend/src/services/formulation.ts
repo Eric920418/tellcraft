@@ -5,6 +5,7 @@ import { getEnv } from '../lib/env'
 import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
+import { extractNullableColumnsHint } from './schema-derivation'
 
 const logger = createLogger('formulation')
 
@@ -798,6 +799,11 @@ export async function generateSingleFeature(
     ? extractSchemaHints(relatedItems)
     : extractSchemaHints(resolvedItems)
 
+  // L31.E：注入 schema nullable columns hint（避免 Then 期望 $notnull 但 entity_setup 沒給）
+  // 不限縮 relatedEntities — 列全部 entity，因為一個 feature 可能涉及多個 entity（join/fk）
+  // 實際 token 增量受 helper 內部過濾控制（fully-NOT-NULL 的 table 不輸出）
+  const nullableHint = extractNullableColumnsHint(schemaSql, entityMapping)
+
   // ── Prompt Caching: 靜態 ISA 規則放 Block 1（跨 feature 快取），動態 feature info 放 Block 2 ──
   const staticSystemPrompt = `You are a senior BDD analyst. Output a Gherkin Feature File for the specified function.
 
@@ -1029,6 +1035,14 @@ After writing a Feature, scan back and run this checklist for **every \`$xxx\` r
 
 If the self-check finds any issue, **fix it before outputting**. There's no second chance at dry-run stage.
 
+## ⚠️ Then-EntitySetup 一致性（違反 = 整個 scenario 永遠失敗，LLM 修 code 修不好）
+
+Then 表用 \`$notnull\` / \`$null\` / 具體字面值期望某欄位 X 時：
+- X 必須在該 scenario scope（Background + Given）的 \`準備一個 X, with table:\` headers 出現
+- 期望 \`$notnull\` 或具體值 → entity_setup 必須給該欄位非空值（不能只列 header 不給 value）
+- 期望 \`$null\` → entity_setup 該欄位必須留空或不出現該 header
+- **違反後果**：DB column 預設 null → response 也是 null → response_validate 永遠失敗
+
 ## Array 類型參數（如拖曳排序、批次操作）
 
 如果 action 需要接收多個 ID（如 orderedItemIds），在 DataTable 中用**逗號分隔 $variable**：
@@ -1086,7 +1100,11 @@ ${decisions || '（無額外決策）'}${featureSchemaHints ? `
 
 ---
 
-${featureSchemaHints}` : ''}`
+${featureSchemaHints}` : ''}${nullableHint ? `
+
+---
+
+${nullableHint}` : ''}`
 
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
 

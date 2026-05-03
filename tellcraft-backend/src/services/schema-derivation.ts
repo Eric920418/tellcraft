@@ -114,6 +114,97 @@ export function parseEntityToTableMapping(entityMapping: string): Map<string, st
   return map
 }
 
+/**
+ * L31.E：BDD 生成時注入 schema nullable columns metadata
+ *
+ * 給 `formulation.ts` BDD 生成階段用 — 讓 LLM 知道每個 entity 的哪些 columns 是
+ * nullable + default 行為，避免生成「Then 期望 $notnull 但 entity_setup 沒給」這種矛盾。
+ *
+ * 演算法（零 LLM）：
+ *   1. parseCreateTables(schemaSql) → tables
+ *   2. parseEntityToTableMapping(entityMapping) → 中文 entity → table 名
+ *   3. 對每個 entity 的每個 column：分類為 nullable_no_default / nullable_with_default
+ *   4. 跳過系統欄位（id, created_at, updated_at, deleted_at）
+ *   5. 組成 markdown hint
+ *
+ * @param relatedEntities 可選限縮 — 只列這些 entity 的 hint，避免 token 爆量。
+ *                       不傳 → 全部 entity 都列。
+ */
+export function extractNullableColumnsHint(
+  schemaSql: string,
+  entityMapping: string,
+  relatedEntities?: string[]
+): string {
+  const tables = parseCreateTables(schemaSql)
+  const entityToTable = parseEntityToTableMapping(entityMapping)
+  if (tables.length === 0 || entityToTable.size === 0) return ''
+
+  // 用小寫 set 比對 relatedEntities（同時支援中文 entity / 英文 table 名）
+  const relatedSet = relatedEntities && relatedEntities.length > 0
+    ? new Set(relatedEntities.map(e => e.toLowerCase()))
+    : null
+
+  const SYSTEM_COLS = new Set(['id', 'created_at', 'updated_at', 'deleted_at', 'submitted_at', 'published_at'])
+
+  const lines: string[] = []
+  for (const [chineseName, tableName] of entityToTable) {
+    if (relatedSet) {
+      // 比對中文 entity 名 OR 英文 table 名（任一命中就列入）
+      if (!relatedSet.has(chineseName.toLowerCase()) && !relatedSet.has(tableName.toLowerCase())) continue
+    }
+    const table = tables.find(t => t.tableName.toLowerCase() === tableName.toLowerCase())
+    if (!table) continue
+
+    const nullableNoDefault: string[] = []
+    const nullableWithDefault: string[] = []  // 格式：name(default_value)
+
+    for (const col of table.columns) {
+      // 跳過約束行（PRIMARY KEY / FOREIGN KEY / UNIQUE / CHECK / CONSTRAINT）
+      if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)\b/i.test(col)) continue
+
+      // 提取欄位名（第一個 word）
+      const nameMatch = col.match(/^\s*(\w+)\s+/)
+      if (!nameMatch) continue
+      const colName = nameMatch[1].toLowerCase()
+      if (SYSTEM_COLS.has(colName)) continue
+
+      const isNotNull = /\bNOT\s+NULL\b/i.test(col)
+      const defaultMatch = col.match(/\bDEFAULT\s+([^,\n]+?)(?:\s+ON\s+|\s+REFERENCES|\s+COMMENT|\s*$)/i)
+      const hasDefault = !!defaultMatch
+      const defaultValue = defaultMatch ? defaultMatch[1].trim().replace(/['"]/g, '').slice(0, 30) : ''
+
+      if (isNotNull) {
+        // NOT NULL with/without DEFAULT — entity_setup 不必給也 OK（DB 會用 default 或拒絕）
+        // 不放進 hint，因為 NOT NULL 缺值已被 Check 2 覆蓋
+        continue
+      }
+
+      if (hasDefault) {
+        nullableWithDefault.push(`${colName}(default=${defaultValue})`)
+      } else {
+        nullableNoDefault.push(colName)
+      }
+    }
+
+    if (nullableNoDefault.length === 0 && nullableWithDefault.length === 0) continue
+
+    const parts: string[] = [`- **${chineseName}** (${tableName})`]
+    if (nullableNoDefault.length > 0) parts.push(`  - nullable_no_default: \`[${nullableNoDefault.join(', ')}]\` ⚠️ 期望 \`$notnull\` 必須在 entity_setup 給值`)
+    if (nullableWithDefault.length > 0) parts.push(`  - nullable_with_default: \`[${nullableWithDefault.join(', ')}]\``)
+    lines.push(parts.join('\n'))
+  }
+
+  if (lines.length === 0) return ''
+
+  return [
+    '## Schema Nullable 提示（避免 BDD spec 自相矛盾）',
+    '',
+    '以下欄位在 DB 預設為 null。如果 Then 表期望 `$notnull` 或具體值，必須在對應的 `準備一個 X, with table:` 提供該欄位值，否則 SpecFormula 永遠失敗（LLM 修 code 修不好）。',
+    '',
+    ...lines,
+  ].join('\n')
+}
+
 // ============================================================
 // SQL 解析 + 轉換
 // ============================================================
