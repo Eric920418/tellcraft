@@ -652,6 +652,112 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
 // Coder Testing（SpecFormula 紅綠燈）
 // ============================================================
 
+/**
+ * L31.F：__realign_bdd__ handler — 對舊對話重跑 Feature Alignment Gate
+ *
+ * 用途：救援已存在的 BDD spec 含對齊矛盾的對話（Check 13-16 上線前生成的）
+ * 流程：讀 bdd_sessions → runFeatureAlignmentGate → 更新 DB → 自動觸發 testing
+ *
+ * 兩個入口共用此 helper：
+ *   - BullMQ 路徑 orchestrator.ts handleContinueFlow
+ *   - LangGraph 路徑 orchestrator.ts process-message 入口（在 _langGraph.invoke 之前攔截）
+ */
+export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
+  const { projectId, conversationId, userId, redis, io } = input
+  const state = await getFlowState(redis, conversationId)
+  const isChinese = state?.locale !== 'en'
+
+  await sendMessage(conversationId, io, {
+    content: isChinese
+      ? '🔄 開始重新對齊 BDD — 跑 Feature Alignment Gate（Check 13-16 + 方向審計）...'
+      : '🔄 Re-aligning BDD — running Feature Alignment Gate (Check 13-16 + direction audit)...',
+    stage: 'coder_testing',
+  })
+
+  const bddSession = await db.queryOne<{
+    id: string
+    features_content: Array<{ name: string; actionName: string; content: string }> | null
+    actions_yml_content: string | null
+    schema_sql_content: string | null
+    entity_mapping_content: string | null
+  }>(
+    `SELECT id, features_content, actions_yml_content, schema_sql_content, entity_mapping_content
+     FROM bdd_sessions WHERE project_id = $1 ORDER BY updated_at DESC LIMIT 1`,
+    [projectId]
+  )
+
+  if (!bddSession?.features_content || !bddSession?.actions_yml_content) {
+    await sendMessage(conversationId, io, {
+      content: isChinese ? '⚠ 缺少 BDD spec，無法重新對齊。' : '⚠ Missing BDD spec, cannot re-align.',
+      stage: 'error',
+    })
+    return
+  }
+
+  const { runFeatureAlignmentGate } = await import('../../services/feature-alignment-gate')
+  const gateResult = await runFeatureAlignmentGate({
+    features: bddSession.features_content,
+    actionsYml: bddSession.actions_yml_content,
+    schemaSql: bddSession.schema_sql_content || '',
+    entityMapping: bddSession.entity_mapping_content || '',
+    trackingContext: { userId, conversationId },
+  })
+
+  // 寫回 DB（如果有修復）
+  if (gateResult.fixedFeatures || gateResult.fixedSchemaSql || gateResult.fixedEntityMapping) {
+    const setClauses: string[] = []
+    const params: unknown[] = []
+    if (gateResult.fixedFeatures) {
+      params.push(JSON.stringify(gateResult.fixedFeatures))
+      setClauses.push(`features_content = $${params.length}`)
+    }
+    if (gateResult.fixedSchemaSql) {
+      params.push(gateResult.fixedSchemaSql)
+      setClauses.push(`schema_sql_content = $${params.length}`)
+    }
+    if (gateResult.fixedEntityMapping) {
+      params.push(gateResult.fixedEntityMapping)
+      setClauses.push(`entity_mapping_content = $${params.length}`)
+    }
+    params.push(bddSession.id)
+    await db.query(
+      `UPDATE bdd_sessions SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`,
+      params
+    )
+  }
+
+  if (gateResult.blocked) {
+    await sendMessage(conversationId, io, {
+      content: gateResult.blockMessage || (isChinese ? '⚠ Alignment Gate 阻塞 — 無法自動修復。' : '⚠ Alignment Gate blocked — cannot auto-fix.'),
+      stage: 'coder_error',
+      quickReplies: [
+        { label: isChinese ? '再試一次重新對齊' : 'Retry Re-align', value: '__realign_bdd__', style: 'primary' as const },
+        { label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'secondary' as const },
+      ],
+    })
+    return
+  }
+
+  if (gateResult.fixedIssueCount === 0) {
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? '✓ Alignment Gate 通過 — BDD 沒有對齊問題。直接重跑測試...'
+        : '✓ Alignment Gate passed — no alignment issues. Re-running tests...',
+      stage: 'coder_testing',
+    })
+  } else {
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `✓ Alignment Gate 已修復 ${gateResult.fixedIssueCount} 個對齊問題（${gateResult.durationMs}ms）。BDD spec 已更新，現在重跑測試...`
+        : `✓ Alignment Gate auto-fixed ${gateResult.fixedIssueCount} alignment issue(s) (${gateResult.durationMs}ms). BDD spec updated. Re-running tests...`,
+      stage: 'coder_testing',
+    })
+  }
+
+  // 自動觸發 testing（用新 BDD）
+  await executeCoderTesting(input)
+}
+
 export async function executeCoderTesting(input: CoderSkillInput): Promise<void> {
   const { projectId, conversationId, userId, redis, io } = input
 
