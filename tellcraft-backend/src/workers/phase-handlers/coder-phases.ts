@@ -915,8 +915,11 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
       quickReplies.push({ label: isChinese ? '回 BDD 修正 Feature' : 'Back to BDD', value: '__retry_coder__', style: 'secondary' })
       quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'ghost' })
     } else {
-      quickReplies.push({ label: isChinese ? '重試測試' : 'Retry Tests', value: '__verify_backend__', style: 'primary' })
-      quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'secondary' })
+      // L31.F: 「重新對齊 BDD」設為主要按鈕（會跑 Check 13-16 + 自動修對齊矛盾），
+      // 「重試測試」變次要（race-condition retry 才用）。對齊矛盾是常見 root cause。
+      quickReplies.push({ label: isChinese ? '重新對齊 BDD（推薦）' : 'Re-align BDD (Recommended)', value: '__realign_bdd__', style: 'primary' })
+      quickReplies.push({ label: isChinese ? '只重試測試' : 'Retry Tests Only', value: '__verify_backend__', style: 'secondary' })
+      quickReplies.push({ label: isChinese ? '帶風險部署' : 'Deploy (risky)', value: '__deploy_with_risk__', style: 'ghost' })
     }
     quickReplies.push({ label: isChinese ? '開始新專案' : 'New Project', value: '__new_project__', style: 'ghost' })
 
