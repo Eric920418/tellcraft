@@ -403,6 +403,85 @@ export function extractEntitySetupWithData(content: string): EntitySetupWithData
 }
 
 /**
+ * L31.G part1: 解析 Feature 所有 When 步驟的 call table，回傳 user input 字面值
+ * 關鍵：Check 12/13/15 必須把 When call table 視為「資料來源」 — Create/Submit/Update 操作
+ * 的 Then expected value 來自 user API input（When call table），不是只有 entity_setup
+ */
+export function extractWhenCallTableValues(content: string): {
+  headers: Set<string>
+  values: Set<string>
+} {
+  const headers = new Set<string>()
+  const values = new Set<string>()
+  const lines = content.split('\n')
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    if (!/(?:When|And)\s+(?:\(No Actor\)|\(UID="[^"]*"\)|\([^)]*\))?\s*.+?[,，]\s*call\s+table:/i.test(trimmed)) continue
+
+    let headerCells: string[] | null = null
+    for (let j = i + 1; j < lines.length; j++) {
+      const tl = lines[j].trim()
+      if (!tl.startsWith('|')) break
+      const cells = tl.split('|').map(c => c.trim()).filter(Boolean)
+      if (headerCells === null) {
+        headerCells = cells.map(c => {
+          let clean = c
+          if (clean.startsWith('>') || clean.startsWith('<') || clean.startsWith('$')) clean = clean.substring(1)
+          const dotIdx = clean.lastIndexOf('.')
+          if (dotIdx >= 0) clean = clean.substring(dotIdx + 1)
+          return clean
+        })
+        for (const h of headerCells) {
+          if (!h) continue
+          headers.add(h)
+          headers.add(toCamelCase(h))
+          headers.add(toSnakeCase(h))
+        }
+      } else {
+        for (const cell of cells) {
+          const c = cell.trim()
+          if (!c || c === '_') continue
+          if (c.startsWith('$') || c.startsWith('<') || c.startsWith('&')) continue
+          values.add(c)
+          const stripped = c.replace(/^["']|["']$/g, '')
+          if (stripped !== c) values.add(stripped)
+        }
+      }
+    }
+  }
+
+  return { headers, values }
+}
+
+/**
+ * L31.G part2: 解析 schema SQL 提取所有 column names
+ * 用途：Check 12/13/15 判斷「expected field 是否真在 schema 裡」
+ * 不在 schema = server-gen / aggregation / metadata，不該報
+ */
+export function extractAllSchemaColumnNames(schemaSql: string): Set<string> {
+  const cols = new Set<string>()
+  if (!schemaSql) return cols
+  const tableRegex = /CREATE\s+TABLE\s+\w+\s*\(([\s\S]*?)\)\s*(?:COMMENT[^;]*)?;/gi
+  let m: RegExpExecArray | null
+  while ((m = tableRegex.exec(schemaSql)) !== null) {
+    const body = m[1]
+    const splitLines = body.split(/[\n,]/)
+    for (const line of splitLines) {
+      const trimmedLine = line.trim()
+      if (!trimmedLine) continue
+      if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT|INDEX)\b/i.test(trimmedLine)) continue
+      const nameMatch = trimmedLine.match(/^\s*(\w+)\s+/)
+      if (!nameMatch) continue
+      const name = nameMatch[1].toLowerCase()
+      cols.add(name)
+      cols.add(toCamelCase(name))
+    }
+  }
+  return cols
+}
+
+/**
  * L31.B：把 Feature content 切成 Background block + 每個 scenario block
  * 給 Check 14 scenario-scope 對齊用（每 scenario 獨立檢查）
  */
@@ -1305,21 +1384,30 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     }
   }
 
-  // ── Check 12, 13, 15: Then 表期望 vs entity_setup 對齊（L31.A）──
+  // ── Check 12, 13, 15: Then 表期望 vs entity_setup 對齊（L31.A + L31.G 修補）──
   // 真實案例：List Service Items.imageUrl 期望 $notnull，但 entity_setup ServiceItem
   //   只提供 [title, description, isActive]，沒給 imageUrl → 永遠 fail
   // Check 12: $notnull 缺 entity_setup 欄位
   // Check 13: 具體字面值期望（非 sentinel）缺 entity_setup 欄位
   // Check 15: $null 期望但 entity_setup 給了非空值（反向矛盾）
+  //
+  // L31.G 修補（避免誤報）：
+  //   - Skip server-gen / aggregation / metadata：expected field 不在 schema columns → 跳過
+  //     例：token (JWT)、total (pagination)、seoSettings (sub-object)、url (uploaded)
+  //   - Skip Create/Submit/Update 的 user input：expected literal 在 When call table cells → 跳過
+  //     例：Create Service Item 的 name="X"，response echo 自 When call table，不需要 entity_setup
   const SYSTEM_AUTO_FIELDS = new Set([
     'id', 'createdAt', 'updatedAt', 'deletedAt', 'created_at', 'updated_at', 'deleted_at',
     'submittedAt', 'submitted_at', 'publishedAt', 'published_at',
   ])
+
+  // L31.G：解析 schema columns（給「不在 schema → 跳過」用）
+  const allSchemaColumns = extractAllSchemaColumnNames(input.schemaSql)
+
   for (const feature of input.features) {
     const displayName = feature.name || '(unnamed)'
 
     // 收集整個 Feature 的所有 entity_setup headers union（含 Background）
-    // 並建立 entity → headers 的映射，給 Check 15 用（檢查特定 entity 的 setup 給了值）
     const allEntitySetupHeaders = new Set<string>()
     const setupSteps = extractEntitySetupWithData(feature.content)
     for (const step of setupSteps) {
@@ -1332,12 +1420,14 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
       }
     }
 
+    // L31.G：解析 When call table（user API input — Create/Submit/Update 的資料來源）
+    const whenCall = extractWhenCallTableValues(feature.content)
+
     const expectations = extractThenExpectations(feature.content)
     const setupSummary = setupSteps.length > 0
       ? setupSteps.map(s => `${s.entityName}[${s.rawHeaders.map(h => h.replace(/^[><]/, '').trim()).join(', ')}]`).join('; ')
       : '(無 entity_setup)'
 
-    // 「同 scenario 同 field 同 check」只報一次（避免多 data row 重複報）
     const reported = new Set<string>()
     const fpKey = (sc: string, fn: string, check: string) => `${sc}|${fn}|${check}`
 
@@ -1347,8 +1437,16 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
       const fieldVariants = [exp.fieldName, toCamelCase(exp.fieldName), toSnakeCase(exp.fieldName)]
       const inAnySetup = fieldVariants.some(v => allEntitySetupHeaders.has(v))
 
-      // Check 12: $notnull 缺 entity_setup
+      // L31.G filter 1：expected field 不在 schema columns → 跳過（server-gen / aggregation / metadata）
+      // 但只跳過「不在 entity_setup 也不在 schema」的 — 因為 Feature 可能省略部分 schema
+      const inSchema = allSchemaColumns.size > 0 && fieldVariants.some(v => allSchemaColumns.has(v.toLowerCase()) || allSchemaColumns.has(v))
+      if (allSchemaColumns.size > 0 && !inSchema && !inAnySetup) continue
+
+      // L31.G filter 2：expected field 在 When call table headers → user input 提供 → 跳過
+      const inWhenHeaders = fieldVariants.some(v => whenCall.headers.has(v))
+      // Check 12: $notnull — 跳過 server-gen + 跳過 user-input
       if (exp.expectedKind === 'notnull' && !inAnySetup) {
+        if (inWhenHeaders) continue  // user input 經 API 帶到 response，不需要 entity_setup
         const k = fpKey(exp.scenarioName, exp.fieldName, 'check12')
         if (reported.has(k)) continue
         reported.add(k)
@@ -1361,16 +1459,19 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
         continue
       }
 
-      // Check 13: 具體字面值缺 entity_setup
+      // Check 13: 具體字面值 — 跳過 server-gen + 跳過 user-input + 跳過值在 When values
       if (exp.expectedKind === 'literal' && !inAnySetup) {
+        if (inWhenHeaders) continue  // user input
+        if (exp.expectedValue && whenCall.values.has(exp.expectedValue)) continue  // user input value（例如 customerName="John Doe" 從 When 帶到 Then）
+        // Check 13 降為 warning（避免誤報阻擋 LLM auto-fix；Check 12 仍是 error）
         const k = fpKey(exp.scenarioName, exp.fieldName, 'check13')
         if (reported.has(k)) continue
         reported.add(k)
         issues.push({
           featureName: displayName,
           checkName: 'then_concrete_value_missing_from_setup',
-          severity: 'error',
-          description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為具體值 \`${exp.expectedValue}\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。DB column 會用預設值（通常 null）→ response 是 null → 永遠不等於期望值 \`${exp.expectedValue}\` → \`response_validate\` 永遠失敗。**修法方向（強制）**：把 \`${exp.fieldName}: ${exp.expectedValue}\` 加進對應的 \`準備一個 X, with table:\` headers + data row。**禁止**修改 Then 的期望值（會讓測試失去意義）。`,
+          severity: 'warning',
+          description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為具體值 \`${exp.expectedValue}\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。如果這是 Read 操作 → 真矛盾，需把 \`${exp.fieldName}: ${exp.expectedValue}\` 加進 entity_setup；如果是 Create/Update 操作且該值來自 user API input → 此警告可能誤報，可忽略。`,
         })
         continue
       }

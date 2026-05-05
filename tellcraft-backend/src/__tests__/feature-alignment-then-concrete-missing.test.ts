@@ -58,7 +58,7 @@ Feature: List Service Items
     const issues = await runAlignmentChecks(makeInput(feature))
     const concreteIssues = issues.filter(i => i.checkName === 'then_concrete_value_missing_from_setup')
     expect(concreteIssues).toHaveLength(1)
-    expect(concreteIssues[0].severity).toBe('error')
+    expect(concreteIssues[0].severity).toBe('warning')  // L31.G: Check 13 降為 warning（避免誤報阻擋 alignment gate）
     expect(concreteIssues[0].description).toContain('imageUrl')
     expect(concreteIssues[0].description).toContain('https://cdn.x/split.png')
   })

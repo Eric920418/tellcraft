@@ -74,7 +74,9 @@ Feature: List Service Items
 
     const concreteIssue = issues.find(i => i.checkName === 'then_concrete_value_missing_from_setup')
     expect(concreteIssue).toBeDefined()
-    expect(concreteIssue!.description).toContain('修法方向（強制）')
-    expect(concreteIssue!.description).toContain('禁止')
+    // L31.G: Check 13 降為 warning + 改寫 description（advisory 不再強制方向，因為可能誤報）
+    expect(concreteIssue!.severity).toBe('warning')
+    expect(concreteIssue!.description).toContain('如果這是 Read 操作')
+    expect(concreteIssue!.description).toContain('可能誤報')
   })
 })
