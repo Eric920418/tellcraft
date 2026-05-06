@@ -96,8 +96,8 @@ describe('extractAllSchemaColumnNames', () => {
   })
 })
 
-describe('Check 12 (notnull) — 誤報修補', () => {
-  it('A. token (JWT, server-gen) 不在 schema → 不報', async () => {
+describe('Check 12 (notnull) — 誤報修補（Path A: 標記資料來源不阻塞）', () => {
+  it('A. token (JWT, server-gen) 不在 schema → 標 warning + server-gen 標記', async () => {
     const feature = `# Action: admin_login
 # [POST] /api/admin_login
 # Summary: Admin Login
@@ -118,10 +118,13 @@ Feature: Admin Login
 `
     const issues = await runAlignmentChecks(makeInput('Admin Login', 'admin_login', feature))
     const notnullIssues = issues.filter(i => i.checkName === 'notnull_field_missing_from_setup' && i.description.includes('token'))
-    expect(notnullIssues).toHaveLength(0)
+    expect(notnullIssues).toHaveLength(1)
+    expect(notnullIssues[0].severity).toBe('warning')  // 不阻塞
+    expect(notnullIssues[0].description).toContain('server-generated')
+    expect(notnullIssues[0].description).toContain('已自動放行')
   })
 
-  it('D. user input field via When call → 不報', async () => {
+  it('D. user input field via When call → 標 warning + user-input-echo 標記', async () => {
     const feature = `# Action: create_service_item
 # [POST] /api/create_service_item
 # Summary: Create Service Item
@@ -141,17 +144,21 @@ Feature: Create Service Item
         | Split AC Cleaning | https://cdn.x/split-ac.jpg     |
 `
     const issues = await runAlignmentChecks(makeInput('Create Service Item', 'create_service_item', feature))
-    // imageUrl 在 When call table headers + values 都有 → 不報
+    // imageUrl 在 When call table headers + values 都有 → 標 user-input-echo warning（不阻塞）
     const allMissing = issues.filter(i =>
       (i.checkName === 'notnull_field_missing_from_setup' || i.checkName === 'then_concrete_value_missing_from_setup')
       && (i.description.includes('imageUrl') || i.description.includes('name'))
     )
-    expect(allMissing).toHaveLength(0)
+    expect(allMissing.length).toBeGreaterThan(0)
+    for (const iss of allMissing) {
+      expect(iss.severity).toBe('warning')
+      expect(iss.description).toContain('user input echo')
+    }
   })
 })
 
-describe('Check 13 (literal) — 誤報修補', () => {
-  it('C. pagination metadata (total/data) 不在 schema → 不報', async () => {
+describe('Check 13 (literal) — 誤報修補（Path A: 標記資料來源不阻塞）', () => {
+  it('C. pagination metadata (total/data) 不在 schema → 標 warning + server-gen-or-aggregation 標記', async () => {
     const feature = `# Action: list_inquiries
 # [GET] /api/list_inquiries
 # Summary: List Inquiries
@@ -172,10 +179,14 @@ Feature: List Inquiries
 `
     const issues = await runAlignmentChecks(makeInput('List Inquiries', 'list_inquiries', feature))
     const concreteIssues = issues.filter(i => i.checkName === 'then_concrete_value_missing_from_setup' && (i.description.includes('total') || i.description.includes('data')))
-    expect(concreteIssues).toHaveLength(0)
+    expect(concreteIssues.length).toBeGreaterThan(0)
+    for (const iss of concreteIssues) {
+      expect(iss.severity).toBe('warning')
+      expect(iss.description).toContain('aggregation')
+    }
   })
 
-  it('D. Submit Inquiry 的 customerName "John Doe" 在 When call → 不報', async () => {
+  it('D. Submit Inquiry 的 customerName "John Doe" 在 When call → 標 warning + user-input-echo', async () => {
     const feature = `# Action: submit_inquiry
 # [POST] /api/submit_inquiry
 # Summary: Submit Inquiry
@@ -193,7 +204,11 @@ Feature: Submit Inquiry
 `
     const issues = await runAlignmentChecks(makeInput('Submit Inquiry', 'submit_inquiry', feature))
     const concreteIssues = issues.filter(i => i.checkName === 'then_concrete_value_missing_from_setup' && (i.description.includes('customerName') || i.description.includes('phone')))
-    expect(concreteIssues).toHaveLength(0)
+    expect(concreteIssues.length).toBeGreaterThan(0)
+    for (const iss of concreteIssues) {
+      expect(iss.severity).toBe('warning')
+      expect(iss.description).toContain('user input echo')
+    }
   })
 
   it('Check 13 嚴格度降為 warning（不再阻擋 alignment gate）', async () => {

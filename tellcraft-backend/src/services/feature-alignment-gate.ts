@@ -1437,42 +1437,83 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
       const fieldVariants = [exp.fieldName, toCamelCase(exp.fieldName), toSnakeCase(exp.fieldName)]
       const inAnySetup = fieldVariants.some(v => allEntitySetupHeaders.has(v))
 
-      // L31.G filter 1：expected field 不在 schema columns → 跳過（server-gen / aggregation / metadata）
-      // 但只跳過「不在 entity_setup 也不在 schema」的 — 因為 Feature 可能省略部分 schema
+      // L31.G/H：filter 評估（不再「靜默跳過」，改為標記為 warning 留 audit trail）
+      // - 不藏 bug：所有跳過的 case 都進 issues list 供 user/LLM 檢視（severity='warning' 不阻塞）
+      // - 真矛盾仍是 error，可被 alignment gate 自動修復
       const inSchema = allSchemaColumns.size > 0 && fieldVariants.some(v => allSchemaColumns.has(v.toLowerCase()) || allSchemaColumns.has(v))
-      if (allSchemaColumns.size > 0 && !inSchema && !inAnySetup) continue
-
-      // L31.G filter 2：expected field 在 When call table headers → user input 提供 → 跳過
       const inWhenHeaders = fieldVariants.some(v => whenCall.headers.has(v))
-      // Check 12: $notnull — 跳過 server-gen + 跳過 user-input
+      const inWhenValues = exp.expectedValue ? whenCall.values.has(exp.expectedValue) : false
+
+      // 「資料來源」分類
+      let dataSourceTag: 'server-gen-or-aggregation' | 'user-input-echo' | 'unverified' | null = null
+      if (allSchemaColumns.size > 0 && !inSchema && !inAnySetup) {
+        dataSourceTag = 'server-gen-or-aggregation'
+      } else if (!inAnySetup && (inWhenHeaders || inWhenValues)) {
+        dataSourceTag = 'user-input-echo'
+      } else if (!inAnySetup) {
+        dataSourceTag = 'unverified'
+      }
+
+      // Check 12: $notnull
       if (exp.expectedKind === 'notnull' && !inAnySetup) {
-        if (inWhenHeaders) continue  // user input 經 API 帶到 response，不需要 entity_setup
         const k = fpKey(exp.scenarioName, exp.fieldName, 'check12')
         if (reported.has(k)) continue
         reported.add(k)
-        issues.push({
-          featureName: displayName,
-          checkName: 'notnull_field_missing_from_setup',
-          severity: 'error',
-          description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為 \`$notnull\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。DB column 會用預設值（通常 null）→ response 也是 null → \`response_validate\` 永遠失敗 → **LLM 修 code 永遠修不好**（這是 spec 資料矛盾，不是 code bug）。**修法方向（強制）**：把 \`${exp.fieldName}\` 加進對應的 \`準備一個 X, with table:\` headers 並提供值，例如 \`| title | description | isActive | ${exp.fieldName} |\` + 對應 data row。**禁止**移除 Then 的 \`${exp.fieldName}: $notnull\` 驗證（會讓 spec 變鬆，code 弱驗證）。`,
-        })
+        if (dataSourceTag === 'server-gen-or-aggregation') {
+          // 不阻塞，但留 audit trail（user 可檢視，避免靜默藏真 bug）
+          issues.push({
+            featureName: displayName,
+            checkName: 'notnull_field_missing_from_setup',
+            severity: 'warning',
+            description: `[資料來源：server-generated 或 aggregation] Scenario "${exp.scenarioName}" 的 \`${exp.fieldName}: $notnull\` — 此欄位**不在 schema 任何 column**，推測為 server 生成（如 token/uploadedAt）或聚合 response（如 seoSettings）。**已自動放行**，不會阻塞 alignment gate。**但若你預期它應該對應 schema 的某個 column → 請補進 schema + entity_setup**。`,
+          })
+        } else if (dataSourceTag === 'user-input-echo') {
+          issues.push({
+            featureName: displayName,
+            checkName: 'notnull_field_missing_from_setup',
+            severity: 'warning',
+            description: `[資料來源：user input echo] Scenario "${exp.scenarioName}" 的 \`${exp.fieldName}: $notnull\` — 此欄位在 When call table 出現（user API input），response 通常 echo 回來。**已自動放行**。**但若有 server-side transform 邏輯（hash/encrypt/normalize）→ 請補 entity_setup 或顯式驗證 transformed value**。`,
+          })
+        } else {
+          // 真矛盾：unverified — 報 error 阻塞
+          issues.push({
+            featureName: displayName,
+            checkName: 'notnull_field_missing_from_setup',
+            severity: 'error',
+            description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為 \`$notnull\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。DB column 會用預設值（通常 null）→ response 也是 null → \`response_validate\` 永遠失敗 → **LLM 修 code 永遠修不好**（這是 spec 資料矛盾，不是 code bug）。**修法方向（強制）**：把 \`${exp.fieldName}\` 加進對應的 \`準備一個 X, with table:\` headers 並提供值。**禁止**移除 Then 的 \`${exp.fieldName}: $notnull\` 驗證。`,
+          })
+        }
         continue
       }
 
-      // Check 13: 具體字面值 — 跳過 server-gen + 跳過 user-input + 跳過值在 When values
+      // Check 13: 具體字面值
       if (exp.expectedKind === 'literal' && !inAnySetup) {
-        if (inWhenHeaders) continue  // user input
-        if (exp.expectedValue && whenCall.values.has(exp.expectedValue)) continue  // user input value（例如 customerName="John Doe" 從 When 帶到 Then）
-        // Check 13 降為 warning（避免誤報阻擋 LLM auto-fix；Check 12 仍是 error）
         const k = fpKey(exp.scenarioName, exp.fieldName, 'check13')
         if (reported.has(k)) continue
         reported.add(k)
-        issues.push({
-          featureName: displayName,
-          checkName: 'then_concrete_value_missing_from_setup',
-          severity: 'warning',
-          description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為具體值 \`${exp.expectedValue}\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。如果這是 Read 操作 → 真矛盾，需把 \`${exp.fieldName}: ${exp.expectedValue}\` 加進 entity_setup；如果是 Create/Update 操作且該值來自 user API input → 此警告可能誤報，可忽略。`,
-        })
+        if (dataSourceTag === 'server-gen-or-aggregation') {
+          issues.push({
+            featureName: displayName,
+            checkName: 'then_concrete_value_missing_from_setup',
+            severity: 'warning',
+            description: `[資料來源：server-generated 或 aggregation] Scenario "${exp.scenarioName}" 的 \`${exp.fieldName}: ${exp.expectedValue}\` — 此欄位**不在 schema 任何 column**。**已自動放行**。**但若該值來源不明 → 請手動驗證**。`,
+          })
+        } else if (dataSourceTag === 'user-input-echo') {
+          issues.push({
+            featureName: displayName,
+            checkName: 'then_concrete_value_missing_from_setup',
+            severity: 'warning',
+            description: `[資料來源：user input echo] Scenario "${exp.scenarioName}" 的 \`${exp.fieldName}: ${exp.expectedValue}\` — 此值在 When call table 出現過（user API input echo）。**已自動放行**。**但若有 transform 邏輯 → 請手動驗證 transformed value**。`,
+          })
+        } else {
+          // 真矛盾（Read 操作 + 沒給）
+          issues.push({
+            featureName: displayName,
+            checkName: 'then_concrete_value_missing_from_setup',
+            severity: 'warning',
+            description: `Scenario "${exp.scenarioName}" 的 Then 表期望欄位 \`${exp.fieldName}\` 為具體值 \`${exp.expectedValue}\`，但本 Feature 的 entity_setup DataTable 從未提供 \`${exp.fieldName}\` 值（現有 setup: ${setupSummary}）。如果這是 Read 操作 → 真矛盾，需把 \`${exp.fieldName}: ${exp.expectedValue}\` 加進 entity_setup；如果是 Create/Update 操作且該值來自 user API input → 此警告可能誤報，可忽略。`,
+          })
+        }
         continue
       }
 
