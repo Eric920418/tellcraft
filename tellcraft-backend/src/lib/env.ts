@@ -69,6 +69,9 @@ const envSchema = z.object({
   ENABLE_DIFF_OUTPUT: z.stringbool().default(false),             // Animation/RWD 用 SEARCH/REPLACE diff 輸出（kill switch: 設 false 回退完整檔案）
   ENABLE_EXTENDED_THINKING: z.stringbool().default(false),       // 修復路徑 Extended Thinking（fixFailingAction + fixMultipleFeatures）
   EXTENDED_THINKING_BUDGET: z.coerce.number().default(10000),    // Thinking budget tokens（最小 1024）
+  // L31.I：Alignment Gate Cost Guardrail — 防止 alignment gate 失控修復（c9cefcc6 案例：81 calls / $8.62）
+  ALIGNMENT_GATE_MAX_LLM_CALLS: z.coerce.number().default(20),   // 累計 LLM call 上限，超過 break + 回退 bestFeatures
+  ALIGNMENT_GATE_MAX_COST_USD: z.coerce.number().default(3.0),   // 累計 cost USD 上限，超過 break + 回退 bestFeatures
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開

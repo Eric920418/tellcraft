@@ -9,7 +9,8 @@
 
 import * as yaml from 'js-yaml'
 import { parseSchemasFromString } from './specformula-runner'
-import { fixMultipleFeatures, sanitizeFeatureContent, type FeatureFixInput, type GeneratedFeature } from './formulation'
+import { fixMultipleFeatures, sanitizeFeatureContent, type FeatureFixInput, type GeneratedFeature, type FixUsage } from './formulation'
+import { getEnv } from '../lib/env'
 import { enrichError, type EnrichableRootCause } from './error-enrichment'
 
 /**
@@ -29,6 +30,21 @@ function alignmentCheckToRootCause(checkName: string): EnrichableRootCause {
     case 'pagination_mismatch': return 'unknown'  // L19.P1：pagination/DataTable 衝突，fix hint 由 description 提供（二選一改法）
     default: return 'unknown'
   }
+}
+
+/**
+ * L31.I：判斷 alignment gate 是否該因 cost 超限而 break
+ * 純函數，不依賴 module state — 給單元測試用
+ */
+export function checkAlignmentCostBreach(
+  cumulativeLlmCalls: number,
+  cumulativeCostUsd: number,
+  maxLlmCalls: number,
+  maxCostUsd: number,
+): { breached: boolean; reason?: 'calls' | 'cost' } {
+  if (cumulativeLlmCalls >= maxLlmCalls) return { breached: true, reason: 'calls' }
+  if (cumulativeCostUsd >= maxCostUsd) return { breached: true, reason: 'cost' }
+  return { breached: false }
 }
 
 /**
@@ -1844,6 +1860,7 @@ async function autoFixFeatures(
   fixApplied: boolean
   updatedSchemaSql?: string
   updatedEntityMapping?: string
+  usage?: FixUsage  // L31.I：透傳給 runFeatureAlignmentGate 累計
 }> {
   // 按 feature 分組 issues
   const issuesByFeature = new Map<string, AlignmentIssue[]>()
@@ -2049,6 +2066,7 @@ async function autoFixFeatures(
     fixApplied: true,
     updatedSchemaSql: result.updatedSchemaSql,
     updatedEntityMapping: result.updatedEntityMapping,
+    usage: result.usage,  // L31.I：透傳 LLM cost 給 alignment gate 累計
   }
 }
 
@@ -2086,6 +2104,14 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
   let bestErrorCount = Infinity
   let bestSchemaSql: string | undefined
   let bestEntityMapping: string | undefined
+
+  // L31.I：Cost guardrail — 累計 LLM call 次數 + cost USD，超過上限就 break
+  // 防止 alignment gate 失控（c9cefcc6 案例：81 calls / $8.62）
+  const env = getEnv()
+  const MAX_LLM_CALLS_PER_GATE = env.ALIGNMENT_GATE_MAX_LLM_CALLS
+  const MAX_COST_USD_PER_GATE = env.ALIGNMENT_GATE_MAX_COST_USD
+  let cumulativeLlmCalls = 0
+  let cumulativeCostUsd = 0
 
   for (let round = 0; round < MAX_FIX_ROUNDS; round++) {
     // 執行檢查（使用可能已更新的 schema）
@@ -2159,13 +2185,66 @@ export async function runFeatureAlignmentGate(input: AlignmentGateInput): Promis
 
     // 嘗試自動修復
     const beforeCount = errorIssues.length
-    const { fixedFeatures, fixApplied, updatedSchemaSql, updatedEntityMapping } = await autoFixFeatures(
+    const { fixedFeatures, fixApplied, updatedSchemaSql, updatedEntityMapping, usage } = await autoFixFeatures(
       currentFeatures,
       issues,
       currentSchemaSql,
       currentEntityMapping,
       input.trackingContext,
     )
+
+    // L31.I：累計 cost + 觸發 guardrail（在 fixApplied check 後處理，先讓正常流程跑）
+    if (usage) {
+      cumulativeLlmCalls += usage.callCount
+      cumulativeCostUsd += usage.costUsd
+    }
+
+    const breach = checkAlignmentCostBreach(cumulativeLlmCalls, cumulativeCostUsd, MAX_LLM_CALLS_PER_GATE, MAX_COST_USD_PER_GATE)
+    if (breach.breached) {
+      logger.warn({
+        cumulativeLlmCalls, cumulativeCostUsd,
+        maxCalls: MAX_LLM_CALLS_PER_GATE, maxCostUsd: MAX_COST_USD_PER_GATE,
+        round: round + 1, fixedTotal: totalFixedCount,
+        conversationId: input.trackingContext?.conversationId,
+      }, 'Alignment Gate: Cost guardrail breached, stopping fix loop')
+
+      recordTelemetry({
+        skillName: 'feature_gate', eventType: 'alignment_blocked',
+        patternKey: 'cost_guardrail_breach', outcome: 'blocked', phase: 'feature_alignment_gate',
+        fixRounds: round + 1, severity: 'warning',
+        userId: input.trackingContext?.userId,
+        conversationId: input.trackingContext?.conversationId,
+        payload: {
+          cumulativeLlmCalls, cumulativeCostUsd,
+          maxCalls: MAX_LLM_CALLS_PER_GATE, maxCostUsd: MAX_COST_USD_PER_GATE,
+          fixedCount: totalFixedCount,
+        },
+      }).catch(() => {})
+
+      // 即使 break 也要先合併這次的 fix 結果（已花了錢，能用就用）
+      const recheckedAfterBreak = fixApplied
+        ? await runAlignmentChecks({ ...input, features: fixedFeatures, schemaSql: updatedSchemaSql ?? currentSchemaSql, entityMapping: updatedEntityMapping ?? currentEntityMapping })
+        : issues
+      const errorsAfterBreak = recheckedAfterBreak.filter(i => i.severity === 'error')
+
+      // 用 best 版本（更少 error 才採用）
+      const finalFeatures = fixApplied && errorsAfterBreak.length < bestErrorCount ? fixedFeatures : bestFeatures
+      const finalSchemaSql = fixApplied && errorsAfterBreak.length < bestErrorCount ? updatedSchemaSql : (bestSchemaSql ?? latestFixedSchemaSql)
+      const finalEntityMapping = fixApplied && errorsAfterBreak.length < bestErrorCount ? updatedEntityMapping : (bestEntityMapping ?? latestFixedEntityMapping)
+
+      return {
+        passed: false,
+        blocked: true,
+        fixedFeatures: finalFeatures,
+        fixedSchemaSql: finalSchemaSql,
+        fixedEntityMapping: finalEntityMapping,
+        issues: recheckedAfterBreak,
+        fixedIssueCount: totalFixedCount,
+        remainingIssueCount: errorsAfterBreak.length,
+        blockMessage: `**Alignment Gate Cost Guardrail 觸發** — 累計 ${cumulativeLlmCalls} LLM calls / $${cumulativeCostUsd.toFixed(2)} USD 已達上限（防止失控修復）。\n\n已修 ${totalFixedCount} 個 issue，剩餘 ${errorsAfterBreak.length} 個未解。建議：\n- 手動審查 BDD spec\n- 或調整 env: \`ALIGNMENT_GATE_MAX_LLM_CALLS\` / \`ALIGNMENT_GATE_MAX_COST_USD\``,
+        durationMs: Date.now() - start,
+      }
+    }
 
     if (!fixApplied) {
       // LLM 修復失敗 → 阻塞

@@ -1318,6 +1318,13 @@ export interface FeatureFixInput {
   issues: string[]  // 需要修復的問題描述
 }
 
+export interface FixUsage {
+  inputTokens: number
+  outputTokens: number
+  callCount: number
+  costUsd: number  // 用 calculateLlmCost(MODEL.SONNET, in, out) 算（不含 cache，略保守）
+}
+
 export async function fixMultipleFeatures(
   features: FeatureFixInput[],
   resolvedItems: ClarifyItem[],
@@ -1330,9 +1337,20 @@ export async function fixMultipleFeatures(
   updatedSchemaSql?: string
   updatedEntityMapping?: string
   error?: string
+  usage?: FixUsage  // L31.I：給 alignment gate cost guardrail 累計
 }> {
   if (features.length === 0) {
-    return { success: true, fixedFeatures: [] }
+    return { success: true, fixedFeatures: [], usage: { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 } }
+  }
+
+  // L31.I：累計每個 batch 的 usage（給 cost guardrail 用）
+  const { calculateLlmCost } = await import('../lib/anthropic')
+  const cumulativeUsage: FixUsage = { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 }
+  const trackBatchUsage = (inputTokens: number, outputTokens: number) => {
+    cumulativeUsage.inputTokens += inputTokens
+    cumulativeUsage.outputTokens += outputTokens
+    cumulativeUsage.callCount += 1
+    cumulativeUsage.costUsd += calculateLlmCost(MODEL.SONNET, inputTokens, outputTokens)
   }
 
   // Extended Thinking: 修復路徑用深度推理
@@ -1527,6 +1545,9 @@ ${decisions}` : ''}
       return { success: false, error: result.error }
     }
 
+    // L31.I：上報 batch usage 給累計器
+    trackBatchUsage(result.usage.inputTokens, result.usage.outputTokens)
+
     const fixedFeatures = result.data.features as GeneratedFeature[]
     // 後置驗證：sanitizeFeatureContent 修正 Gherkin 內容格式錯誤
     for (const feature of fixedFeatures) {
@@ -1553,7 +1574,8 @@ ${decisions}` : ''}
   // ── 主邏輯：≤3 個直接修，>3 個分批 ──
 
   if (features.length <= BATCH_SIZE) {
-    return await fixFeatureBatch(features, '修復')
+    const r = await fixFeatureBatch(features, '修復')
+    return { ...r, usage: cumulativeUsage }
   }
 
   // 分批修復
@@ -1582,8 +1604,8 @@ ${decisions}` : ''}
   // Feature summary 自動對齊
   alignFeatureSummaries(allFixed)
 
-  logger.info({ totalFixed: allFixed.length, schemaUpdated: !!latestSchemaSql, mappingUpdated: !!latestEntityMapping }, '分批修復完成')
-  return { success: true, fixedFeatures: allFixed, updatedSchemaSql: latestSchemaSql, updatedEntityMapping: latestEntityMapping }
+  logger.info({ totalFixed: allFixed.length, schemaUpdated: !!latestSchemaSql, mappingUpdated: !!latestEntityMapping, usage: cumulativeUsage }, '分批修復完成')
+  return { success: true, fixedFeatures: allFixed, updatedSchemaSql: latestSchemaSql, updatedEntityMapping: latestEntityMapping, usage: cumulativeUsage }
 }
 
 // ============================================================
