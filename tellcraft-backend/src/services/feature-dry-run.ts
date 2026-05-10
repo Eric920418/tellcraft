@@ -162,6 +162,9 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
       // FK 衍生錯誤膨脹失敗數。每個 feature 獨立維護一份（跨 feature reset）。
       const unresolvedContextKeys = new Set<string>()
 
+      // L31.L Phase 3c：累積 entity_setup 跑過的 entity 名稱（給 Then 驗證用）
+      const insertedEntities = new Set<string>()
+
       for (const step of stepsToRun) {
         totalSteps++
         const stepType = classifyStep(step.text)
@@ -203,6 +206,7 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
               await ensureFkReferencesExist(dt, entityName, schemas, pool)
 
               await entitySetup.setup(entityName, dt.headers, dt.rows)
+              insertedEntities.add(entityName)  // L31.L Phase 3c
               passedSteps++
               break
             }
@@ -253,6 +257,28 @@ export async function runFeatureDryRun(input: DryRunInput): Promise<DryRunResult
               }
             }
           }
+        }
+      }
+
+      // L31.L Phase 3c: Then 期望 vs DB row 真實比對（0 LLM cost，純 SQL）
+      // 只跑「entity_setup 全 OK + insertedEntities 非空」的 feature，避免級聯失敗誤報
+      if (featureErrors.length === 0 && insertedEntities.size > 0) {
+        try {
+          const env = (await import('../lib/env')).getEnv()
+          if (env.PHASE_3C_DRY_RUN_THEN_VALIDATION) {
+            const thenErrors = await validateThenAgainstDb(feature.content, insertedEntities, schemas, pool)
+            if (thenErrors.length > 0) {
+              featureErrors.push(...thenErrors)
+              failedSteps += thenErrors.length
+              totalSteps += thenErrors.length
+              logger.info({
+                feature: feature.name,
+                thenValidationErrors: thenErrors.length,
+              }, 'L31.L Phase 3c: Then-DB 驗證發現矛盾')
+            }
+          }
+        } catch (e) {
+          logger.warn({ err: e, feature: feature.name }, 'L31.L Phase 3c: Then 驗證例外（不阻塞）')
         }
       }
 
@@ -349,4 +375,97 @@ function getStepsBeforeApiCall(steps: ParsedStep[]): ParsedStep[] {
     result.push(step)
   }
   return result
+}
+
+// ============================================================
+// L31.L Phase 3c: Then 期望 vs DB row 真實比對
+// 純 SQL 驗證，0 LLM cost — 抓「entity_setup INSERT 後 DB row 不符 Then 期望」
+//
+// 真實案例（f6e48588 imageUrl）：
+//   - entity_setup ServiceItem 沒給 imageUrl → DB image_url = NULL
+//   - Then 期望 imageUrl = $notnull → 永遠失敗
+//   - alignment gate Check 12 是 heuristic 看 entity_setup headers，
+//     Phase 3c 是 ground truth 看 DB 真實 row
+//
+// 限制（保守降低 false positive）：
+//   - 只比對 $notnull / $null 期望（具體值對 List 操作會誤報，跳過）
+//   - 只對 entity_setup 已 INSERT 的 entity 對應 table
+//   - field 必須在該 table 的 column（snake_case 對應）
+// ============================================================
+async function validateThenAgainstDb(
+  featureContent: string,
+  insertedEntities: Set<string>,
+  schemas: import('../lib/specformula/spec/data/models').DatabaseSchema[],
+  pool: Pool,
+): Promise<string[]> {
+  const failures: string[] = []
+
+  // 從 alignment-gate 復用 extractThenExpectations
+  const { extractThenExpectations } = await import('./feature-alignment-gate')
+  const { DatabaseSchema } = await import('../lib/specformula/spec/data/models')
+  const expectations = extractThenExpectations(featureContent)
+  if (expectations.length === 0) return failures
+
+  // 系統自動欄位 — DB 預設 null 但 Coder 會自動補（id/timestamps/server-gen）
+  const SYSTEM_AUTO_FIELDS = new Set([
+    'id', 'createdAt', 'updatedAt', 'deletedAt', 'created_at', 'updated_at', 'deleted_at',
+    'submittedAt', 'submitted_at', 'publishedAt', 'published_at',
+    'token', 'accessToken', 'refreshToken',  // server-gen tokens
+  ])
+
+  const reportedKey = new Set<string>()  // 同 (scenario|field) 只報一次
+
+  for (const entityName of insertedEntities) {
+    const found = DatabaseSchema.findSchemaAndTable(schemas, entityName)
+    if (!found) continue
+    const tableName = found.table.tableName
+    const columnNames = new Set(found.table.columns.map(c => c.name.toLowerCase()))
+
+    for (const exp of expectations) {
+      if (exp.expectedKind !== 'notnull' && exp.expectedKind !== 'null') continue
+      if (SYSTEM_AUTO_FIELDS.has(exp.fieldName)) continue
+
+      const snakeName = exp.fieldName.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+      if (!columnNames.has(snakeName)) continue  // 該 field 不在這 table 的 column
+
+      const dedupKey = `${exp.scenarioName}|${exp.fieldName}|${tableName}`
+      if (reportedKey.has(dedupKey)) continue
+
+      try {
+        const result = await pool.query(`SELECT "${snakeName}" FROM "${tableName}" LIMIT 100`)
+        if (result.rowCount === 0) continue  // entity_setup 沒 INSERT 任何 row
+
+        const colKey = snakeName  // pg returns snake_case keys
+        if (exp.expectedKind === 'notnull') {
+          // 所有 row 該 column 都 null → spec 矛盾（entity_setup 沒給該欄位）
+          const allNull = result.rows.every(r => r[colKey] == null || r[colKey] === '')
+          if (allNull) {
+            reportedKey.add(dedupKey)
+            failures.push(
+              `[then_db_validation] Scenario "${exp.scenarioName}" — Then expects \`${exp.fieldName}\` = $notnull, ` +
+              `but all ${result.rowCount} row(s) of ${tableName}.${snakeName} are NULL/empty after entity_setup. ` +
+              `**修法**：補 \`${exp.fieldName}\` 進 \`準備一個 ${entityName}, with table:\` headers + 對應 data row。`
+            )
+          }
+        } else if (exp.expectedKind === 'null') {
+          // 任一 row 該 column 不 null → spec 矛盾（entity_setup 給了值但 Then 期望 null）
+          const someNotNull = result.rows.some(r => r[colKey] != null && r[colKey] !== '')
+          if (someNotNull) {
+            const sample = String(result.rows.find(r => r[colKey] != null && r[colKey] !== '')?.[colKey] ?? '').slice(0, 50)
+            reportedKey.add(dedupKey)
+            failures.push(
+              `[then_db_validation] Scenario "${exp.scenarioName}" — Then expects \`${exp.fieldName}\` = $null, ` +
+              `but row(s) of ${tableName}.${snakeName} have non-null value (e.g. "${sample}"). ` +
+              `**修法**：移除 \`${exp.fieldName}\` 從 \`準備一個 ${entityName}\` headers，或修 Then 不期望 null。`
+            )
+          }
+        }
+      } catch (e) {
+        // SELECT 失敗 — column 可能 quoted name 不對，跳過不阻塞
+        logger.debug({ err: e, tableName, column: snakeName }, 'L31.L Phase 3c: SELECT 失敗，跳過')
+      }
+    }
+  }
+
+  return failures
 }

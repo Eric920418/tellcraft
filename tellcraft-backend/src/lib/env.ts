@@ -76,6 +76,8 @@ const envSchema = z.object({
   PHASE_3A_SPEC_FIRST_REPAIR: z.stringbool().default(true),      // kill switch：設 false 退回舊行為（永遠 fixFailingAction）
   // L31.K Phase 3b: Pre-Coder Spec Validation — RED Phase Stub 失敗時自動呼叫 fixFailingSpec 修 BDD（取代純 advisory）
   PHASE_3B_PRE_CODER_VALIDATION: z.stringbool().default(true),   // kill switch：設 false 退回舊 RED Phase advisory 行為（不自動修）
+  // L31.L Phase 3c: Feature-Dry-Run Then-DB Validation — entity_setup 後 SELECT 比對 Then 期望（純 SQL 0 LLM cost）
+  PHASE_3C_DRY_RUN_THEN_VALIDATION: z.stringbool().default(true), // kill switch：設 false 跳過 Then-DB 驗證
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開
