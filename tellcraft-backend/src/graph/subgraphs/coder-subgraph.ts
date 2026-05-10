@@ -553,6 +553,24 @@ async function testNode(state: TellcraftStateType): Promise<Partial<TellcraftSta
       }
     }
 
+    // L31.J Phase 3a: persist 修過的 BDD 到 bdd_sessions.features_content
+    if (result.fixedBddFeatures && result.fixedBddFeatures.size > 0) {
+      try {
+        const featureFilesObj = bddSession.features_content as Array<{ name: string; actionName: string; content: string }>
+        const updatedFeatures = featureFilesObj.map(f => {
+          const fixed = result.fixedBddFeatures!.get(f.name)
+          return fixed ? { ...f, content: fixed } : f
+        })
+        await db.query(
+          `UPDATE bdd_sessions SET features_content = $1, updated_at = NOW() WHERE project_id = $2`,
+          [JSON.stringify(updatedFeatures), projectId]
+        )
+        logger.info({ projectId, fixedCount: result.fixedBddFeatures.size }, 'L31.J Phase 3a: BDD features 已 persist 到 bdd_sessions')
+      } catch (e) {
+        logger.warn({ err: e, projectId }, 'L31.J Phase 3a: persist BDD 失敗（不阻塞）')
+      }
+    }
+
     // 更新 FlowState
     // round=0 是 LangGraph fresh invoke 第一輪 → 重置 attempts（不繼承上次 retry 的累積）
     // round>0 是 graph 內部重試 loop → 累加（同一個 invoke 內的多輪測試應該加總）

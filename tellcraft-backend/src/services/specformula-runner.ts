@@ -2652,11 +2652,19 @@ export async function runRedGreenCycle(input: {
   attempts: number
   allPassed: boolean
   regressionRounds: number
+  // L31.J Phase 3a：BDD spec 經 fixFailingSpec 修過的 feature → caller persist 到 bdd_sessions.features_content
+  fixedBddFeatures?: Map<string, string>  // featureName → new content
 }> {
-  const { fixFailingAction } = await import('./coder-generation')
+  const { fixFailingAction, fixFailingSpec, classifyFailureRootCause, BDD_SIDE_ROOT_CAUSES } = await import('./coder-generation')
+  const { getEnv } = await import('../lib/env')
+  const env = getEnv()
+  const SPEC_FIRST_REPAIR_ENABLED = env.PHASE_3A_SPEC_FIRST_REPAIR
   const maxAttemptsPerFeature = input.maxAttempts ?? 3
   let currentFiles = [...input.backendFiles]
   let totalAttempts = 0
+  // L31.J Phase 3a：追蹤 BDD 內容修改（in-memory，return 給 caller 寫 DB）
+  const currentFeatures = input.featureFiles.map(f => ({ ...f }))  // shallow clone 避免污染 caller
+  const fixedBddFeatures = new Map<string, string>()
 
   // ============================================================
   // Phase 1: 逐 Feature 精準測試 + 修復
@@ -2664,7 +2672,7 @@ export async function runRedGreenCycle(input: {
   // ============================================================
   const totalFeatures = input.featureFiles.length
   for (let fi = 0; fi < totalFeatures; fi++) {
-    const feature = input.featureFiles[fi]
+    const feature = currentFeatures[fi]  // L31.J: 用 currentFeatures（可被 fixFailingSpec 修改）
     const featureLabel = `Feature ${fi + 1}/${totalFeatures}: ${feature.name}`
     const basePercent = Math.floor((fi / totalFeatures) * 70)
 
@@ -2769,26 +2777,55 @@ export async function runRedGreenCycle(input: {
           }
         })
 
-      const fixedCode = await fixFailingAction(
-        actionName,
-        currentFiles[fileIdx].content,
-        failedScenarios,
-        input.schemaSql,
-        input.trackingContext,
-        feature.content,
-        input.entityMapping
-      )
+      // L31.J Phase 3a: Spec-First Repair — 智慧分流
+      // 先 classifyFailureRootCause，判斷是 BDD 類還是 Code 類
+      const primaryError = failedScenarios[0]?.error || ''
+      const primaryScenarioName = failedScenarios[0]?.scenarioName
+      const rootCause = classifyFailureRootCause(primaryError, primaryScenarioName)
+      const isBddSide = SPEC_FIRST_REPAIR_ENABLED && BDD_SIDE_ROOT_CAUSES.has(rootCause)
 
-      // Fix 後安全網：確保 sql import 存在
-      let safedCode = fixedCode
-      const usesSql = /\bsql\s*`/.test(safedCode) || /\bsql\.begin/.test(safedCode)
-      const hasImport = /import\s*\{[^}]*\bsql\b[^}]*\}\s*from\s*['"]@\/lib\/db['"]/.test(safedCode)
-      if (usesSql && !hasImport) {
-        safedCode = `import { sql } from '@/lib/db'\n\n${safedCode}`
-        logger.info({ actionName }, 'Fix 後安全網：注入 import { sql }')
+      if (isBddSide) {
+        // BDD 類 → 修 spec 不修 code
+        logger.info({ feature: feature.name, rootCause }, 'L31.J Phase 3a: 走 fixFailingSpec（BDD 類 root cause）')
+        const specResult = await fixFailingSpec(
+          feature.name,
+          feature.content,
+          failedScenarios,
+          input.schemaSql,
+          rootCause,
+          input.trackingContext,
+          input.entityMapping,
+        )
+        if (specResult.fixedFeatureContent !== feature.content) {
+          // BDD 被修了 → 更新 in-memory + 標記需 persist
+          feature.content = specResult.fixedFeatureContent
+          fixedBddFeatures.set(feature.name, specResult.fixedFeatureContent)
+          logger.info({ feature: feature.name, costUsd: specResult.usage.costUsd.toFixed(4) }, 'L31.J Phase 3a: BDD spec 已更新（in-memory）')
+        }
+        // BDD 修了之後不動 code（下一輪 attempt 會用新 BDD 重測）
+      } else {
+        // Code 類 → 修 code（既有路徑）
+        const fixedCode = await fixFailingAction(
+          actionName,
+          currentFiles[fileIdx].content,
+          failedScenarios,
+          input.schemaSql,
+          input.trackingContext,
+          feature.content,
+          input.entityMapping
+        )
+
+        // Fix 後安全網：確保 sql import 存在
+        let safedCode = fixedCode
+        const usesSql = /\bsql\s*`/.test(safedCode) || /\bsql\.begin/.test(safedCode)
+        const hasImport = /import\s*\{[^}]*\bsql\b[^}]*\}\s*from\s*['"]@\/lib\/db['"]/.test(safedCode)
+        if (usesSql && !hasImport) {
+          safedCode = `import { sql } from '@/lib/db'\n\n${safedCode}`
+          logger.info({ actionName }, 'Fix 後安全網：注入 import { sql }')
+        }
+
+        currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: safedCode }
       }
-
-      currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: safedCode }
     }
 
     // 逐 Feature 修復結束：如果仍失敗，回退到修復前版本（避免壞修復影響回歸測試）
@@ -2886,19 +2923,44 @@ export async function runRedGreenCycle(input: {
       if (fileIdx === -1) continue
 
       try {
-        // 找到對應的 feature content 供 per-sub-op 修復
-        const featureFile = input.featureFiles.find(f => {
+        // 找到對應的 feature（用 currentFeatures，可能已被 fixFailingSpec 修過）
+        const featureFile = currentFeatures.find(f => {
           const match = f.content.match(/^#\s*Action:\s*(\S+)/m)
           return match?.[1] === actionName
         })
-        let fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext, featureFile?.content, input.entityMapping)
-        // 回歸修復安全網：確保 sql import
-        if ((/\bsql\s*`/.test(fixedCode) || /\bsql\.begin/.test(fixedCode)) && !/import\s*\{[^}]*\bsql\b[^}]*\}\s*from\s*['"]@\/lib\/db['"]/.test(fixedCode)) {
-          fixedCode = `import { sql } from '@/lib/db'\n\n${fixedCode}`
+
+        // L31.J Phase 3a: 回歸修復也分流（regression failure 也可能是 BDD 問題）
+        const primaryError = scenarios[0]?.error || ''
+        const primaryScenarioName = scenarios[0]?.scenarioName
+        const rootCause = classifyFailureRootCause(primaryError, primaryScenarioName)
+        const isBddSide = SPEC_FIRST_REPAIR_ENABLED && BDD_SIDE_ROOT_CAUSES.has(rootCause)
+
+        if (isBddSide && featureFile) {
+          logger.info({ actionName, rootCause }, 'L31.J Phase 3a: 回歸修復走 fixFailingSpec')
+          const specResult = await fixFailingSpec(
+            featureFile.name,
+            featureFile.content,
+            scenarios,
+            input.schemaSql,
+            rootCause,
+            input.trackingContext,
+            input.entityMapping,
+          )
+          if (specResult.fixedFeatureContent !== featureFile.content) {
+            featureFile.content = specResult.fixedFeatureContent
+            fixedBddFeatures.set(featureFile.name, specResult.fixedFeatureContent)
+            logger.info({ feature: featureFile.name, costUsd: specResult.usage.costUsd.toFixed(4) }, 'L31.J Phase 3a: 回歸 BDD 修復完成')
+          }
+        } else {
+          let fixedCode = await fixFailingAction(actionName, currentFiles[fileIdx].content, scenarios, input.schemaSql, input.trackingContext, featureFile?.content, input.entityMapping)
+          // 回歸修復安全網：確保 sql import
+          if ((/\bsql\s*`/.test(fixedCode) || /\bsql\.begin/.test(fixedCode)) && !/import\s*\{[^}]*\bsql\b[^}]*\}\s*from\s*['"]@\/lib\/db['"]/.test(fixedCode)) {
+            fixedCode = `import { sql } from '@/lib/db'\n\n${fixedCode}`
+          }
+          currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
         }
-        currentFiles[fileIdx] = { ...currentFiles[fileIdx], content: fixedCode }
       } catch (fixErr) {
-        logger.warn({ actionName, err: fixErr }, '回歸修復 fixFailingAction 失敗，跳過此 action')
+        logger.warn({ actionName, err: fixErr }, '回歸修復失敗，跳過此 action')
       }
     }
   }
@@ -2909,6 +2971,7 @@ export async function runRedGreenCycle(input: {
     attempts: totalAttempts,
     allPassed: finalResult.failed === 0,
     regressionRounds,
+    fixedBddFeatures: fixedBddFeatures.size > 0 ? fixedBddFeatures : undefined,  // L31.J Phase 3a
   }
 }
 

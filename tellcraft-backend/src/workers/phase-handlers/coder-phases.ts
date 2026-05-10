@@ -936,6 +936,23 @@ export async function executeCoderTesting(input: CoderSkillInput): Promise<void>
       }
     }
 
+    // L31.J Phase 3a: 如果 fixFailingSpec 修了 BDD，persist 到 bdd_sessions.features_content
+    if (result.fixedBddFeatures && result.fixedBddFeatures.size > 0) {
+      try {
+        const updatedFeatures = (bddSession.features_content as Array<{ name: string; actionName: string; content: string }>).map(f => {
+          const fixed = result.fixedBddFeatures!.get(f.name)
+          return fixed ? { ...f, content: fixed } : f
+        })
+        await db.query(
+          `UPDATE bdd_sessions SET features_content = $1, updated_at = NOW() WHERE project_id = $2`,
+          [JSON.stringify(updatedFeatures), projectId]
+        )
+        logger.info({ projectId, fixedCount: result.fixedBddFeatures.size }, 'L31.J Phase 3a: BDD features 已 persist 到 bdd_sessions')
+      } catch (e) {
+        logger.warn({ err: e, projectId }, 'L31.J Phase 3a: persist BDD 失敗（不阻塞）')
+      }
+    }
+
     await saveFlowState(redis, conversationId, state)
 
     const reportText = formatTestResults(result.testResults)

@@ -5269,6 +5269,168 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
   return fixed
 }
 
+// ============================================================
+// L31.J Phase 3a: Spec-First Repair — fixFailingSpec
+// 修 BDD spec（不修 code）— Coder 失敗時的智慧分流路徑
+// 對應 root cause：var_resolution / fk_constraint / spec_inconsistency /
+//                 api_summary_mismatch / step_parsing / entity_setup
+// ============================================================
+
+/**
+ * BDD-side root causes — 這些 rootCause 修代碼永遠沒用，必須修 BDD spec
+ */
+export const BDD_SIDE_ROOT_CAUSES: ReadonlySet<FailureRootCause> = new Set<FailureRootCause>([
+  'var_resolution',
+  'spec_inconsistency',
+  'api_summary_mismatch',
+  'step_parsing',
+])
+
+/**
+ * Per-rootCause 修法方向 hint（強制 LLM 走正確修法）
+ */
+const BDD_FIX_DIRECTION_HINTS: Record<string, string> = {
+  var_resolution: '【強制方向】Feature 引用了未宣告的 VAR（如 `$Entity.field`）。修法：在 Background 或同 scenario Given 補上 `>Entity.field` 宣告（搭配 `<entityField` 捕獲）。**禁止**改 Then 或 When 來繞過 VAR 引用。',
+  spec_inconsistency: '【強制方向】Scenario 名稱描述（例如「應變為 null」）與 DataTable 期望值（例如 `expect: [UUID]`）矛盾。修法：把 DataTable 的期望值改成 `$null` 或對應 sentinel，與 scenario name 對齊。**禁止**改 scenario name 來遮掩矛盾。',
+  api_summary_mismatch: '【強制方向】Feature When 步驟的 summary 在 actionsYml 找不到對應 operation。修法：把 When `<summary>` 改成 actionsYml 既有的 summary（精確匹配）。**禁止**改 actionsYml 來遷就 Feature。',
+  step_parsing: '【強制方向】Gherkin 步驟格式錯（花括號 `{}`、DataTable 全空 row、缺必要欄位）。修法：移除花括號、補 data row 至少一個非空 cell、補對應 schema 欄位。**禁止**改 SpecFormula runner 邏輯。',
+  fk_constraint: '【強制方向】FK 引用的父 entity 還沒在前序 Given 宣告（`>Parent.field` 沒在 `>Child.parentField` 之前出現）。修法：把 `準備一個 Parent` 步驟調整到 `準備一個 Child` 之前。**禁止**改 Schema 或刪除 FK 約束。',
+  entity_setup: '【強制方向】entity_setup DataTable 欄位名/型別不符 schema。修法：把 DataTable headers 改成 schema 真實 column 名稱（snake_case → camelCase 映射）。**禁止**改 schema。',
+}
+
+/**
+ * 用 LLM 修 BDD spec（不修 code）
+ *
+ * 跟 fixMultipleFeatures（formulation.ts，BDD 生成階段用）的差異：
+ * - fixMultipleFeatures：用 alignment check 報的 issue 修（heuristic-driven）
+ * - fixFailingSpec：用 SpecFormula 真實執行的 error 修（ground-truth-driven）
+ *
+ * @returns { fixedFeatureContent, usage } — 修過的 BDD content + token usage
+ */
+export async function fixFailingSpec(
+  featureName: string,
+  featureContent: string,
+  failedScenarios: Array<{ scenarioName: string; ruleName: string; error?: string; stepsContext?: string }>,
+  schemaSql: string,
+  rootCause: FailureRootCause,
+  trackingContext?: { userId?: string; conversationId?: string },
+  entityMapping?: string,
+): Promise<{ fixedFeatureContent: string; usage: { inputTokens: number; outputTokens: number; callCount: number; costUsd: number } }> {
+  const { calculateLlmCost } = await import('../lib/anthropic')
+  const noop = { fixedFeatureContent: featureContent, usage: { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 } }
+
+  if (!BDD_SIDE_ROOT_CAUSES.has(rootCause)) {
+    logger.info({ featureName, rootCause }, 'fixFailingSpec: rootCause 不屬於 BDD-side，跳過（呼叫端應走 fixFailingAction）')
+    return noop
+  }
+
+  recordTelemetry({
+    skillName: 'coder', eventType: 'spec_first_repair_attempt', patternKey: rootCause,
+    outcome: 'failed', rootCauseCategory: rootCause, phase: 'coder_green_phase',
+    userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+    payload: { featureName, scenarioCount: failedScenarios.length },
+  }).catch(() => {})
+
+  const directionHint = BDD_FIX_DIRECTION_HINTS[rootCause] ?? '【強制方向】根據 SpecFormula 真實 error 修 BDD spec（非 code），保留 Then 期望強度。'
+
+  const failedScenariosText = failedScenarios.slice(0, 5).map((s, i) => `
+${i + 1}. **Scenario**: ${s.scenarioName}
+   **Rule**: ${s.ruleName || '(no rule)'}
+   **Error from SpecFormula real execution**: ${(s.error || 'unknown').slice(0, 800)}
+${s.stepsContext ? `   **Steps context**:\n${s.stepsContext.split('\n').slice(0, 15).map(l => '   ' + l).join('\n')}` : ''}
+`).join('\n')
+
+  const systemPrompt = `You are an sdd.os ISA SpecFormula Gherkin expert. Fix the BDD spec — **NOT the action code**.
+
+## Background
+The Coder generated action code, then ran SpecFormula real tests against the user's Neon database. Some scenarios failed. The root cause analysis identified this as a **BDD spec issue** (not code bug).
+
+## Root Cause: \`${rootCause}\`
+
+${directionHint}
+
+## Critical Rules
+1. **Output ONLY the corrected Feature content as Gherkin** — wrapped in \`\`\`gherkin code block.
+2. **Preserve all working scenarios** — only fix the failing ones.
+3. **Preserve Then expectation strength** — never weaken validation (e.g. don't replace \`$notnull\` with \`_\` to "pass").
+4. **Preserve Feature name + Action annotations** (\`# Action:\` / \`# [METHOD]\` / \`# Summary:\`).
+5. **VAR system**: \`>contextKey\` declares, \`$variable\` references, \`<executionKey\` captures.
+6. **Schema-aware**: column names use snake_case in DB, camelCase in Feature DataTable (system handles mapping).
+7. If you can't determine fix from error message, return the original Feature unchanged (don't guess).
+
+## Output Format
+\`\`\`gherkin
+# Action: ...
+# [METHOD] /path
+# Summary: ...
+Feature: ...
+
+  Background: ...
+  Rule: ...
+\`\`\``
+
+  const userMessage = `## Feature: ${featureName}
+
+## Failed Scenarios (real SpecFormula execution)
+${failedScenariosText}
+
+## Current BDD Feature Content
+\`\`\`gherkin
+${featureContent}
+\`\`\`
+
+## SQL Schema (for reference)
+\`\`\`sql
+${schemaSql.slice(0, 4000)}
+\`\`\`
+
+${entityMapping ? `## Entity Mapping\n\`\`\`yaml\n${entityMapping.slice(0, 1000)}\n\`\`\`\n` : ''}
+
+Output the fixed BDD Feature content (Gherkin only, in \`\`\`gherkin block). If no fix is possible, output the original.`
+
+  const result = await callClaude(
+    buildCacheableSystem(systemPrompt),
+    userMessage,
+    { maxTokens: 8192, temperature: 0.1 },
+    trackingContext,
+  )
+
+  if (!result.success || !result.content) {
+    logger.warn({ featureName, error: result.error }, 'fixFailingSpec: LLM 失敗')
+    return noop
+  }
+
+  const inputTokens = result.inputTokens ?? 0
+  const outputTokens = result.outputTokens ?? 0
+  const costUsd = calculateLlmCost(MODEL.SONNET, inputTokens, outputTokens)
+  const usage = { inputTokens, outputTokens, callCount: 1, costUsd }
+
+  // 提取 Gherkin block
+  const gherkinMatch = result.content.match(/```gherkin\s*([\s\S]*?)\s*```/)
+  const fixedRaw = gherkinMatch ? gherkinMatch[1].trim() : result.content.trim()
+  if (!fixedRaw || fixedRaw.length < 50) {
+    logger.warn({ featureName, contentLength: fixedRaw.length }, 'fixFailingSpec: LLM 回傳空或太短，回退原始')
+    return { ...noop, usage }
+  }
+
+  // 後置 sanitize（與 BDD 生成階段一致的格式正規化）
+  const { sanitizeFeatureContent } = await import('./formulation')
+  const { content: sanitized, fixes } = sanitizeFeatureContent(fixedRaw)
+  if (fixes.length > 0) {
+    logger.info({ featureName, fixes }, 'fixFailingSpec: 後置 sanitize')
+  }
+
+  recordTelemetry({
+    skillName: 'coder', eventType: 'spec_first_repair_success', patternKey: rootCause,
+    outcome: 'repaired', rootCauseCategory: rootCause, phase: 'coder_green_phase',
+    userId: trackingContext?.userId, conversationId: trackingContext?.conversationId,
+    payload: { featureName, costUsd, inputTokens, outputTokens },
+  }).catch(() => {})
+
+  logger.info({ featureName, rootCause, costUsd: costUsd.toFixed(4) }, 'fixFailingSpec: 修復完成')
+  return { fixedFeatureContent: sanitized, usage }
+}
+
 /**
  * 並行執行，限制最大並發數
  */

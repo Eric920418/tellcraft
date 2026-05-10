@@ -72,6 +72,8 @@ const envSchema = z.object({
   // L31.I：Alignment Gate Cost Guardrail — 防止 alignment gate 失控修復（c9cefcc6 案例：81 calls / $8.62）
   ALIGNMENT_GATE_MAX_LLM_CALLS: z.coerce.number().default(20),   // 累計 LLM call 上限，超過 break + 回退 bestFeatures
   ALIGNMENT_GATE_MAX_COST_USD: z.coerce.number().default(3.0),   // 累計 cost USD 上限，超過 break + 回退 bestFeatures
+  // L31.J Phase 3a: Spec-First Repair — Coder 失敗時根據 root cause 智慧分流（BDD 類修 spec，Code 類修 code）
+  PHASE_3A_SPEC_FIRST_REPAIR: z.stringbool().default(true),      // kill switch：設 false 退回舊行為（永遠 fixFailingAction）
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開

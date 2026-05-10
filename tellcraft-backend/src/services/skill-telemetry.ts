@@ -59,6 +59,8 @@ export type EventType =
   | 'syntax_repair'
   | 'preview_gate'
   | 'variant_diversity'
+  | 'spec_first_repair_attempt'   // L31.J Phase 3a: fixFailingSpec 觸發
+  | 'spec_first_repair_success'   // L31.J Phase 3a: fixFailingSpec 成功
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
