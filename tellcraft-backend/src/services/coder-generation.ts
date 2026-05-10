@@ -5278,12 +5278,17 @@ ${entityMapping ? `\n## Entity Mapping\n\`\`\`yaml\n${entityMapping}\n\`\`\`\n` 
 
 /**
  * BDD-side root causes — 這些 rootCause 修代碼永遠沒用，必須修 BDD spec
+ *
+ * L31.K Phase 3b：加 entity_setup / fk_constraint
+ * - entity_setup：RED Phase 偵測 entity_setup INSERT 失敗（schema 對不上）
+ * - fk_constraint：FK 引用順序錯（父 entity 沒先宣告）
  */
 export const BDD_SIDE_ROOT_CAUSES: ReadonlySet<FailureRootCause> = new Set<FailureRootCause>([
   'var_resolution',
   'spec_inconsistency',
   'api_summary_mismatch',
   'step_parsing',
+  'fk_constraint',
 ])
 
 /**

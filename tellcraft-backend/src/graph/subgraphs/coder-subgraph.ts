@@ -165,20 +165,49 @@ async function validateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
     )
     if (project?.neon_connection_string) {
       try {
-        const stubResult = await runRedPhaseFullValidation({
-          features: bddSession.features_content,
-          actionsYml: bddSession.actions_yml_content,
-          openApiSpec: bddSession.open_api_spec_content,
-          isaConfigYml: bddSession.isa_config_content,
-          schemaSql: bddSession.schema_sql_content,
-          entityMapping: bddSession.entity_mapping_content || '',
-          neonConnectionString: project.neon_connection_string,
-        })
-        if (!stubResult.passed) {
-          logger.warn({ unexpectedFailures: stubResult.unexpectedFailures.length }, 'RED Phase Stub 發現非預期失敗')
+        // L31.K Phase 3b: Pre-Coder Spec Validation（自動修 BDD-side failures）
+        const env = (await import('../../lib/env')).getEnv()
+        if (env.PHASE_3B_PRE_CODER_VALIDATION) {
+          const { runPreCoderSpecValidation } = await import('../../services/pre-coder-spec-validation')
+          const validation = await runPreCoderSpecValidation({
+            features: bddSession.features_content,
+            actionsYml: bddSession.actions_yml_content,
+            openApiSpec: bddSession.open_api_spec_content,
+            isaConfigYml: bddSession.isa_config_content,
+            schemaSql: bddSession.schema_sql_content,
+            entityMapping: bddSession.entity_mapping_content || '',
+            neonConnectionString: project.neon_connection_string,
+            projectId,
+            trackingContext: { userId: state.userId, conversationId },
+          })
+          if (validation.fixedBddFeatures && validation.fixedBddFeatures.size > 0) {
+            // 同步 in-memory bddSession（DB 已 persist）
+            bddSession.features_content = (bddSession.features_content as Array<{ name: string; actionName: string; content: string }>).map(f => {
+              const fixed = validation.fixedBddFeatures!.get(f.name)
+              return fixed ? { ...f, content: fixed } : f
+            })
+            logger.info({ projectId, fixedCount: validation.fixedFeatureCount, costUsd: validation.totalLlmCostUsd.toFixed(4) }, 'L31.K Phase 3b: BDD spec 已修復')
+          }
+          if (!validation.passed) {
+            logger.warn({ remainingFailures: validation.remainingFailureCount }, 'L31.K Phase 3b: 仍有未解 issue（不阻塞）')
+          }
+        } else {
+          // 退回舊 advisory 行為
+          const stubResult = await runRedPhaseFullValidation({
+            features: bddSession.features_content,
+            actionsYml: bddSession.actions_yml_content,
+            openApiSpec: bddSession.open_api_spec_content,
+            isaConfigYml: bddSession.isa_config_content,
+            schemaSql: bddSession.schema_sql_content,
+            entityMapping: bddSession.entity_mapping_content || '',
+            neonConnectionString: project.neon_connection_string,
+          })
+          if (!stubResult.passed) {
+            logger.warn({ unexpectedFailures: stubResult.unexpectedFailures.length }, 'RED Phase Stub 發現非預期失敗')
+          }
         }
       } catch (e) {
-        logger.error({ error: e }, 'RED Phase Stub 執行失敗，降級跳過')
+        logger.error({ error: e }, 'RED Phase Stub / Pre-Coder Validation 執行失敗，降級跳過')
       }
 
       try {

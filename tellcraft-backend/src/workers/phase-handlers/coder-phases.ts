@@ -222,43 +222,74 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       }
 
       if (neonConnectionString) {
-        const stubResult = await runRedPhaseFullValidation({
-          features: bddSession.features_content,
-          actionsYml: bddSession.actions_yml_content,
-          openApiSpec: bddSession.open_api_spec_content,
-          isaConfigYml: bddSession.isa_config_content,
-          schemaSql: bddSession.schema_sql_content,
-          entityMapping: bddSession.entity_mapping_content || '',
-          neonConnectionString,
-        })
-
-        // 更新 FlowState
-        state = await getFlowState(redis, conversationId) || state
-        state.coderRedPhasePassed = stubResult.passed
-        state.coderRedPhaseIssueCount = stubResult.unexpectedFailures.length
-        await saveFlowState(redis, conversationId, state)
-
-        if (!stubResult.passed) {
-          logger.warn({
-            unexpectedFailures: stubResult.unexpectedFailures.length,
-            expectedRed: stubResult.expectedRedCount,
-          }, 'RED Phase Stub 發現非預期失敗')
-
-          const failureSummary = stubResult.unexpectedFailures
-            .map(f => `- [${f.failureType}] ${f.featureName} / ${f.scenarioName}: ${f.error.substring(0, 80)}`)
-            .join('\n')
-          await sendMessage(conversationId, io, {
-            content: isChinese
-              ? `⚠ SDD RED Phase 發現 ${stubResult.unexpectedFailures.length} 個測試基礎設施問題：\n${failureSummary}`
-              : `⚠ SDD RED Phase found ${stubResult.unexpectedFailures.length} test infrastructure issue(s):\n${failureSummary}`,
-            stage: 'coder_generating',
+        // L31.K Phase 3b: Pre-Coder Spec Validation（取代純 advisory 的 RED Phase Stub）
+        // 內部跑 runRedPhaseFullValidation + 對 BDD-side failures 自動呼叫 fixFailingSpec 修 BDD
+        // PHASE_3B_PRE_CODER_VALIDATION=false 時退回舊 advisory 行為
+        const env = (await import('../../lib/env')).getEnv()
+        if (env.PHASE_3B_PRE_CODER_VALIDATION) {
+          const { runPreCoderSpecValidation } = await import('../../services/pre-coder-spec-validation')
+          const validation = await runPreCoderSpecValidation({
+            features: bddSession.features_content,
+            actionsYml: bddSession.actions_yml_content,
+            openApiSpec: bddSession.open_api_spec_content,
+            isaConfigYml: bddSession.isa_config_content,
+            schemaSql: bddSession.schema_sql_content,
+            entityMapping: bddSession.entity_mapping_content || '',
+            neonConnectionString,
+            projectId,
+            trackingContext: { userId, conversationId },
           })
+
+          // 修過的 BDD 已 persist 到 DB（runPreCoderSpecValidation 內處理）+ 同步 in-memory bddSession
+          if (validation.fixedBddFeatures && validation.fixedBddFeatures.size > 0) {
+            bddSession.features_content = (bddSession.features_content as Array<{ name: string; actionName: string; content: string }>).map(f => {
+              const fixed = validation.fixedBddFeatures!.get(f.name)
+              return fixed ? { ...f, content: fixed } : f
+            })
+            await sendMessage(conversationId, io, {
+              content: isChinese
+                ? `✓ Pre-Coder 驗證自動修了 ${validation.fixedFeatureCount} 個 BDD spec（${validation.totalLlmCalls} LLM calls / $${validation.totalLlmCostUsd.toFixed(2)}）`
+                : `✓ Pre-Coder validation auto-fixed ${validation.fixedFeatureCount} BDD spec(s) (${validation.totalLlmCalls} calls / $${validation.totalLlmCostUsd.toFixed(2)})`,
+              stage: 'coder_generating',
+            })
+          }
+
+          state = await getFlowState(redis, conversationId) || state
+          state.coderRedPhasePassed = validation.passed
+          state.coderRedPhaseIssueCount = validation.remainingFailureCount
+          await saveFlowState(redis, conversationId, state)
+
+          if (!validation.passed) {
+            // 不阻塞 Pipeline（與既有 RED Phase 行為一致），只 warning（修不了的會由 Coder 階段 fixFailingAction 兜底）
+            await sendMessage(conversationId, io, {
+              content: validation.blockMessage || (isChinese
+                ? `⚠ Pre-Coder Spec Validation 發現 ${validation.remainingFailureCount} 個未解問題（不阻塞 Coder）`
+                : `⚠ Pre-Coder Spec Validation found ${validation.remainingFailureCount} unresolved issues (Coder will continue)`),
+              stage: 'coder_generating',
+            })
+          }
         } else {
-          logger.info({
-            expectedRed: stubResult.expectedRedCount,
-            totalScenarios: stubResult.totalScenarios,
-            durationMs: stubResult.durationMs,
-          }, 'RED Phase Stub 通過 — 所有測試正確，全部預期 RED')
+          // 退回舊 advisory 行為
+          const stubResult = await runRedPhaseFullValidation({
+            features: bddSession.features_content,
+            actionsYml: bddSession.actions_yml_content,
+            openApiSpec: bddSession.open_api_spec_content,
+            isaConfigYml: bddSession.isa_config_content,
+            schemaSql: bddSession.schema_sql_content,
+            entityMapping: bddSession.entity_mapping_content || '',
+            neonConnectionString,
+          })
+          state = await getFlowState(redis, conversationId) || state
+          state.coderRedPhasePassed = stubResult.passed
+          state.coderRedPhaseIssueCount = stubResult.unexpectedFailures.length
+          await saveFlowState(redis, conversationId, state)
+          if (!stubResult.passed) {
+            const failureSummary = stubResult.unexpectedFailures.map(f => `- [${f.failureType}] ${f.featureName} / ${f.scenarioName}: ${f.error.substring(0, 80)}`).join('\n')
+            await sendMessage(conversationId, io, {
+              content: isChinese ? `⚠ SDD RED Phase 發現 ${stubResult.unexpectedFailures.length} 個問題：\n${failureSummary}` : `⚠ SDD RED Phase found ${stubResult.unexpectedFailures.length} issue(s):\n${failureSummary}`,
+              stage: 'coder_generating',
+            })
+          }
         }
       }
     } catch (e) {

@@ -74,6 +74,8 @@ const envSchema = z.object({
   ALIGNMENT_GATE_MAX_COST_USD: z.coerce.number().default(3.0),   // 累計 cost USD 上限，超過 break + 回退 bestFeatures
   // L31.J Phase 3a: Spec-First Repair — Coder 失敗時根據 root cause 智慧分流（BDD 類修 spec，Code 類修 code）
   PHASE_3A_SPEC_FIRST_REPAIR: z.stringbool().default(true),      // kill switch：設 false 退回舊行為（永遠 fixFailingAction）
+  // L31.K Phase 3b: Pre-Coder Spec Validation — RED Phase Stub 失敗時自動呼叫 fixFailingSpec 修 BDD（取代純 advisory）
+  PHASE_3B_PRE_CODER_VALIDATION: z.stringbool().default(true),   // kill switch：設 false 退回舊 RED Phase advisory 行為（不自動修）
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開
