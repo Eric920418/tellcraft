@@ -39,6 +39,7 @@ export type SkillName =
   | 'prefilter'
   | 'syntax_validator'
   | 'flowstate_recovery'
+  | 'budget_guard'  // L31.M: per-conversation budget cap
 
 export type EventType =
   | 'sanitize_fix'
@@ -61,6 +62,7 @@ export type EventType =
   | 'variant_diversity'
   | 'spec_first_repair_attempt'   // L31.J Phase 3a: fixFailingSpec 觸發
   | 'spec_first_repair_success'   // L31.J Phase 3a: fixFailingSpec 成功
+  | 'conversation_budget_exceeded' // L31.M: per-conversation budget cap 觸發
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'

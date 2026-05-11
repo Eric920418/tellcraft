@@ -4950,6 +4950,14 @@ export async function fixFailingAction(
   featureContent?: string,
   entityMapping?: string
 ): Promise<string> {
+  // L31.M：跨流程 conversation budget cap — fix path 入口防護
+  const { guardFixPathBudget } = await import('../lib/conversation-budget')
+  const budget = await guardFixPathBudget(trackingContext?.conversationId, 'fixFailingAction')
+  if (budget.exceeded) {
+    logger.warn({ actionName, currentCost: budget.currentCostUsd, limit: budget.limitUsd }, 'fixFailingAction: budget exceeded, returning currentCode unchanged')
+    return currentCode
+  }
+
   // === Extended Thinking: 修復路徑用深度推理 ===
   const env = getEnv()
   const thinkingConfig = env.ENABLE_EXTENDED_THINKING
@@ -5326,6 +5334,14 @@ export async function fixFailingSpec(
 
   if (!BDD_SIDE_ROOT_CAUSES.has(rootCause)) {
     logger.info({ featureName, rootCause }, 'fixFailingSpec: rootCause 不屬於 BDD-side，跳過（呼叫端應走 fixFailingAction）')
+    return noop
+  }
+
+  // L31.M：跨流程 conversation budget cap
+  const { guardFixPathBudget } = await import('../lib/conversation-budget')
+  const budget = await guardFixPathBudget(trackingContext?.conversationId, 'fixFailingSpec')
+  if (budget.exceeded) {
+    logger.warn({ featureName, currentCost: budget.currentCostUsd, limit: budget.limitUsd }, 'fixFailingSpec: budget exceeded, skip')
     return noop
   }
 

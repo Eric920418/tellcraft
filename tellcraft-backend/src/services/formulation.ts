@@ -1343,6 +1343,14 @@ export async function fixMultipleFeatures(
     return { success: true, fixedFeatures: [], usage: { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 } }
   }
 
+  // L31.M：跨流程 conversation budget cap — 任何 fix path 開始前 check 該對話已累計 cost
+  // 8a32661e 案例：alignment gate + feature-validation 累計 $5.84，Phase 5 guardrail 跨不到
+  const { guardFixPathBudget } = await import('../lib/conversation-budget')
+  const budget = await guardFixPathBudget(trackingContext?.conversationId, 'fixMultipleFeatures')
+  if (budget.exceeded) {
+    return { success: false, error: budget.errorMessage, usage: { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 } }
+  }
+
   // L31.I：累計每個 batch 的 usage（給 cost guardrail 用）
   const { calculateLlmCost } = await import('../lib/anthropic')
   const cumulativeUsage: FixUsage = { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 }
