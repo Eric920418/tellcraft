@@ -32,6 +32,10 @@ npx ts-node bdd-spec/scripts/validate-feature.ts spec/features/      # 結構驗
 cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts              # 預設 7 天 markdown
 cd tellcraft-backend && pnpm tsx src/scripts/telemetry-weekly-report.ts --days=1 --json
 
+# Phase 3 治本指標報告（看 alignment cost / spec_first_repair / Coder rootCause）
+cd tellcraft-backend && pnpm tsx src/scripts/telemetry-phase3-report.ts               # 預設 7 天
+cd tellcraft-backend && pnpm tsx src/scripts/telemetry-phase3-report.ts --days=2 --json
+
 # Prompt Change 註冊（改了 prompt 或加了 code rule 後執行）
 cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --pattern <key> --skill <name> --action <prompt_fewshot|sanitize_rule|qg_rule> --target <file>
 cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --list / --retire <id>
@@ -443,6 +447,17 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **Coder E2E 必須含 backendFiles**：`runCoderE2ETests` 的 code 須含 `result.backendFiles`，否則 Module not found → 500
 - **`rewriteComponentForServerActions` maxTokens 32768**：截斷偵測 JSX 平衡，不平衡回退原始組件
 - **`identifyMockDataComponents`**：Haiku batch 識別需改寫組件，失敗降級 regex fallback
+- `[ARCH]` **Phase 3 多層攔截整體架構（L31.I-L）治本路徑**：BDD spec 對齊矛盾從「Coder 階段才發現修不好」變成「多層早期攔截 + 智慧分流」。
+  ```
+  BDD complete → Layer 0 (Bug 6/7 formulation prompt) → Layer 1 (Alignment Gate heuristic + L31.I Cost Guardrail $3 上限)
+              → Layer 2 (L31.L Phase 3c Dry-Run Then-DB Validation 0 LLM SQL 比對)
+              → Layer 3 (L31.K Phase 3b Pre-Coder Stub Validation 真 DB + StubHttpAdapter)
+              → Coder generate → Layer 4 (L31.J Phase 3a Coder 失敗智慧分流：BDD_SIDE_ROOT_CAUSES → fixFailingSpec / 其他 → fixFailingAction)
+              → Layer 5 (SpecFormula 真實測試) → Deploy
+  ```
+  **設計原則**：每層各自降低下游負擔，LLM 只在「真的修 BDD/code」時才花錢。**真矛盾 vs 誤報**：alignment gate 是 regex heuristic（容易誤報），Phase 3 b/c 是 ground truth（真執行）— 兩者互補。
+  **觀察 SOP**：跑 `pnpm tsx src/scripts/telemetry-phase3-report.ts --days=2` 看治本指標 — 平均 alignment cost < $1 / cost_guardrail_breach < 5% / spec_first_repair 成功率 > 60% = 治本良好。
+  **Kill switches**（出問題 env 一行 rollback）：`PHASE_3A_SPEC_FIRST_REPAIR` / `PHASE_3B_PRE_CODER_VALIDATION` / `PHASE_3C_DRY_RUN_THEN_VALIDATION` / `ALIGNMENT_GATE_MAX_COST_USD` 全可獨立調整。
 
 ### 資料庫與基礎設施
 
