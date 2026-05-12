@@ -7,7 +7,14 @@
 
 import { DatabaseSchema, TableDefinition, type ColumnDefinition } from '../lib/specformula/spec/data/models'
 import { NamingConverter } from '../lib/specformula/helper/naming-converter'
-import { parseCheckConstraintSpec } from './feature-alignment-gate'
+import {
+  parseCheckConstraintSpec,
+  extractEntitySetupWithData,
+  extractEntityValidateSteps,
+  splitFeatureIntoScenarios,
+  type AlignmentIssue,
+  type EntitySetupWithData,
+} from './feature-alignment-gate'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('deterministic-feature-fix')
@@ -601,4 +608,449 @@ export function insertIntoBackground(content: string, newStepLines: string[]): s
   const before = lines.slice(0, featureLineIdx + 1)
   const after = lines.slice(featureLineIdx + 1)
   return [...before, ...backgroundBlock, ...after].join('\n')
+}
+
+// ============================================================
+// R1: 確定性 alignment 修補（Check 12 / 14 / 15 / 16）— 取代 LLM
+// ============================================================
+
+function toSnakeCase(s: string): string {
+  return s.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+}
+
+function toCamelCase(s: string): string {
+  return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+}
+
+/**
+ * 把 column 加到單一 DataTable row（保持結尾 ` |` 結構）
+ * `| a | b |` + value="c" → `| a | b | c |`
+ */
+function appendCellToRow(row: string, value: string): string {
+  const m = row.match(/^(\s*\|.*?)\|\s*$/)
+  if (!m) return row
+  return `${m[1]}${value} |`
+}
+
+/**
+ * 找到 entity_setup table 的所有行 index（header + data rows）
+ * stepLine 是「準備一個 X, with table:」的 1-based 行號
+ * 回傳 0-based line indices
+ */
+function findTableLineIndices(lines: string[], stepLine1Based: number): number[] {
+  const indices: number[] = []
+  let i = stepLine1Based  // 0-based 等於 1-based - 1，再從下一行開始
+  // 跳過空行直到第一個 |
+  while (i < lines.length && lines[i].trim() === '') i++
+  while (i < lines.length && lines[i].trim().startsWith('|')) {
+    indices.push(i)
+    i++
+  }
+  return indices
+}
+
+/**
+ * 把 column 加到既有 entity_setup table（header + 所有 data rows）
+ * 回傳更新後的 lines；若 stepLine 找不到對應 table → 原樣返回
+ */
+function appendColumnToEntitySetup(
+  lines: string[],
+  setupStep: EntitySetupWithData,
+  columnHeader: string,
+  cellValue: string,
+): { lines: string[]; mutated: boolean } {
+  const tableIndices = findTableLineIndices(lines, setupStep.stepLine)
+  if (tableIndices.length < 1) return { lines, mutated: false }
+  const newLines = [...lines]
+  // 第一行 = header
+  newLines[tableIndices[0]] = appendCellToRow(newLines[tableIndices[0]], columnHeader)
+  // 後續 = data rows
+  for (let k = 1; k < tableIndices.length; k++) {
+    newLines[tableIndices[k]] = appendCellToRow(newLines[tableIndices[k]], cellValue)
+  }
+  return { lines: newLines, mutated: true }
+}
+
+/**
+ * 從 entity_setup 移除指定 column（用於 Check 15：$null 期望但 setup 給值）
+ * 需要把 header 那一格 + 所有 data rows 對應 cell 整格移除
+ */
+function removeColumnFromEntitySetup(
+  lines: string[],
+  setupStep: EntitySetupWithData,
+  columnHeader: string,
+): { lines: string[]; mutated: boolean } {
+  const tableIndices = findTableLineIndices(lines, setupStep.stepLine)
+  if (tableIndices.length < 1) return { lines, mutated: false }
+  // 找 header 內的 column index
+  const headerRow = lines[tableIndices[0]]
+  const headerCells = headerRow.split('|').map(c => c.trim())
+  // headerCells[0] = ''（行首 | 前），headerCells[last] = ''（行尾 | 後）
+  let targetIdx = -1
+  const variants = [columnHeader, toCamelCase(columnHeader), toSnakeCase(columnHeader)]
+  for (let i = 1; i < headerCells.length - 1; i++) {
+    const clean = headerCells[i].replace(/^[><]/, '').trim()
+    if (variants.includes(clean)) {
+      targetIdx = i
+      break
+    }
+  }
+  if (targetIdx === -1) return { lines, mutated: false }
+
+  const newLines = [...lines]
+  for (const li of tableIndices) {
+    const cells = newLines[li].split('|')
+    // cells 對應 split — cells[0] 是行首空字串，cells[targetIdx] 是要移的，cells[last] 是行尾空字串
+    if (targetIdx < cells.length - 1) {
+      cells.splice(targetIdx, 1)
+    }
+    // 重新組合：每個非首尾空格 cell 都該補 padding。最簡單：保留結構 `| a | b |`
+    // cells: ['', ' a ', ' b ', ''] → '| a | b |'
+    newLines[li] = cells.join('|')
+  }
+  return { lines: newLines, mutated: true }
+}
+
+/**
+ * 找 schema 裡哪個 table 包含這個 field（用於從 Check 12 fieldName 反推 entity）
+ * 回傳 entity name（如果 schemas 帶 mapping）或 table name
+ */
+function findEntityForField(
+  fieldName: string,
+  schemas: DatabaseSchema[],
+): { entityName: string; table: TableDefinition; column: ColumnDefinition } | null {
+  const variants = [fieldName, toSnakeCase(fieldName), toCamelCase(fieldName)]
+  for (const schema of schemas) {
+    for (const table of schema.tables) {
+      for (const col of table.columns) {
+        if (variants.includes(col.name)) {
+          // 反查 entity name
+          const mapping = schema.entityTableMapping
+          let entityName = table.tableName
+          if (mapping) {
+            for (const entry of mapping.entity_to_table_mapping) {
+              for (const [eName, tName] of Object.entries(entry)) {
+                if (tName === table.tableName) {
+                  entityName = eName
+                  break
+                }
+              }
+            }
+          }
+          return { entityName, table, column: col }
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * 為某 column 推一個合理的 sample value 作為 entity_setup cell 值
+ * （複用 sampleValueForColumn 但簡化 fkResolver — 不解析 FK，回 $notnull placeholder）
+ */
+function sampleValueForFix(col: ColumnDefinition): string {
+  return sampleValueForColumn(col, () => null)
+}
+
+// ============================================================
+// Helper 1: autoFillNotnullSetupGap (Check 12)
+// ============================================================
+
+export interface AlignmentDeterministicFixResult {
+  content: string
+  fixedFields: Array<{ scenario: string; field: string; entity: string }>
+  skipped: Array<{ field: string; reason: string }>
+}
+
+/**
+ * Check 12: notnull_field_missing_from_setup
+ * Then 期望 `$notnull` 但 entity_setup 沒給 → append column 到對應 entity_setup
+ */
+export function autoFillNotnullSetupGap(
+  content: string,
+  issues: AlignmentIssue[],
+  schemas: DatabaseSchema[],
+): AlignmentDeterministicFixResult {
+  const targets = issues.filter(
+    i => i.checkName === 'notnull_field_missing_from_setup' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, fixedFields: [], skipped: [] }
+  }
+
+  let lines = content.split('\n')
+  const fixedFields: Array<{ scenario: string; field: string; entity: string }> = []
+  const skipped: Array<{ field: string; reason: string }> = []
+
+  // 每次 mutate 後重新 extract 確保 stepLine 正確（防 line index 漂移）
+  for (const issue of targets) {
+    const m = issue.description.match(/Scenario "([^"]+)" 的 Then 表期望欄位 `([^`]+)` 為 `\$notnull`/)
+    if (!m) {
+      skipped.push({ field: '?', reason: 'description 格式不符 — 無法 parse scenario/field' })
+      continue
+    }
+    const scenarioName = m[1]
+    const fieldName = m[2]
+
+    // 從 schema 找 fieldName 屬於哪個 table → entity
+    const found = findEntityForField(fieldName, schemas)
+    if (!found) {
+      skipped.push({ field: fieldName, reason: 'schema 找不到對應 column — 可能 server-gen' })
+      continue
+    }
+
+    // 找該 entity 的 entity_setup（同 feature 內第一個匹配）
+    const currentContent = lines.join('\n')
+    const setupSteps = extractEntitySetupWithData(currentContent)
+    const matchSetup = setupSteps.find(
+      s => s.entityName.toLowerCase() === found.entityName.toLowerCase() ||
+           toSnakeCase(s.entityName) === toSnakeCase(found.entityName),
+    )
+    if (!matchSetup) {
+      skipped.push({ field: fieldName, reason: `entity_setup 缺 ${found.entityName} — 屬 Check 14/16 範疇` })
+      continue
+    }
+
+    // 已存在該 column → 跳過（可能上一輪修過了）
+    const variants = [fieldName, toSnakeCase(fieldName), toCamelCase(fieldName)]
+    const alreadyHas = matchSetup.rawHeaders.some(
+      h => variants.includes(h.replace(/^[><]/, '').trim()),
+    )
+    if (alreadyHas) {
+      continue
+    }
+
+    const sampleValue = sampleValueForFix(found.column)
+    const headerName = toCamelCase(fieldName)
+    const result = appendColumnToEntitySetup(lines, matchSetup, headerName, sampleValue)
+    if (!result.mutated) {
+      skipped.push({ field: fieldName, reason: 'appendColumnToEntitySetup 失敗（table 結構異常）' })
+      continue
+    }
+    lines = result.lines
+    fixedFields.push({ scenario: scenarioName, field: fieldName, entity: found.entityName })
+  }
+
+  return { content: lines.join('\n'), fixedFields, skipped }
+}
+
+// ============================================================
+// Helper 2: autoRemoveNullConflictSetup (Check 15)
+// ============================================================
+
+/**
+ * Check 15: null_expectation_setup_conflict
+ * Then 期望 `$null` 但 entity_setup 給了非空值 → 移除 entity_setup 該 column
+ */
+export function autoRemoveNullConflictSetup(
+  content: string,
+  issues: AlignmentIssue[],
+): { content: string; removedFields: Array<{ scenario: string; field: string; entity: string }>; skipped: Array<{ field: string; reason: string }> } {
+  const targets = issues.filter(
+    i => i.checkName === 'null_expectation_setup_conflict' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, removedFields: [], skipped: [] }
+  }
+
+  let lines = content.split('\n')
+  const removedFields: Array<{ scenario: string; field: string; entity: string }> = []
+  const skipped: Array<{ field: string; reason: string }> = []
+
+  for (const issue of targets) {
+    // description 包含 entity name + field name
+    // 格式：`...期望欄位 \`fieldName\` 為 \`$null\`...但 entity_setup \`entityName\` 給了 \`fieldName = ...\``
+    const m = issue.description.match(
+      /Scenario "([^"]+)" .*期望欄位 `([^`]+)` 為 `\$null`.*entity_setup `([^`]+)`/,
+    )
+    if (!m) {
+      skipped.push({ field: '?', reason: 'description 格式不符' })
+      continue
+    }
+    const scenarioName = m[1]
+    const fieldName = m[2]
+    const entityName = m[3]
+
+    const currentContent = lines.join('\n')
+    const setupSteps = extractEntitySetupWithData(currentContent)
+    const matchSetup = setupSteps.find(s => s.entityName === entityName)
+    if (!matchSetup) {
+      skipped.push({ field: fieldName, reason: `找不到 entity_setup ${entityName}` })
+      continue
+    }
+    const result = removeColumnFromEntitySetup(lines, matchSetup, fieldName)
+    if (!result.mutated) {
+      skipped.push({ field: fieldName, reason: 'column 已不在 entity_setup（可能上輪修過）' })
+      continue
+    }
+    lines = result.lines
+    removedFields.push({ scenario: scenarioName, field: fieldName, entity: entityName })
+  }
+
+  return { content: lines.join('\n'), removedFields, skipped }
+}
+
+// ============================================================
+// Helper 3: autoFillEntityValidateGap (Check 16)
+// ============================================================
+
+/**
+ * Check 16: entity_validation_field_missing_from_setup
+ * 應該存在一個 X with table 期望欄位但 entity_setup 沒給 → append 到 entity_setup
+ */
+export function autoFillEntityValidateGap(
+  content: string,
+  issues: AlignmentIssue[],
+  schemas: DatabaseSchema[],
+): AlignmentDeterministicFixResult {
+  const targets = issues.filter(
+    i => i.checkName === 'entity_validation_field_missing_from_setup' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, fixedFields: [], skipped: [] }
+  }
+
+  let lines = content.split('\n')
+  const fixedFields: Array<{ scenario: string; field: string; entity: string }> = []
+  const skipped: Array<{ field: string; reason: string }> = []
+
+  for (const issue of targets) {
+    // description 包含 entityName + fieldName + sampleExpected
+    // 格式：`Scenario "X" 的 \`應該存在一個 EntityName, with table:\` 期望欄位 \`fieldName\` 為 \`value\``
+    const m = issue.description.match(
+      /Scenario "([^"]+)" 的 `應該存在一個 ([^,，]+)[,，] with table:` 期望欄位 `([^`]+)` 為 `([^`]+)`/,
+    )
+    if (!m) {
+      skipped.push({ field: '?', reason: 'description 格式不符' })
+      continue
+    }
+    const scenarioName = m[1]
+    const entityName = m[2].trim()
+    const fieldName = m[3]
+    const expectedValue = m[4]
+
+    const currentContent = lines.join('\n')
+    const setupSteps = extractEntitySetupWithData(currentContent)
+    const matchSetup = setupSteps.find(s => s.entityName === entityName)
+    if (!matchSetup) {
+      skipped.push({ field: fieldName, reason: `entity_setup 缺 ${entityName}` })
+      continue
+    }
+
+    // 已存在 column → 跳過
+    const variants = [fieldName, toSnakeCase(fieldName), toCamelCase(fieldName)]
+    const alreadyHas = matchSetup.rawHeaders.some(
+      h => variants.includes(h.replace(/^[><]/, '').trim()),
+    )
+    if (alreadyHas) continue
+
+    // 推斷 sample value：若 expectedValue=$notnull → 從 schema 取 sample；否則用 expectedValue
+    let cellValue: string
+    if (expectedValue === '$notnull') {
+      const found = findEntityForField(fieldName, schemas)
+      cellValue = found ? sampleValueForFix(found.column) : `Sample ${fieldName}`
+    } else {
+      cellValue = expectedValue
+    }
+
+    const headerName = toCamelCase(fieldName)
+    const result = appendColumnToEntitySetup(lines, matchSetup, headerName, cellValue)
+    if (!result.mutated) {
+      skipped.push({ field: fieldName, reason: 'appendColumnToEntitySetup 失敗' })
+      continue
+    }
+    lines = result.lines
+    fixedFields.push({ scenario: scenarioName, field: fieldName, entity: entityName })
+  }
+
+  return { content: lines.join('\n'), fixedFields, skipped }
+}
+
+// ============================================================
+// Helper 4: autoFillScenarioScopeSetup (Check 14)
+// ============================================================
+
+/**
+ * Check 14: scenario_scope_setup_mismatch
+ * 該 scenario scope（Background + 自身 Given）缺欄位，但 Feature 其他 scenario 有
+ * → 找到「其他 scenario 提供該欄位」的 entity_setup，複製到 Background（讓所有 scenario 共享）
+ *
+ * 注意：Check 14 預設 severity='warning'，只在 STRICT_SCENARIO_SCOPE_ALIGNMENT=true 時為 error
+ * 這裡只處理 error 嚴重度（避免誤動 warning case）
+ */
+export function autoFillScenarioScopeSetup(
+  content: string,
+  issues: AlignmentIssue[],
+  schemas: DatabaseSchema[],
+): AlignmentDeterministicFixResult {
+  const targets = issues.filter(
+    i => i.checkName === 'scenario_scope_setup_mismatch' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, fixedFields: [], skipped: [] }
+  }
+
+  let lines = content.split('\n')
+  const fixedFields: Array<{ scenario: string; field: string; entity: string }> = []
+  const skipped: Array<{ field: string; reason: string }> = []
+
+  for (const issue of targets) {
+    const m = issue.description.match(/Scenario "([^"]+)" 的 Then 期望欄位 `([^`]+)`/)
+    if (!m) {
+      skipped.push({ field: '?', reason: 'description 格式不符' })
+      continue
+    }
+    const scenarioName = m[1]
+    const fieldName = m[2]
+
+    // 找 schema entity
+    const found = findEntityForField(fieldName, schemas)
+    if (!found) {
+      skipped.push({ field: fieldName, reason: 'schema 無此 column' })
+      continue
+    }
+
+    // 策略：在該 scenario 的 Given 區塊裡，如果已有對應 entity_setup → append column
+    //       否則 skip（屬於 Check 12 範疇，會被 autoFillNotnullSetupGap 處理）
+    const currentContent = lines.join('\n')
+    const { scenarios } = splitFeatureIntoScenarios(currentContent)
+    const scBlock = scenarios.find(s => s.scenarioName === scenarioName)
+    if (!scBlock) {
+      skipped.push({ field: fieldName, reason: `找不到 scenario block "${scenarioName}"` })
+      continue
+    }
+    const localSetups = extractEntitySetupWithData(scBlock.content)
+    const matchLocal = localSetups.find(
+      s => s.entityName.toLowerCase() === found.entityName.toLowerCase(),
+    )
+    if (!matchLocal) {
+      skipped.push({ field: fieldName, reason: '該 scenario Given 無對應 entity_setup（屬 Check 12 範疇）' })
+      continue
+    }
+
+    // localSetup 的 stepLine 是相對於 scBlock 內容；需要轉成全 content 的行號
+    // scBlock.startLine 是 1-based，scBlock.content = lines.slice(startLine-1, endLine).join('\n')
+    // 所以 全 content 行號 = scBlock.startLine + (matchLocal.stepLine - 1)
+    const absoluteStepLine = scBlock.startLine + (matchLocal.stepLine - 1)
+    const absoluteSetup: EntitySetupWithData = { ...matchLocal, stepLine: absoluteStepLine }
+
+    const variants = [fieldName, toSnakeCase(fieldName), toCamelCase(fieldName)]
+    const alreadyHas = matchLocal.rawHeaders.some(
+      h => variants.includes(h.replace(/^[><]/, '').trim()),
+    )
+    if (alreadyHas) continue
+
+    const sampleValue = sampleValueForFix(found.column)
+    const headerName = toCamelCase(fieldName)
+    const result = appendColumnToEntitySetup(lines, absoluteSetup, headerName, sampleValue)
+    if (!result.mutated) {
+      skipped.push({ field: fieldName, reason: 'appendColumnToEntitySetup 失敗' })
+      continue
+    }
+    lines = result.lines
+    fixedFields.push({ scenario: scenarioName, field: fieldName, entity: found.entityName })
+  }
+
+  return { content: lines.join('\n'), fixedFields, skipped }
 }

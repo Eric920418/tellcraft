@@ -1959,6 +1959,151 @@ async function autoFixFeatures(
     }
   }
 
+  // ============================================================
+  // R1：Check 12/14/15/16 deterministic 修補（取代 LLM）
+  // 條件：env R1_DETERMINISTIC_ALIGNMENT_FIX=true（預設 true，可 rollback）
+  // 失敗安全網：每 helper 跑完後 try-catch，跑完整體 deterministic 後重跑
+  //   runAlignmentChecks 比對 issue set — 若 deterministic 引入新 error → 整批回退
+  // ============================================================
+  const r1Enabled = process.env.R1_DETERMINISTIC_ALIGNMENT_FIX !== 'false'
+  if (r1Enabled && schemasForRepair.length > 0) {
+    const {
+      autoFillNotnullSetupGap,
+      autoRemoveNullConflictSetup,
+      autoFillEntityValidateGap,
+      autoFillScenarioScopeSetup,
+    } = await import('./deterministic-feature-fix')
+
+    // pre-R1 snapshot 供回退用
+    const preR1Snapshot = workingFeatures.map(f => ({ ...f }))
+    const preR1ErrorFingerprints = issues
+      .filter(i => i.severity === 'error')
+      .map(i => issueFingerprint(i))
+    const preR1ErrorSet = new Set(preR1ErrorFingerprints)
+
+    let r1FixCount = 0
+    for (let fi = 0; fi < workingFeatures.length; fi++) {
+      const displayName = workingFeatures[fi].name || workingFeatures[fi].actionName
+      const featureIssues = issuesByFeature.get(displayName) || []
+      if (featureIssues.length === 0) continue
+
+      let curContent = workingFeatures[fi].content
+      const allFixed: Array<{ checkName: string; field: string; entity?: string }> = []
+
+      // Helper 1: Check 12 notnull
+      try {
+        const r = autoFillNotnullSetupGap(curContent, featureIssues, schemasForRepair)
+        if (r.fixedFields.length > 0) {
+          curContent = r.content
+          for (const f of r.fixedFields) allFixed.push({ checkName: 'notnull_field_missing_from_setup', field: f.field, entity: f.entity })
+        }
+      } catch (e) {
+        logger.warn({ err: e, feature: displayName }, 'R1: autoFillNotnullSetupGap 失敗，fallthrough')
+      }
+
+      // Helper 2: Check 15 null conflict
+      try {
+        const r = autoRemoveNullConflictSetup(curContent, featureIssues)
+        if (r.removedFields.length > 0) {
+          curContent = r.content
+          for (const f of r.removedFields) allFixed.push({ checkName: 'null_expectation_setup_conflict', field: f.field, entity: f.entity })
+        }
+      } catch (e) {
+        logger.warn({ err: e, feature: displayName }, 'R1: autoRemoveNullConflictSetup 失敗，fallthrough')
+      }
+
+      // Helper 3: Check 16 entity validate
+      try {
+        const r = autoFillEntityValidateGap(curContent, featureIssues, schemasForRepair)
+        if (r.fixedFields.length > 0) {
+          curContent = r.content
+          for (const f of r.fixedFields) allFixed.push({ checkName: 'entity_validation_field_missing_from_setup', field: f.field, entity: f.entity })
+        }
+      } catch (e) {
+        logger.warn({ err: e, feature: displayName }, 'R1: autoFillEntityValidateGap 失敗，fallthrough')
+      }
+
+      // Helper 4: Check 14 scenario scope
+      try {
+        const r = autoFillScenarioScopeSetup(curContent, featureIssues, schemasForRepair)
+        if (r.fixedFields.length > 0) {
+          curContent = r.content
+          for (const f of r.fixedFields) allFixed.push({ checkName: 'scenario_scope_setup_mismatch', field: f.field, entity: f.entity })
+        }
+      } catch (e) {
+        logger.warn({ err: e, feature: displayName }, 'R1: autoFillScenarioScopeSetup 失敗，fallthrough')
+      }
+
+      if (allFixed.length > 0) {
+        workingFeatures[fi] = { ...workingFeatures[fi], content: curContent }
+        r1FixCount += allFixed.length
+        deterministicFixCount += allFixed.length
+        recordTelemetry({
+          skillName: 'feature_gate',
+          eventType: 'alignment_fixed',
+          patternKey: 'deterministic_alignment_fix',
+          outcome: 'repaired',
+          phase: 'feature_alignment_gate',
+          userId: trackingContext?.userId,
+          conversationId: trackingContext?.conversationId,
+          payload: { feature: displayName, fixed: allFixed },
+        }).catch(() => {})
+        logger.info({ feature: displayName, fixed: allFixed }, 'R1: deterministic alignment 修補完成')
+      }
+    }
+
+    // 安全網：R1 修完後對每個 mutated feature 做結構完整性檢查
+    // - 每行 DataTable 的 cell count 一致（header rows 與 data rows）
+    // - 至少還有原來的 entity_setup steps（不會憑空消失）
+    // 任一 feature 失敗 → 整批回退到 preR1 snapshot，由 LLM 接手
+    if (r1FixCount > 0) {
+      let safetyNetFailed = false
+      for (let fi = 0; fi < workingFeatures.length; fi++) {
+        const before = preR1Snapshot[fi].content
+        const after = workingFeatures[fi].content
+        if (before === after) continue  // 沒動過
+
+        try {
+          // 結構檢查 1：每個 DataTable 區塊內所有行的 cell count 一致
+          const afterLines = after.split('\n')
+          let inTable = false
+          let tableCellCount = -1
+          for (const line of afterLines) {
+            const trimmed = line.trim()
+            if (trimmed.startsWith('|')) {
+              const cells = trimmed.split('|').length - 2  // 去頭尾空字串
+              if (!inTable) {
+                inTable = true
+                tableCellCount = cells
+              } else if (cells !== tableCellCount) {
+                throw new Error(`DataTable cell count 不一致：期望 ${tableCellCount}，實際 ${cells}`)
+              }
+            } else {
+              inTable = false
+              tableCellCount = -1
+            }
+          }
+          // 結構檢查 2：entity_setup count 不減少
+          const beforeSetupCount = extractEntitySetupWithData(before).length
+          const afterSetupCount = extractEntitySetupWithData(after).length
+          if (afterSetupCount < beforeSetupCount) {
+            throw new Error(`entity_setup 從 ${beforeSetupCount} 降到 ${afterSetupCount}`)
+          }
+        } catch (e) {
+          logger.warn({ err: e, feature: workingFeatures[fi].name }, 'R1: 安全網結構檢查失敗，將整批回退')
+          safetyNetFailed = true
+          break
+        }
+      }
+      if (safetyNetFailed) {
+        for (let i = 0; i < workingFeatures.length; i++) workingFeatures[i] = preR1Snapshot[i]
+        deterministicFixCount -= r1FixCount
+      } else {
+        logger.info({ r1FixCount, preErrorCount: preR1ErrorFingerprints.length }, 'R1: 安全網通過，保留 deterministic 修補')
+      }
+    }
+  }
+
   // 若 deterministic 已修完所有 feature 的 var issues → 直接回傳，skip LLM
   if (deterministicFixCount > 0) {
     // 重新驗證：如果這次 deterministic 補完後剩下 error 都不是 var_system_alignment → LLM 也不用跑
@@ -2031,6 +2176,48 @@ async function autoFixFeatures(
 
   logger.info({ featureCount: featuresToFix.length, issueCount: featuresToFix.reduce((sum, f) => sum + f.issues.length, 0) }, 'Alignment Gate: 嘗試自動修復 Features')
 
+  // R2: 跨 loop fingerprint cache — LLM call 前 check
+  const r2Enabled = process.env.R2_FIX_ATTEMPT_CACHE !== 'false'
+  let fingerprintsForCache: string[] = []
+  if (r2Enabled && trackingContext?.conversationId) {
+    const { buildFingerprint, shouldSkipLlmFix } = await import('../lib/fix-attempt-cache')
+    fingerprintsForCache = featuresToFix.flatMap(f =>
+      f.issues.map(issueText => {
+        // issueText 格式：`[checkName] description\n  → Harness: ...`
+        const checkMatch = issueText.match(/^\[([^\]]+)\]\s*(.+?)(?:\n|$)/)
+        const checkName = checkMatch?.[1] ?? 'unknown'
+        const desc = checkMatch?.[2] ?? issueText
+        return buildFingerprint({
+          loopName: 'alignment_gate',
+          featureName: f.name || f.actionName,
+          issueKind: checkName,
+          keyContent: desc,
+        })
+      })
+    )
+    const skipCheck = await shouldSkipLlmFix(trackingContext.conversationId, fingerprintsForCache)
+    if (skipCheck.skip) {
+      logger.warn({
+        reason: skipCheck.reason,
+        fingerprintCount: fingerprintsForCache.length,
+        attemptCounts: skipCheck.attemptCounts,
+      }, 'R2: alignment_gate LLM 修補 skip（cache hit — 全部 issue 已多次嘗試）')
+      const { recordTelemetry } = await import('./skill-telemetry')
+      recordTelemetry({
+        skillName: 'feature_gate',
+        eventType: 'cross_loop_fix_skipped',
+        patternKey: 'alignment_gate_skipped_by_cache',
+        outcome: 'blocked',
+        phase: 'feature_alignment_gate',
+        severity: 'warning',
+        userId: trackingContext.userId,
+        conversationId: trackingContext.conversationId,
+        payload: { fingerprintCount: fingerprintsForCache.length, attemptCounts: skipCheck.attemptCounts },
+      }).catch(() => {})
+      return { fixedFeatures: workingFeatures, fixApplied: deterministicFixCount > 0 }
+    }
+  }
+
   const result = await fixMultipleFeatures(
     featuresToFix,
     [], // 沒有 clarifyItems（這是 post-BDD 修復）
@@ -2060,6 +2247,13 @@ async function autoFixFeatures(
     }
     return f  // LLM 沒碰 → 保留 workingFeatures 版本（可能已 deterministic 補過）
   })
+
+  // R2: LLM 修完後寫 cache — 所有送修 fingerprints 記為「已嘗試一次」（succeeded 由下輪 alignment 重檢知道）
+  // 此處保守記為 succeeded=false（讓下輪能再試）；真實成功與否由下次 runAlignmentChecks 決定
+  if (r2Enabled && trackingContext?.conversationId && fingerprintsForCache.length > 0) {
+    const { recordBatchAttempt } = await import('../lib/fix-attempt-cache')
+    recordBatchAttempt(trackingContext.conversationId, [], fingerprintsForCache).catch(() => {})
+  }
 
   return {
     fixedFeatures: merged,

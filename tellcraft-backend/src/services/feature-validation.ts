@@ -522,6 +522,43 @@ export async function validateAndFixFeatures(
       }
     }
 
+    // R2: 跨 loop cache check — 若 ALL issues 已多次嘗試過 → skip LLM
+    const r2Enabled = process.env.R2_FIX_ATTEMPT_CACHE !== 'false'
+    if (r2Enabled && trackingContext?.conversationId) {
+      const { buildFingerprint, shouldSkipLlmFix } = await import('../lib/fix-attempt-cache')
+      const fingerprints = featuresNeedingFix.flatMap(f =>
+        f.issues.map(err =>
+          buildFingerprint({
+            loopName: 'validation',
+            featureName: f.name,
+            issueKind: 'validate_error',
+            keyContent: err.replace(/L\d+:/g, 'L?:'),  // 同 errorIdentitySet 邏輯
+          })
+        )
+      )
+      const skipCheck = await shouldSkipLlmFix(trackingContext.conversationId, fingerprints)
+      if (skipCheck.skip) {
+        logger.warn({
+          round: round + 1,
+          reason: skipCheck.reason,
+          fingerprintCount: fingerprints.length,
+        }, 'R2: feature-validation LLM 修補 skip（cache hit）')
+        const { recordTelemetry } = await import('./skill-telemetry')
+        recordTelemetry({
+          skillName: 'feature_gate',
+          eventType: 'cross_loop_fix_skipped',
+          patternKey: 'feature_validation_skipped_by_cache',
+          outcome: 'blocked',
+          phase: 'feature_validation',
+          severity: 'warning',
+          userId: trackingContext.userId,
+          conversationId: trackingContext.conversationId,
+          payload: { fingerprintCount: fingerprints.length, attemptCounts: skipCheck.attemptCounts },
+        }).catch(() => {})
+        break
+      }
+    }
+
     const fixResult = await fixMultipleFeatures(
       featuresNeedingFix,
       resolvedItems || [],
@@ -533,6 +570,22 @@ export async function validateAndFixFeatures(
     if (!fixResult.success || !fixResult.fixedFeatures) {
       logger.warn({ round: round + 1, error: fixResult.error }, '修復失敗')
       break
+    }
+
+    // R2: 記錄這輪嘗試（所有 fingerprints 記為已嘗試 — succeeded 由下輪 validate 判斷）
+    if (r2Enabled && trackingContext?.conversationId) {
+      const { buildFingerprint, recordBatchAttempt } = await import('../lib/fix-attempt-cache')
+      const recordedFps = featuresNeedingFix.flatMap(f =>
+        f.issues.map(err =>
+          buildFingerprint({
+            loopName: 'validation',
+            featureName: f.name,
+            issueKind: 'validate_error',
+            keyContent: err.replace(/L\d+:/g, 'L?:'),
+          })
+        )
+      )
+      recordBatchAttempt(trackingContext.conversationId, [], recordedFps).catch(() => {})
     }
 
     // 合併修復結果：替換被修復的 Features，保留未修改的

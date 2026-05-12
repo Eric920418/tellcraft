@@ -65,6 +65,7 @@ export type EventType =
   | 'spec_first_repair_success'   // L31.J Phase 3a: fixFailingSpec 成功
   | 'conversation_budget_exceeded' // L31.M: per-conversation budget cap 觸發
   | 'fix_convergence_failed'       // L31.O: fix loop 連續兩輪錯誤指紋一致 → LLM 修不動
+  | 'cross_loop_fix_skipped'       // R2: 跨 loop cache hit，skip LLM 修補
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'

@@ -385,6 +385,10 @@ const orchestratorQueue = new Queue('orchestrator', {
 setOrchestratorQueue(orchestratorQueue)
 setRedisClient(generalRedis)
 
+// R2: 注入 Redis 給 fix-attempt-cache（跨 loop fingerprint cache，BDD pipeline only）
+// 沒注入 → cache 退化為 no-op，fail-open（4 個 loop 各自跑 LLM）
+import('./lib/fix-attempt-cache').then(m => m.setFixAttemptCacheRedis(generalRedis))
+
 // 初始化 LINE Bot Handler（注入 Messaging Client + 隊列）
 if (env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
   const lineMessagingClient = new lineMessagingApi.MessagingApiClient({

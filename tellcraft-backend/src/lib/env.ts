@@ -80,6 +80,10 @@ const envSchema = z.object({
   PHASE_3C_DRY_RUN_THEN_VALIDATION: z.stringbool().default(true), // kill switch：設 false 跳過 Then-DB 驗證
   // L31.M: Per-Conversation Budget Cap — 純安全網（拉高到 $20，正常對話遇不到；主要防線是 fix loop 收斂偵測）
   MAX_CONVERSATION_COST_USD: z.coerce.number().default(20.0),    // 對話累計 cost 上限（任何 fix path 前 check llm_usage）
+  // R1: Check 12/14/15/16 確定性修補 — 取代 LLM，零 token cost
+  R1_DETERMINISTIC_ALIGNMENT_FIX: z.stringbool().default(true),
+  // R2: 跨 loop fingerprint cache — BDD pipeline 4 loop 共享 issue 嘗試紀錄
+  R2_FIX_ATTEMPT_CACHE: z.stringbool().default(true),
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開

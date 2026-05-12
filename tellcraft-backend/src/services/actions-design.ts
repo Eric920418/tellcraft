@@ -697,10 +697,41 @@ ${(response.content || '').slice(0, 2000)}
 
   logger.warn({ errors: validation.errors, missingFeatures }, '驗證失敗，進入修復流程')
 
-  // Layer 3: 增強修復（最多 2 輪 + 收斂偵測）
+  // Layer 3: 增強修復（最多 2 輪 + 收斂偵測 + R2 cross-loop cache）
   const MAX_FIX_ROUNDS = 2
   let prevErrorFingerprint: string | null = null
   for (let round = 1; round <= MAX_FIX_ROUNDS; round++) {
+    // R2: 跨 loop cache check — 全 issue 已多次嘗試 → skip LLM
+    const r2Enabled = process.env.R2_FIX_ATTEMPT_CACHE !== 'false'
+    if (r2Enabled && trackingContext?.conversationId) {
+      const { buildFingerprint, shouldSkipLlmFix } = await import('../lib/fix-attempt-cache')
+      const fingerprints = validation.errors.map(err =>
+        buildFingerprint({
+          loopName: 'actions_design',
+          featureName: '(actions.yml)',
+          issueKind: err.includes('沒有對應的 Action') ? 'missing_action' : 'yaml_error',
+          keyContent: err,
+        })
+      )
+      const skipCheck = await shouldSkipLlmFix(trackingContext.conversationId, fingerprints)
+      if (skipCheck.skip) {
+        logger.warn({ round, reason: skipCheck.reason }, 'R2: actions_design LLM 修補 skip（cache hit）')
+        const { recordTelemetry } = await import('./skill-telemetry')
+        recordTelemetry({
+          skillName: 'actions_design',
+          eventType: 'cross_loop_fix_skipped',
+          patternKey: 'actions_design_skipped_by_cache',
+          outcome: 'blocked',
+          phase: 'actions_design_fix',
+          severity: 'warning',
+          userId: trackingContext.userId,
+          conversationId: trackingContext.conversationId,
+          payload: { fingerprintCount: fingerprints.length, attemptCounts: skipCheck.attemptCounts },
+        }).catch(() => {})
+        break
+      }
+    }
+
     // L31.O: 收斂偵測 — 上一輪和這一輪錯誤指紋一樣 → LLM 修不動，提前停
     const currentFingerprint = [...validation.errors].sort().join('|')
     if (prevErrorFingerprint !== null && currentFingerprint === prevErrorFingerprint) {

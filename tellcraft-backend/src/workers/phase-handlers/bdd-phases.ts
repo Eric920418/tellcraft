@@ -3194,8 +3194,9 @@ async function _completeSpecPhaseInner(
           neonConnectionString: neonRow.rows[0].neon_connection_string,
         })
 
-        // Dry-run 失敗 → LLM 修復 → 重跑（最多 2 輪）
+        // Dry-run 失敗 → LLM 修復 → 重跑（最多 2 輪 + R2 cross-loop cache）
         if (!dryRunResult.passed) {
+          const r2Enabled = process.env.R2_FIX_ATTEMPT_CACHE !== 'false'
           for (let round = 0; round < 2; round++) {
             logger.info({ round: round + 1, failedCount: dryRunResult.failedFeatures.length }, 'Dry-run 失敗，嘗試修復...')
             const fixInput = dryRunResult.failedFeatures.map(f => ({
@@ -3205,9 +3206,57 @@ async function _completeSpecPhaseInner(
               issues: f.errors,
             }))
 
+            // R2: 跨 loop cache check — 全 issue 已多次嘗試 → skip LLM
+            if (r2Enabled && trackingContext?.conversationId) {
+              const { buildFingerprint, shouldSkipLlmFix } = await import('../../lib/fix-attempt-cache')
+              const fingerprints = fixInput.flatMap(f =>
+                f.issues.map(err =>
+                  buildFingerprint({
+                    loopName: 'dry_run',
+                    featureName: f.name,
+                    issueKind: 'dry_run_error',
+                    keyContent: err,
+                  })
+                )
+              )
+              const skipCheck = await shouldSkipLlmFix(trackingContext!.conversationId, fingerprints)
+              if (skipCheck.skip) {
+                logger.warn({ round: round + 1, reason: skipCheck.reason }, 'R2: dry_run LLM 修補 skip（cache hit）')
+                const { recordTelemetry } = await import('../../services/skill-telemetry')
+                recordTelemetry({
+                  skillName: 'feature_gate',
+                  eventType: 'cross_loop_fix_skipped',
+                  patternKey: 'dry_run_skipped_by_cache',
+                  outcome: 'blocked',
+                  phase: 'feature_dry_run',
+                  severity: 'warning',
+                  userId: trackingContext!.userId,
+                  conversationId: trackingContext!.conversationId,
+                  payload: { fingerprintCount: fingerprints.length, attemptCounts: skipCheck.attemptCounts },
+                }).catch(() => {})
+                break
+              }
+            }
+
             const dryRunResolvedItems = session.data?.resolvedItems || []
             const fixResult = await fixMultipleFeatures(fixInput, dryRunResolvedItems, schemaSql, entityMapping, trackingContext)
             if (!fixResult.success || !fixResult.fixedFeatures) break
+
+            // R2: 記錄這輪嘗試
+            if (r2Enabled && trackingContext?.conversationId) {
+              const { buildFingerprint, recordBatchAttempt } = await import('../../lib/fix-attempt-cache')
+              const recordedFps = fixInput.flatMap(f =>
+                f.issues.map(err =>
+                  buildFingerprint({
+                    loopName: 'dry_run',
+                    featureName: f.name,
+                    issueKind: 'dry_run_error',
+                    keyContent: err,
+                  })
+                )
+              )
+              recordBatchAttempt(trackingContext!.conversationId, [], recordedFps).catch(() => {})
+            }
 
             // 更新 features 陣列
             for (const fixed of fixResult.fixedFeatures) {
