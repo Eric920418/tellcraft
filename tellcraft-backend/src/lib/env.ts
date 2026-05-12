@@ -90,6 +90,8 @@ const envSchema = z.object({
   R3A_FIX_CHECK_CONSTRAINT: z.stringbool().default(true),
   // R3-B: formulation.ts dynamic block 加 FK + CHECK constraint hints
   R3B_PROMPT_HINTS: z.stringbool().default(true),
+  // R4: Check 5.5 cross_scenario_var_reference 確定性修補
+  R4_CROSS_SCENARIO_VAR_FIX: z.stringbool().default(true),
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開

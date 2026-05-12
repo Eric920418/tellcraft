@@ -12,6 +12,7 @@ import {
   extractEntitySetupWithData,
   extractEntityValidateSteps,
   splitFeatureIntoScenarios,
+  extractScenariosWithScope,
   type AlignmentIssue,
   type EntitySetupWithData,
 } from './feature-alignment-gate'
@@ -1297,4 +1298,206 @@ export function autoFixCheckConstraintViolation(
   }
 
   return { content: lines.join('\n'), fixedValues, skipped }
+}
+
+// ============================================================
+// R4: Check 5.5 cross_scenario_var_reference deterministic 修補
+// ============================================================
+
+/**
+ * 找指定 scenario 內，第一個 When/Then 之前的行 index（給 Given step 插入用）
+ * 若 scenario 沒有 When/Then 則回 scenario block 末尾
+ * 回傳 null 表 scenario 不存在
+ */
+function findScenarioGivenInsertionPoint(
+  lines: string[],
+  scenarioName: string,
+): { lineIdx: number; indent: string; hasExistingGiven: boolean } | null {
+  let inScenario = false
+  let scenarioHeaderIdx = -1
+  let firstWhenThenIdx = -1
+  let hasExistingGiven = false
+
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    const sm = t.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
+    if (sm) {
+      if (inScenario) {
+        // 已進入下一個 scenario，當前 scenario 結束（沒有 When/Then 的 edge case）
+        break
+      }
+      if (sm[1].trim() === scenarioName) {
+        inScenario = true
+        scenarioHeaderIdx = i
+      }
+      continue
+    }
+    if (!inScenario) continue
+    if (/^(?:Given|And)\b/.test(t)) {
+      hasExistingGiven = true
+    }
+    if (/^(?:When|Then)\b/.test(t)) {
+      firstWhenThenIdx = i
+      break
+    }
+  }
+  if (!inScenario) return null
+  // scenario header 的縮排 + 2 = step 縮排
+  const headerIndent = lines[scenarioHeaderIdx].match(/^(\s*)/)?.[1] ?? ''
+  const stepIndent = headerIndent + '  '
+  const insertIdx = firstWhenThenIdx !== -1 ? firstWhenThenIdx : lines.length
+  return { lineIdx: insertIdx, indent: stepIndent, hasExistingGiven }
+}
+
+/**
+ * 從 content 找到「捕獲指定 var」的 entity_setup 步驟（含完整 table 行）
+ * 回傳 step block 文字 + 行 index 範圍
+ */
+function findEntitySetupCapturingVar(
+  content: string,
+  varName: string,
+): { stepBlock: string[]; sourceScenarioName: string | null } | null {
+  const lines = content.split('\n')
+  // 先用 extractEntitySetupWithData 找所有 entity_setup
+  const setupSteps = extractEntitySetupWithData(content)
+  for (const step of setupSteps) {
+    // 該 step 的 dataRows cell 是否含 `<varName`
+    const capturedHere = step.dataRows.some(row =>
+      row.cells.some(cell => {
+        const c = cell.trim()
+        return c === `<${varName}` || c.startsWith(`<${varName}`)
+      }),
+    )
+    if (!capturedHere) continue
+
+    // 提取整個 step block：stepLine（1-based）+ 後續所有 |... 行
+    const startIdx = step.stepLine - 1  // 0-based
+    const tableEndIdx = step.dataRows.length > 0
+      ? step.dataRows[step.dataRows.length - 1].line - 1  // 0-based
+      : startIdx
+    const block: string[] = []
+    // 從 startIdx 開始，但只取「step line + table rows」
+    block.push(lines[startIdx])
+    for (let i = startIdx + 1; i <= tableEndIdx; i++) {
+      block.push(lines[i])
+    }
+    // 找 source scenario name（用 splitFeatureIntoScenarios 判定）
+    let sourceScenarioName: string | null = null
+    const { scenarios } = splitFeatureIntoScenarios(content)
+    for (const sc of scenarios) {
+      if (step.stepLine >= sc.startLine && step.stepLine <= sc.endLine) {
+        sourceScenarioName = sc.scenarioName
+        break
+      }
+    }
+    return { stepBlock: block, sourceScenarioName }
+  }
+  return null
+}
+
+/**
+ * R4 Helper: Check 5.5 cross_scenario_var_reference
+ *
+ * Scenario X 引用 $varName 但 varName 只在 Scenario Y 宣告 →
+ * 複製 Scenario Y 的 entity_setup 步驟到 Scenario X 的 Given
+ *
+ * 策略：複製不移動 — Scenario Y 自己仍保有宣告，避免破壞既有 scenario
+ * 重複資料 INSERT 在 SpecFormula 是 OK 的（每 scenario 獨立 DB state）
+ */
+export function autoFillCrossScenarioVarReference(
+  content: string,
+  issues: AlignmentIssue[],
+): {
+  content: string
+  fixedRefs: Array<{ targetScenario: string; varName: string; sourceScenario: string | null }>
+  skipped: Array<{ ref: string; reason: string }>
+} {
+  const targets = issues.filter(
+    i => i.checkName === 'cross_scenario_var_reference' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, fixedRefs: [], skipped: [] }
+  }
+
+  let workingContent = content
+  const fixedRefs: Array<{ targetScenario: string; varName: string; sourceScenario: string | null }> = []
+  const skipped: Array<{ ref: string; reason: string }> = []
+
+  // 已處理（targetScenario, varName）避免重複插入
+  const processed = new Set<string>()
+
+  // 防爆 dedupe：同 targetScenario 已插入過的 step block hash → 不重複
+  const insertedStepHashes = new Set<string>()
+
+  for (const issue of targets) {
+    // description: `Scenario "X" (line N) 引用 "$varName" 未在該 scenario 的 Background 或 Given 宣告`
+    const m = issue.description.match(/Scenario "([^"]+)" \(line \d+\) 引用 "\$([^"]+)"/)
+    if (!m) {
+      skipped.push({ ref: '?', reason: 'description 格式不符' })
+      continue
+    }
+    const targetScenarioName = m[1]
+    const varName = m[2]
+    const dedupeKey = `${targetScenarioName}::${varName}`
+    if (processed.has(dedupeKey)) continue
+    processed.add(dedupeKey)
+
+    // 找 source step（捕獲此 var 的 entity_setup）
+    const source = findEntitySetupCapturingVar(workingContent, varName)
+    if (!source) {
+      skipped.push({ ref: `${targetScenarioName}.$${varName}`, reason: '找不到 source（無 <varName 捕獲）' })
+      continue
+    }
+    if (source.sourceScenarioName === targetScenarioName) {
+      skipped.push({ ref: `${targetScenarioName}.$${varName}`, reason: 'source 已在 target scenario 內（誤判）' })
+      continue
+    }
+
+    // 找 target scenario 的插入點
+    const lines = workingContent.split('\n')
+    const insertion = findScenarioGivenInsertionPoint(lines, targetScenarioName)
+    if (!insertion) {
+      skipped.push({ ref: `${targetScenarioName}.$${varName}`, reason: '找不到 target scenario' })
+      continue
+    }
+
+    // 檢查同 step block 是否已插入過（防 N 個 var 從同 source 來重複插）
+    const blockHash = `${targetScenarioName}::${source.stepBlock.join('\n')}`
+    if (insertedStepHashes.has(blockHash)) {
+      // 已從同 source 同 step 拉過了，不重複
+      fixedRefs.push({ targetScenario: targetScenarioName, varName, sourceScenario: source.sourceScenarioName })
+      continue
+    }
+    insertedStepHashes.add(blockHash)
+
+    // 重新縮排 + Given/And 關鍵字調整
+    // source 的第一行格式：`<indent>Given 準備一個 X, with table:` 或 `<indent>And 準備一個 X, ...`
+    // 改成 target 的縮排 + 適當關鍵字
+    const newStepBlock: string[] = []
+    for (let k = 0; k < source.stepBlock.length; k++) {
+      const line = source.stepBlock[k]
+      const trimmed = line.trim()
+      if (k === 0) {
+        // step header line
+        const keyword = insertion.hasExistingGiven ? 'And' : 'Given'
+        const cleaned = trimmed.replace(/^(?:Given|And|When|Then|But)\s+/, '')
+        newStepBlock.push(`${insertion.indent}${keyword} ${cleaned}`)
+      } else {
+        // table line — 換縮排即可
+        newStepBlock.push(`${insertion.indent}  ${trimmed}`)
+      }
+    }
+
+    // 插入
+    const newLines = [
+      ...lines.slice(0, insertion.lineIdx),
+      ...newStepBlock,
+      ...lines.slice(insertion.lineIdx),
+    ]
+    workingContent = newLines.join('\n')
+
+    fixedRefs.push({ targetScenario: targetScenarioName, varName, sourceScenario: source.sourceScenarioName })
+  }
+
+  return { content: workingContent, fixedRefs, skipped }
 }

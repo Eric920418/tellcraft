@@ -2074,6 +2074,21 @@ async function autoFixFeatures(
         }
       }
 
+      // R4: Check 5.5 cross_scenario_var_reference（複製跨 scenario 引用的 entity_setup 到本 scenario Given）
+      const r4Enabled = process.env.R4_CROSS_SCENARIO_VAR_FIX !== 'false'
+      if (r4Enabled) {
+        try {
+          const { autoFillCrossScenarioVarReference } = await import('./deterministic-feature-fix')
+          const r = autoFillCrossScenarioVarReference(curContent, featureIssues)
+          if (r.fixedRefs.length > 0) {
+            curContent = r.content
+            for (const f of r.fixedRefs) allFixed.push({ checkName: 'cross_scenario_var_reference', field: `${f.varName}@${f.targetScenario}` })
+          }
+        } catch (e) {
+          logger.warn({ err: e, feature: displayName }, 'R4: autoFillCrossScenarioVarReference 失敗，fallthrough')
+        }
+      }
+
       if (allFixed.length > 0) {
         workingFeatures[fi] = { ...workingFeatures[fi], content: curContent }
         r1FixCount += allFixed.length
