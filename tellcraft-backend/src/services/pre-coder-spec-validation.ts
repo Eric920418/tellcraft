@@ -115,6 +115,7 @@ export async function runPreCoderSpecValidation(
   let totalLlmCostUsd = 0
   let totalLlmCalls = 0
   let rounds = 0
+  let prevFailureFingerprint: string | null = null
   let lastResult: { passed: boolean; unexpectedFailures: RedPhaseUnexpectedFailure[] } = {
     passed: false, unexpectedFailures: [],
   }
@@ -172,6 +173,32 @@ export async function runPreCoderSpecValidation(
 
     // 最後一輪不修（因為修完無法重驗）
     if (round === maxFixRounds - 1) break
+
+    // L31.O: 收斂偵測 — 跟上輪 failure fingerprint 完全相同 → LLM 修不動，提前停
+    const currentFingerprint = redResult.unexpectedFailures
+      .map(f => `${f.featureName}|${f.scenarioName ?? ''}|${f.failureType}|${(f.error ?? '').slice(0, 100)}`)
+      .sort().join('::')
+    if (prevFailureFingerprint !== null && currentFingerprint === prevFailureFingerprint) {
+      logger.warn({
+        round: round + 1,
+        unexpectedCount: redResult.unexpectedFailures.length,
+        sampleFailures: redResult.unexpectedFailures.slice(0, 3).map(f => f.featureName + '/' + f.failureType),
+      }, 'pre-coder-spec-validation: 連續兩輪 failure 指紋一致，LLM 修不動，提前停止')
+      recordTelemetry({
+        skillName: 'red_phase',
+        eventType: 'fix_convergence_failed',
+        patternKey: 'identical_failures_across_rounds',
+        outcome: 'blocked',
+        phase: 'pre_coder_spec_validation',
+        fixRounds: round,
+        severity: 'warning',
+        userId: input.trackingContext?.userId,
+        conversationId: input.trackingContext?.conversationId,
+        payload: { unexpectedCount: redResult.unexpectedFailures.length, totalLlmCalls, totalLlmCostUsd },
+      }).catch(() => {})
+      break
+    }
+    prevFailureFingerprint = currentFingerprint
 
     // 對 BDD-side 失敗呼叫 fixFailingSpec
     // 按 feature 分組

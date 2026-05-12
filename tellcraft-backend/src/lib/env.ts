@@ -78,10 +78,8 @@ const envSchema = z.object({
   PHASE_3B_PRE_CODER_VALIDATION: z.stringbool().default(true),   // kill switch：設 false 退回舊 RED Phase advisory 行為（不自動修）
   // L31.L Phase 3c: Feature-Dry-Run Then-DB Validation — entity_setup 後 SELECT 比對 Then 期望（純 SQL 0 LLM cost）
   PHASE_3C_DRY_RUN_THEN_VALIDATION: z.stringbool().default(true), // kill switch：設 false 跳過 Then-DB 驗證
-  // L31.M: Per-Conversation Budget Cap — 跨流程 cost guardrail（Phase 5 只擋 alignment gate 內，這擋全局）
-  MAX_CONVERSATION_COST_USD: z.coerce.number().default(5.0),     // 對話累計 cost 上限（任何 fix path 前 check llm_usage）
-  // L31.N Layer 3: 全局 conversation 運行時間上限 — 防無限 loop / retry
-  MAX_CONVERSATION_RUNTIME_MIN: z.coerce.number().default(30),   // 分鐘，從 MIN(llm_usage.created_at) 起算
+  // L31.M: Per-Conversation Budget Cap — 純安全網（拉高到 $20，正常對話遇不到；主要防線是 fix loop 收斂偵測）
+  MAX_CONVERSATION_COST_USD: z.coerce.number().default(20.0),    // 對話累計 cost 上限（任何 fix path 前 check llm_usage）
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開

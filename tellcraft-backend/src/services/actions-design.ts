@@ -2,7 +2,6 @@ import * as yaml from 'js-yaml'
 import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
-import { assertCanCallLlm } from '../lib/conversation-budget'
 
 const logger = createLogger('actions-design')
 
@@ -74,12 +73,6 @@ async function callClaude(
   error?: string
 }> {
   let lastError = 'Unknown error'
-
-  // L31.N: budget / timeout / blocked flag guard
-  const guard = await assertCanCallLlm(trackingContext?.conversationId, 'actions_design')
-  if (!guard.allowed) {
-    return { success: false, error: guard.reason }
-  }
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
@@ -704,9 +697,34 @@ ${(response.content || '').slice(0, 2000)}
 
   logger.warn({ errors: validation.errors, missingFeatures }, '驗證失敗，進入修復流程')
 
-  // Layer 3: 增強修復（最多 2 輪）
+  // Layer 3: 增強修復（最多 2 輪 + 收斂偵測）
   const MAX_FIX_ROUNDS = 2
+  let prevErrorFingerprint: string | null = null
   for (let round = 1; round <= MAX_FIX_ROUNDS; round++) {
+    // L31.O: 收斂偵測 — 上一輪和這一輪錯誤指紋一樣 → LLM 修不動，提前停
+    const currentFingerprint = [...validation.errors].sort().join('|')
+    if (prevErrorFingerprint !== null && currentFingerprint === prevErrorFingerprint) {
+      logger.warn(
+        { round, errorCount: validation.errors.length, sampleErrors: validation.errors.slice(0, 3) },
+        'generateActionsYml: 連續兩輪錯誤指紋一致，LLM 修不動，提前停止修復迴圈'
+      )
+      const { recordTelemetry } = await import('./skill-telemetry')
+      recordTelemetry({
+        skillName: 'actions_design',
+        eventType: 'fix_convergence_failed',
+        patternKey: 'identical_errors_across_rounds',
+        outcome: 'blocked',
+        phase: 'actions_design_fix',
+        fixRounds: round - 1,
+        severity: 'warning',
+        userId: trackingContext?.userId,
+        conversationId: trackingContext?.conversationId,
+        payload: { errorCount: validation.errors.length, sampleErrors: validation.errors.slice(0, 3) },
+      }).catch(() => {})
+      break
+    }
+    prevErrorFingerprint = currentFingerprint
+
     // 區分錯誤類型
     const summaryMissingErrors = validation.errors.filter(e => e.includes('沒有對應的 Action（summary 不匹配）'))
     const otherErrors = validation.errors.filter(e => !e.includes('沒有對應的 Action（summary 不匹配）'))

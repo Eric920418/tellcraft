@@ -27,7 +27,6 @@ import { generateAdminPanel } from './coder-admin-templates'
 import { generateUploadFiles } from './coder-upload-templates'
 import { getTemplate } from './coder-templates'
 import { tryDeterministicFix } from './coder-deterministic-fixes'
-import { assertCanCallLlm } from '../lib/conversation-budget'
 export { detectAuthInSchema, detectAuthCapabilities, generateAuthSystem, injectSessionProvider } from './coder-auth-templates'
 export { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-email-templates'
 export { generateAdminPanel } from './coder-admin-templates'
@@ -132,12 +131,6 @@ async function callClaude(
   let lastError = 'Unknown error'
   const baseMaxTokens = options.maxTokens || 8192
   const effectiveMaxTokens = options.thinking ? baseMaxTokens + options.thinking.budget_tokens : baseMaxTokens
-
-  // L31.N: budget / timeout / blocked flag guard
-  const guard = await assertCanCallLlm(trackingContext?.conversationId, options.thinking ? 'coder-generation+thinking' : 'coder-generation')
-  if (!guard.allowed) {
-    return { success: false, error: guard.reason }
-  }
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {

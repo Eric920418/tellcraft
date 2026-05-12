@@ -6,7 +6,6 @@ import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { extractNullableColumnsHint } from './schema-derivation'
-import { assertCanCallLlm } from '../lib/conversation-budget'
 
 const logger = createLogger('formulation')
 
@@ -218,12 +217,6 @@ async function callClaude(
   error?: string
 }> {
   let lastError: string = 'Unknown error'
-
-  // L31.N: budget / timeout / blocked flag guard
-  const guard = await assertCanCallLlm(trackingContext?.conversationId, 'formulation_generate_feature')
-  if (!guard.allowed) {
-    return { success: false, error: guard.reason }
-  }
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
