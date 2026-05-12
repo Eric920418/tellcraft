@@ -46,10 +46,13 @@ function extractAnnotations(content: string): FeatureAnnotations {
 /**
  * 修 actionsYml：把 Feature 註解的 method/path 寫進對應 action 的 method:/path: 欄位
  *
- * 規則：
- * - Feature 註解有 method 且為 GET/POST/PUT/PATCH/DELETE 之一 → 寫入 action.method
- * - Feature 註解有 path 且不為空 → 寫入 action.path
- * - 已有 method:/path: 的不覆寫（trust existing source-of-truth）
+ * 規則（authoritative — Feature 註解是 user ground truth）：
+ * - Feature 註解有 method 且為 GET/POST/PUT/PATCH/DELETE 之一 → **強制覆寫** action.method
+ * - Feature 註解有 path 且不為空 → **強制覆寫** action.path
+ * - 既有值與 Feature 註解一致 → 不動
+ *
+ * 為何 authoritative：之前是 conservative（只填 missing）導致 LLM 寫錯 method/path
+ * 時不會被修正（method_mismatch / path_mismatch 雪崩來源 — bb0d1081 案例）。
  *
  * 失敗（YAML parse 失敗 / 沒有 actions 區段）→ return null
  */
@@ -85,16 +88,34 @@ export function autoFixActionsMethodPathFromFeatures(
     if (idx === undefined) continue
     const action = actions[idx]
 
-    if (anno.method && validMethods.has(anno.method) && typeof action.method !== 'string') {
-      action.method = anno.method
-      anyChange = true
-      changes.push({ type: 'method_set', target: anno.actionName, detail: `method: ${anno.method}` })
+    if (anno.method && validMethods.has(anno.method)) {
+      const currentMethod = typeof action.method === 'string' ? action.method.toUpperCase() : undefined
+      if (currentMethod !== anno.method) {
+        action.method = anno.method
+        anyChange = true
+        changes.push({
+          type: 'method_set',
+          target: anno.actionName,
+          detail: currentMethod
+            ? `method: ${currentMethod} → ${anno.method}（authoritative override）`
+            : `method: ${anno.method}（注入）`,
+        })
+      }
     }
 
-    if (anno.path && anno.path.startsWith('/') && typeof action.path !== 'string') {
-      action.path = anno.path
-      anyChange = true
-      changes.push({ type: 'path_set', target: anno.actionName, detail: `path: ${anno.path}` })
+    if (anno.path && anno.path.startsWith('/')) {
+      const currentPath = typeof action.path === 'string' ? action.path : undefined
+      if (currentPath !== anno.path) {
+        action.path = anno.path
+        anyChange = true
+        changes.push({
+          type: 'path_set',
+          target: anno.actionName,
+          detail: currentPath
+            ? `path: ${currentPath} → ${anno.path}（authoritative override）`
+            : `path: ${anno.path}（注入）`,
+        })
+      }
     }
   }
 

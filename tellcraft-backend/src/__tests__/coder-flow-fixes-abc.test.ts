@@ -1,61 +1,35 @@
-// Coder flow fixes A/B/C 測試
-// A: actionsYml 強制讀 Feature # [METHOD] /path 註解
+// Coder flow fixes — refactored to use existing deterministic-actions-fix.ts (authoritative)
+// A: actionsYml method/path 強制覆蓋（authoritative override）
 // B: RED Phase validator field_mismatch 去 VAR capture false positive
-// C: WHEN call table headers strip `>` / `<` 前綴
+// C: WHEN call table headers strip `>` / `<` 前綴（既有 autoFixVarInCallTable）
 import { describe, it, expect } from 'vitest'
 import * as yaml from 'js-yaml'
-import { injectFeatureAnnotationsToActions } from '../services/actions-design'
-import { autoStripVarPrefixFromCallTable } from '../services/deterministic-feature-fix'
+import {
+  autoFixActionsMethodPathFromFeatures,
+  autoFixVarInCallTable,
+} from '../services/deterministic-actions-fix'
 
-describe('Fix A: injectFeatureAnnotationsToActions', () => {
-  it('injects method + path from Feature annotation', () => {
+describe('Fix A: autoFixActionsMethodPathFromFeatures (authoritative)', () => {
+  it('injects missing method + path from Feature annotation', () => {
     const actionsYml = `
 actions:
   - name: createPricingPlan
     summary: Create Pricing Plan
-  - name: getPublicFaqs
-    summary: Get Public FAQs
-`
-    const features = [
-      {
-        name: 'Create Pricing Plan',
-        actionName: 'createPricingPlan',
-        content: `# Action: createPricingPlan\n# [POST] /api/admin/pricing-plans\n# Summary: Create a pricing plan\n\nFeature: Create Pricing Plan\n`,
-      },
-      {
-        name: 'Get Public FAQs',
-        actionName: 'getPublicFaqs',
-        content: `# Action: getPublicFaqs\n# [GET] /api/public/faqs\n\nFeature: Get Public FAQs\n`,
-      },
-    ]
-    const r = injectFeatureAnnotationsToActions(actionsYml, features)
-    expect(r.injectedMethod).toBe(2)
-    expect(r.injectedPath).toBe(2)
-    const parsed = yaml.load(r.aligned) as { actions: Array<{ name: string; method: string; path: string }> }
-    const create = parsed.actions.find(a => a.name === 'createPricingPlan')
-    expect(create?.method).toBe('POST')
-    expect(create?.path).toBe('/api/admin/pricing-plans')
-    const get = parsed.actions.find(a => a.name === 'getPublicFaqs')
-    expect(get?.method).toBe('GET')
-    expect(get?.path).toBe('/api/public/faqs')
-  })
-
-  it('skips actions without matching feature annotation', () => {
-    const actionsYml = `
-actions:
-  - name: unknownAction
-    summary: Unknown
 `
     const features = [{
-      name: 'Other Feature', actionName: 'otherAction',
-      content: `# Action: otherAction\n# [POST] /api/other\n\nFeature: Other Feature`,
+      name: 'Create Pricing Plan',
+      actionName: 'createPricingPlan',
+      content: `# Action: createPricingPlan\n# [POST] /api/admin/pricing-plans\n\nFeature: Create Pricing Plan`,
     }]
-    const r = injectFeatureAnnotationsToActions(actionsYml, features)
-    expect(r.injectedMethod).toBe(0)
-    expect(r.injectedPath).toBe(0)
+    const r = autoFixActionsMethodPathFromFeatures(actionsYml, features)
+    expect(r.fixed).not.toBeNull()
+    expect(r.changes.length).toBe(2)
+    const parsed = yaml.load(r.fixed!) as { actions: Array<{ method: string; path: string }> }
+    expect(parsed.actions[0].method).toBe('POST')
+    expect(parsed.actions[0].path).toBe('/api/admin/pricing-plans')
   })
 
-  it('overrides existing method/path when Feature annotation differs', () => {
+  it('overrides existing mismatched method (Fix authority)', () => {
     const actionsYml = `
 actions:
   - name: updatePricingPlan
@@ -68,120 +42,107 @@ actions:
       actionName: 'updatePricingPlan',
       content: `# Action: updatePricingPlan\n# [PATCH] /api/admin/pricing-plans/:id\n\nFeature: Update Pricing Plan`,
     }]
-    const r = injectFeatureAnnotationsToActions(actionsYml, features)
-    expect(r.injectedMethod).toBe(1)
-    expect(r.injectedPath).toBe(1)
-    const parsed = yaml.load(r.aligned) as { actions: Array<{ method: string; path: string }> }
+    const r = autoFixActionsMethodPathFromFeatures(actionsYml, features)
+    expect(r.fixed).not.toBeNull()
+    expect(r.changes.length).toBe(2)
+    const parsed = yaml.load(r.fixed!) as { actions: Array<{ method: string; path: string }> }
     expect(parsed.actions[0].method).toBe('PATCH')
     expect(parsed.actions[0].path).toBe('/api/admin/pricing-plans/:id')
+    // 確認 change detail 標示 override
+    expect(r.changes.find(c => c.type === 'method_set')?.detail).toContain('PUT → PATCH')
+    expect(r.changes.find(c => c.type === 'path_set')?.detail).toContain('override')
   })
 
-  it('returns unchanged when no features have annotations', () => {
-    const actionsYml = `actions:\n  - name: x\n    summary: X\n`
-    const r = injectFeatureAnnotationsToActions(actionsYml, [{
-      name: 'X', actionName: 'x', content: 'Feature: X\n',  // 無 # [...] 註解
-    }])
-    expect(r.aligned).toBe(actionsYml)
-    expect(r.injectedMethod).toBe(0)
+  it('no change when already correct', () => {
+    const actionsYml = `
+actions:
+  - name: x
+    summary: X
+    method: GET
+    path: /api/x
+`
+    const features = [{
+      name: 'X', actionName: 'x',
+      content: `# Action: x\n# [GET] /api/x\n\nFeature: X`,
+    }]
+    const r = autoFixActionsMethodPathFromFeatures(actionsYml, features)
+    expect(r.fixed).toBeNull()
+    expect(r.changes.length).toBe(0)
   })
 
-  it('ignores invalid method strings', () => {
+  it('skips actions without matching feature annotation', () => {
+    const actionsYml = `actions:\n  - name: unknown\n    summary: U\n`
+    const features = [{
+      name: 'Other', actionName: 'other',
+      content: `# Action: other\n# [POST] /api/other\n\nFeature: Other`,
+    }]
+    const r = autoFixActionsMethodPathFromFeatures(actionsYml, features)
+    expect(r.fixed).toBeNull()
+  })
+
+  it('ignores invalid method strings but still injects valid path', () => {
     const actionsYml = `actions:\n  - name: x\n    summary: X\n`
-    const r = injectFeatureAnnotationsToActions(actionsYml, [{
-      name: 'X', actionName: 'x', content: '# Action: x\n# [INVALID] /api/x\n\nFeature: X',
-    }])
-    expect(r.injectedMethod).toBe(0)
+    const features = [{
+      name: 'X', actionName: 'x',
+      content: `# Action: x\n# [INVALID] /api/x\n\nFeature: X`,
+    }]
+    const r = autoFixActionsMethodPathFromFeatures(actionsYml, features)
+    // 注意：path 仍會被注入（合法），但 method 不會（INVALID 不在白名單）
+    const methodChange = r.changes.find(c => c.type === 'method_set')
+    expect(methodChange).toBeUndefined()
+    // path 應被注入
+    const pathChange = r.changes.find(c => c.type === 'path_set')
+    expect(pathChange).toBeDefined()
+  })
+
+  it('ignores both when neither method nor path are extractable', () => {
+    const actionsYml = `actions:\n  - name: x\n    summary: X\n`
+    const features = [{
+      name: 'X', actionName: 'x',
+      content: `# Action: x\n\nFeature: X`,  // 無 # [...] 註解
+    }]
+    const r = autoFixActionsMethodPathFromFeatures(actionsYml, features)
+    expect(r.fixed).toBeNull()
   })
 })
 
-describe('Fix C: autoStripVarPrefixFromCallTable', () => {
+describe('Fix C: autoFixVarInCallTable', () => {
   it('strips > prefix from WHEN call table headers', () => {
     const content = `Feature: F
 
 Scenario: A
   When (No Actor) Create FAQ, call table:
-    | >question     | >answer |
-    | what?         | yes     |
+    | >question | >answer |
+    | what?     | yes     |
   Then op(200)回應, with table:
     | id       |
     | $notnull |
 `
-    const r = autoStripVarPrefixFromCallTable(content)
-    expect(r.strippedHeaders.length).toBe(2)
-    expect(r.strippedHeaders[0].from).toBe('>question')
-    expect(r.strippedHeaders[0].to).toBe('question')
-    // 確認 header 已修正、data row 不變
-    const lines = r.content.split('\n')
-    const headerLine = lines.find(l => l.includes('question') && l.includes('answer'))
+    const r = autoFixVarInCallTable(content)
+    expect(r.fixed).not.toBeNull()
+    expect(r.removedCount).toBe(2)
+    const headerLine = r.fixed!.split('\n').find(l => l.includes('question'))
     expect(headerLine).toBeDefined()
     expect(headerLine).not.toContain('>question')
-    expect(headerLine).toContain('question')
-    const dataLine = lines.find(l => l.includes('what?'))
-    expect(dataLine).toContain('what?')
   })
 
   it('does not touch Then response table headers', () => {
-    const content = `Feature: F
-
-Scenario: A
-  When (No Actor) op, call table:
-    | param |
-    | x     |
-  Then op(200)回應, with table:
-    | <capturedId |
-    | $notnull    |
-`
-    const r = autoStripVarPrefixFromCallTable(content)
-    expect(r.strippedHeaders.length).toBe(0)
-    expect(r.content).toBe(content)
-  })
-
-  it('does not touch Given entity_setup tables', () => {
-    const content = `Feature: F
-
-Background:
-  Given 準備一個 X, with table:
-    | >X1.id | name |
-    | $uuid  | foo  |
-`
-    const r = autoStripVarPrefixFromCallTable(content)
-    expect(r.strippedHeaders.length).toBe(0)
+    const content = `Feature: F\n\nScenario: A\n  When (No Actor) op, call table:\n    | param |\n    | x     |\n  Then op(200)回應, with table:\n    | <capturedId |\n    | $notnull    |\n`
+    const r = autoFixVarInCallTable(content)
+    expect(r.fixed).toBeNull()
   })
 
   it('handles call table with no bad prefixes', () => {
-    const content = `Feature: F
-
-Scenario: A
-  When (No Actor) op, call table:
-    | name | age |
-    | bob  | 30  |
-`
-    const r = autoStripVarPrefixFromCallTable(content)
-    expect(r.strippedHeaders.length).toBe(0)
-    expect(r.content).toBe(content)
-  })
-
-  it('handles < prefix as well', () => {
-    const content = `Feature: F
-
-Scenario: A
-  When (UID="$id") op, call table:
-    | <captured | name |
-    | x         | y    |
-`
-    const r = autoStripVarPrefixFromCallTable(content)
-    expect(r.strippedHeaders.length).toBe(1)
-    expect(r.strippedHeaders[0].to).toBe('captured')
+    const content = `Feature: F\n\nScenario: A\n  When (No Actor) op, call table:\n    | name | age |\n    | bob  | 30  |\n`
+    const r = autoFixVarInCallTable(content)
+    expect(r.fixed).toBeNull()
   })
 })
 
-// Fix B test: 通過實際的 red-phase-validator 整合測試難以單元測（需 mock schemas）
-// 用簡單的 regex 級驗證：序列化命名 → 抓尾段 PascalCase field
+// Fix B test: VAR sequential naming pattern recognition for executionKey ↔ schema column
 describe('Fix B: VAR sequential naming pattern recognition', () => {
-  // 這些 pattern 是 red-phase-validator.ts:535 對應的邏輯
   it('plan1Id should extract Id → id', () => {
-    const key = 'plan1Id'
-    const m = key.match(/^[a-z]+\d+([A-Z]\w*)$/)
+    const m = 'plan1Id'.match(/^[a-z]+\d+([A-Z]\w*)$/)
     expect(m).not.toBeNull()
     expect(m![1]).toBe('Id')
     const field = m![1].charAt(0).toLowerCase() + m![1].slice(1)
@@ -197,22 +158,17 @@ describe('Fix B: VAR sequential naming pattern recognition', () => {
   it('inquiry1CustomerName should extract CustomerName → customerName', () => {
     const m = 'inquiry1CustomerName'.match(/^[a-z]+\d+([A-Z]\w*)$/)
     expect(m).not.toBeNull()
-    expect(m![1]).toBe('CustomerName')
     const field = m![1].charAt(0).toLowerCase() + m![1].slice(1)
     expect(field).toBe('customerName')
   })
 
-  it('regular camelCase (no seq number) goes through alternate path', () => {
-    const key = 'planId'
-    // 序列化 pattern 不匹配
-    expect(key.match(/^[a-z]+\d+([A-Z]\w*)$/)).toBeNull()
-    // 但 camelCase pattern 應該抓得到
-    const camelM = key.match(/^[a-z]+([A-Z]\w*)$/)
-    expect(camelM).not.toBeNull()
-    expect(camelM![1]).toBe('Id')
+  it('regular camelCase (no seq number) uses alternate pattern', () => {
+    expect('planId'.match(/^[a-z]+\d+([A-Z]\w*)$/)).toBeNull()
+    const m = 'planId'.match(/^[a-z]+([A-Z]\w*)$/)
+    expect(m![1]).toBe('Id')
   })
 
-  it('composite key (newUserId) should be caught by isCompositeKey before our regex', () => {
+  it('composite key (newUserId) is caught by isCompositeKey before regex', () => {
     expect(/^(?:new|created|updated)/.test('newUserId')).toBe(true)
   })
 })

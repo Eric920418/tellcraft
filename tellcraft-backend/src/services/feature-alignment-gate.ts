@@ -2089,21 +2089,8 @@ async function autoFixFeatures(
         }
       }
 
-      // Fix C: var_in_call_table — strip `>` / `<` 從 WHEN call table headers
-      // 主動 scan（不依賴 issue），因為 var_in_call_table 由 RED Phase 報，不在 alignment gate
-      const fixCEnabled = process.env.FIX_C_STRIP_VAR_IN_CALL_TABLE !== 'false'
-      if (fixCEnabled) {
-        try {
-          const { autoStripVarPrefixFromCallTable } = await import('./deterministic-feature-fix')
-          const r = autoStripVarPrefixFromCallTable(curContent)
-          if (r.strippedHeaders.length > 0) {
-            curContent = r.content
-            for (const h of r.strippedHeaders) allFixed.push({ checkName: 'var_in_call_table', field: `${h.from}→${h.to}` })
-          }
-        } catch (e) {
-          logger.warn({ err: e, feature: displayName }, 'Fix C: autoStripVarPrefixFromCallTable 失敗，fallthrough')
-        }
-      }
+      // Note: var_in_call_table 修補由 coder-phases.ts 的 autoFixVarInCallTable 處理
+      // （同個 deterministic 修補同時 cover 新對話 + retry 舊對話，避免重複實作）
 
       if (allFixed.length > 0) {
         workingFeatures[fi] = { ...workingFeatures[fi], content: curContent }
