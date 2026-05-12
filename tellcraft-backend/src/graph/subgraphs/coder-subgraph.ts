@@ -130,12 +130,63 @@ async function validateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
   // 4. RED Phase L1 — SDD 靜態規格驗證
   if (bddSession.features_content && bddSession.features_content.length > 0) {
     try {
-      const redResult = await executeRedPhase({
+      let redResult = await executeRedPhase({
         features: bddSession.features_content,
         actionsYml: bddSession.actions_yml_content,
         schemaSql: bddSession.schema_sql_content,
         entityMapping: bddSession.entity_mapping_content || '',
       })
+
+      // 4.5 Deterministic 修補 — method_mismatch / path_mismatch / var_in_call_table 0 LLM 修
+      // 同 coder-phases.ts:156-202 邏輯（之前漏在 LangGraph 路徑），舊對話 retry 也會被修
+      const hasDeterministicallyFixable = redResult.issues.some(i =>
+        i.issueType === 'method_mismatch' || i.issueType === 'path_mismatch' || i.issueType === 'var_in_call_table'
+      )
+      if (hasDeterministicallyFixable && bddSession.actions_yml_content) {
+        const { autoFixActionsAndFeatures } = await import('../../services/deterministic-actions-fix')
+        const fixResult = autoFixActionsAndFeatures(
+          bddSession.actions_yml_content,
+          bddSession.features_content,
+        )
+        if (fixResult.changes.length > 0) {
+          const setClauses: string[] = []
+          const params: unknown[] = []
+          if (fixResult.fixedActionsYml) {
+            bddSession.actions_yml_content = fixResult.fixedActionsYml
+            params.push(fixResult.fixedActionsYml)
+            setClauses.push(`actions_yml_content = $${params.length}`)
+          }
+          if (fixResult.fixedFeatures.size > 0) {
+            bddSession.features_content = (bddSession.features_content as Array<{ name: string; actionName: string; content: string }>).map(f => {
+              const fixed = fixResult.fixedFeatures.get(f.name)
+              return fixed ? { ...f, content: fixed } : f
+            })
+            params.push(JSON.stringify(bddSession.features_content))
+            setClauses.push(`features_content = $${params.length}`)
+          }
+          if (setClauses.length > 0) {
+            params.push(bddSession.id)
+            await db.query(
+              `UPDATE bdd_sessions SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`,
+              params,
+            )
+          }
+          logger.info({ changes: fixResult.changes }, 'LangGraph Coder: Deterministic actionsYml/Feature fix 已套用')
+          await sendMessage(conversationId, io, {
+            content: isChinese
+              ? `✓ Deterministic 修補：${fixResult.changes.length} 個 method/path/VAR 問題已自動修正（0 LLM）`
+              : `✓ Deterministic fix: ${fixResult.changes.length} method/path/VAR issue(s) auto-corrected (0 LLM)`,
+            stage: 'coder_generating',
+          })
+          // 重跑 RED Phase 確認修補生效
+          redResult = await executeRedPhase({
+            features: bddSession.features_content,
+            actionsYml: bddSession.actions_yml_content,
+            schemaSql: bddSession.schema_sql_content,
+            entityMapping: bddSession.entity_mapping_content || '',
+          })
+        }
+      }
 
       flowState = await getFlowState(redis, conversationId) || flowState
       flowState.coderRedPhasePassed = redResult.passed
@@ -144,14 +195,16 @@ async function validateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
       await saveFlowState(redis, conversationId, flowState)
 
       if (!redResult.passed) {
-        logger.warn({ errors: redResult.errors, warnings: redResult.warnings }, 'RED Phase 發現規格問題')
+        logger.warn({ errors: redResult.errors, warnings: redResult.warnings }, 'RED Phase 發現規格問題（deterministic 修後仍剩）')
         const report = formatRedPhaseReport(redResult)
         await sendMessage(conversationId, io, {
           content: isChinese
-            ? `⚠ 規格預檢發現 ${redResult.errors} 個問題，將嘗試在代碼生成後自動修復：\n${report}`
-            : `⚠ Spec pre-check found ${redResult.errors} issue(s), will attempt auto-fix after code generation:\n${report}`,
+            ? `⚠ 規格預檢仍有 ${redResult.errors} 個問題（deterministic 修補後剩餘），將交給 Pre-Coder Spec Validation 處理：\n${report}`
+            : `⚠ Spec pre-check still has ${redResult.errors} issue(s) after deterministic fix:\n${report}`,
           stage: 'coder_generating',
         })
+      } else {
+        logger.info({ warnings: redResult.warnings }, 'RED Phase 通過')
       }
     } catch (e) {
       logger.error({ error: e }, 'RED Phase 執行失敗，降級跳過')
