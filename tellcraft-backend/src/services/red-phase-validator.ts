@@ -520,15 +520,38 @@ export async function executeRedPhase(input: RedPhaseInput): Promise<RedPhaseRes
         // executionKey 通常是 camelCase（如 newUserId），對應 schema 的 snake_case（如 id、user_id）
         // 跳過明顯的 composite key（包含 new/created/updated 前綴的）
         const isCompositeKey = /^(?:new|created|updated)/.test(key)
-        if (!isCompositeKey && !fieldMatchesAnyColumn(key, allColumns)) {
-          issues.push({
-            featureName: displayName,
-            issueType: 'field_mismatch',
-            severity: 'warning',
-            description: `<${key}> executionKey 在 schema 中找不到對應的 column（checked: ${key}, ${toSnakeCase(key)}）`,
-            suggestion: `確認 <${key}> 是否為 LLM 生成的 composite 欄位名，或修正為 schema 中存在的 column 名`,
-          })
+        if (isCompositeKey) continue
+        if (fieldMatchesAnyColumn(key, allColumns)) continue
+
+        // Fix B: VAR 序列化命名（<entity><seq><Field> 如 plan1Id, faq2Title, inquiry1CustomerName）
+        // 提取尾段 PascalCase field → check schema
+        // 範例：plan1Id → Id → id ✓，faq2Title → Title → title ✓
+        const seqMatch = key.match(/^[a-z]+\d+([A-Z]\w*)$/)
+        if (seqMatch) {
+          const fieldSuffix = seqMatch[1].charAt(0).toLowerCase() + seqMatch[1].slice(1)
+          if (fieldMatchesAnyColumn(fieldSuffix, allColumns)) {
+            // 是 VAR 序列化命名捕捉合法 schema column，不算 mismatch
+            continue
+          }
         }
+
+        // Fix B: 單 entity prefix 命名（<entityField> 如 planId, inquiryStatus）
+        // 抓尾段 PascalCase field 比對
+        const camelMatch = key.match(/^[a-z]+([A-Z]\w*)$/)
+        if (camelMatch) {
+          const fieldSuffix = camelMatch[1].charAt(0).toLowerCase() + camelMatch[1].slice(1)
+          if (fieldMatchesAnyColumn(fieldSuffix, allColumns)) {
+            continue
+          }
+        }
+
+        issues.push({
+          featureName: displayName,
+          issueType: 'field_mismatch',
+          severity: 'warning',
+          description: `<${key}> executionKey 在 schema 中找不到對應的 column（checked: ${key}, ${toSnakeCase(key)}）`,
+          suggestion: `確認 <${key}> 是否為 LLM 生成的 composite 欄位名，或修正為 schema 中存在的 column 名`,
+        })
       }
     }
 

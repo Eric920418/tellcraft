@@ -92,6 +92,10 @@ const envSchema = z.object({
   R3B_PROMPT_HINTS: z.stringbool().default(true),
   // R4: Check 5.5 cross_scenario_var_reference 確定性修補
   R4_CROSS_SCENARIO_VAR_FIX: z.stringbool().default(true),
+  // Fix A: actionsYml 強制讀 Feature # [METHOD] /path 註解（解 path_mismatch/method_mismatch 雪崩）
+  FIX_A_INJECT_FEATURE_ANNOTATIONS: z.stringbool().default(true),
+  // Fix C: WHEN call table headers 自動 strip `>` / `<` 前綴
+  FIX_C_STRIP_VAR_IN_CALL_TABLE: z.stringbool().default(true),
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開

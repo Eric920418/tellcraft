@@ -881,6 +881,81 @@ export function alignActionsYmlSummariesToFeatures(
   }
 }
 
+/**
+ * Fix A: 從每個 Feature content 解析 # [METHOD] /path 註解，強制注入到對應 action 的 method/path 欄位。
+ *
+ * 修這個的原因：LLM 生 actionsYml 時常漏 method:/path: 欄位，導致 RED Phase validator
+ * 用 deriveActionMethod 啟發式推導，跟 Feature 註解打架（method_mismatch / path_mismatch 雪崩）。
+ *
+ * 解法：Feature 註解是 user-authored ground truth，直接覆蓋 actionsYml 推導值。
+ */
+export function injectFeatureAnnotationsToActions(
+  actionsYml: string,
+  features: Array<{ name: string; actionName: string; content?: string }>
+): { aligned: string; injectedMethod: number; injectedPath: number } {
+  let parsed: unknown
+  try {
+    parsed = yaml.load(actionsYml)
+  } catch (e) {
+    logger.warn({ err: e }, 'actionsYml 解析失敗，跳過 method/path 注入')
+    return { aligned: actionsYml, injectedMethod: 0, injectedPath: 0 }
+  }
+  if (!parsed || typeof parsed !== 'object') return { aligned: actionsYml, injectedMethod: 0, injectedPath: 0 }
+  const root = parsed as { actions?: Array<{ name?: string; method?: string; path?: string }> }
+  if (!Array.isArray(root.actions)) return { aligned: actionsYml, injectedMethod: 0, injectedPath: 0 }
+
+  // 從每個 feature 取 # [METHOD] /path 註解
+  const annotationByAction = new Map<string, { method: string; path: string }>()
+  for (const f of features) {
+    if (!f.actionName || !f.content) continue
+    const m = f.content.match(/^#\s*\[(\w+)\]\s*(\/\S+)/m)
+    if (!m) continue
+    const method = m[1].toUpperCase()
+    const path = m[2]
+    if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) continue
+    annotationByAction.set(f.actionName, { method, path })
+  }
+
+  if (annotationByAction.size === 0) return { aligned: actionsYml, injectedMethod: 0, injectedPath: 0 }
+
+  let injectedMethod = 0
+  let injectedPath = 0
+  for (const action of root.actions) {
+    if (!action.name) continue
+    const ann = annotationByAction.get(action.name)
+    if (!ann) continue
+    // 注入 method（如果缺失或不一致）
+    if (action.method !== ann.method) {
+      logger.info({
+        actionName: action.name,
+        oldMethod: action.method,
+        newMethod: ann.method,
+      }, 'Fix A: 強制注入 Feature 註解的 method 到 actionsYml')
+      action.method = ann.method
+      injectedMethod++
+    }
+    // 注入 path（如果缺失或不一致）
+    if (action.path !== ann.path) {
+      logger.info({
+        actionName: action.name,
+        oldPath: action.path,
+        newPath: ann.path,
+      }, 'Fix A: 強制注入 Feature 註解的 path 到 actionsYml')
+      action.path = ann.path
+      injectedPath++
+    }
+  }
+
+  if (injectedMethod === 0 && injectedPath === 0) {
+    return { aligned: actionsYml, injectedMethod: 0, injectedPath: 0 }
+  }
+  return {
+    aligned: yaml.dump(parsed, { lineWidth: -1, noRefs: true }),
+    injectedMethod,
+    injectedPath,
+  }
+}
+
 function buildSuccessResult(
   actionsYml: string,
   projectName?: string,
@@ -893,6 +968,19 @@ function buildSuccessResult(
     if (corrections > 0) {
       logger.info({ corrections }, `actionsYml: 機械對齊 ${corrections} 個 summary 到 features.name`)
       finalYml = aligned
+    }
+
+    // Fix A: 強制注入 Feature # [METHOD] /path 註解到 actionsYml
+    // env FIX_A_INJECT_FEATURE_ANNOTATIONS=false 可一鍵 disable
+    if (process.env.FIX_A_INJECT_FEATURE_ANNOTATIONS !== 'false') {
+      const ann = injectFeatureAnnotationsToActions(finalYml, features)
+      if (ann.injectedMethod > 0 || ann.injectedPath > 0) {
+        logger.info({
+          injectedMethod: ann.injectedMethod,
+          injectedPath: ann.injectedPath,
+        }, `Fix A: 機械注入 Feature 註解到 actionsYml（method ${ann.injectedMethod}、path ${ann.injectedPath}）`)
+        finalYml = ann.aligned
+      }
     }
   }
 

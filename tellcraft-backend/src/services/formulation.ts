@@ -829,6 +829,47 @@ ${LANGUAGE_POLICY_FEATURE_BLOCK}
 | \`<\` | Capture execution result | \`<customer1Id\` |
 - \`$notnull\` means "non-null, value doesn't matter"
 
+### ⚠️ VAR Prefix 使用位置 (Fix D — CRITICAL，違反會被 RED Phase 阻塞)
+
+| 步驟類型 | 允許前綴 | 禁止前綴 |
+|---------|---------|---------|
+| Given \`準備一個 X, with table:\` 的 header | \`>\` (declare) / \`<\` (capture) | 純名稱（無前綴）✓ |
+| Given \`準備一個 X, with table:\` 的 data row | \`$\` (reference) / 字面值 | \`>\` / \`<\` |
+| **When \`call table:\` 的 header** | **純名稱（無前綴）** | **❌ \`>\` 不可在 call table headers — 會讓欄位被跳過不發送** |
+| When \`call table:\` 的 data row | \`$\` (reference) / 字面值 | \`>\` / \`<\` |
+| Then \`(STATUS)回應, with table:\` 的 header | \`<\` (capture) / 純名稱 | \`>\` |
+
+✅ CORRECT call table（純 request 參數）：
+\`\`\`gherkin
+When (No Actor) Create FAQ, call table:
+  | question     | answer    |   ← 純名稱 header
+  | what is it? | yes       |
+\`\`\`
+
+❌ WRONG（path_mismatch 雪崩來源之一）：
+\`\`\`gherkin
+When (No Actor) Create FAQ, call table:
+  | >question | >answer |   ← ❌ \`>\` 只能在 Given declare，call table 用會跳過欄位
+  | what?     | yes     |
+\`\`\`
+
+### ⚠️ Feature Annotation Path/Method 一致性 (Fix D — CRITICAL)
+
+Feature 檔案頂部的 \`# [METHOD] /path\` 註解是 **ground truth**，actionsYml 會強制讀取覆蓋。
+
+- RESTful 路徑用 \`-\`（kebab-case），**禁止 snake_case**：
+  - ✅ \`# [POST] /api/admin/page-sections\`
+  - ❌ \`# [POST] /api/admin/page_sections\`
+  - ❌ \`# [POST] /api/list_page_sections\`（這是 action name 不是 path）
+- Method 必須是 \`GET | POST | PUT | PATCH | DELETE\`，**符合 RESTful 慣例**：
+  - 列表/取得 → \`GET\`
+  - 建立 → \`POST\`（status 201）
+  - 完整更新 → \`PUT\`
+  - 部分更新 → \`PATCH\`
+  - 刪除 → \`DELETE\`
+- Path 含 \`:id\` 變數：\`# [PUT] /api/admin/pricing-plans/:id\`
+- public vs admin 區分：\`/api/public/...\` 不需 auth / \`/api/admin/...\` 需 admin auth
+
 ### Given Setup Strategy
 | Condition | Choice | Example |
 |-----------|--------|---------|
