@@ -468,21 +468,26 @@ async function generateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
     await saveFlowState(redis, conversationId, flowState)
 
     if (!neonConnectionString) {
-      // 無 Neon DB → 直接完成
+      // 無 Neon DB → 跳過 SpecFormula 測試，提示用戶可以重試 DB provision
       const mockWarnings = result.mockDataWarnings || []
       const mockWarningText = mockWarnings.length > 0
         ? `\n\n⚠️ ${mockWarnings.length} 個組件仍使用假資料：${mockWarnings.map(w => `\`${w}\``).join('、')}`
         : ''
       const sanitized = sanitizeForPreview({ pages: mergedPages, components: mergedComponents, styles })
+      // 透明告知：跳過測試是因為 DB 不存在（可能配額不足或 provision 失敗）
+      const dbReason = flowState.dbProvisionStatus === 'quota_exceeded'
+        ? '\n\n⚠️ **跳過 SpecFormula 測試**：偵測到 DB 配額曾被佔滿（state: quota_exceeded）。若已釋放（刪除舊 DB），請按「**重試資料庫**」重新建立 + 跑測試。'
+        : '\n\n⚠️ **跳過 SpecFormula 測試**：此專案無 Neon DB（provision 未完成）。按「**重試資料庫**」重新建立 + 跑測試。'
       await sendMessage(conversationId, io, {
-        content: `**後端代碼生成完成！**\n\n${result.summary}${mockWarningText}\n\n- 輸入「**部署**」部署上線\n- 或描述想調整的地方`,
+        content: `**後端代碼生成完成！**\n\n${result.summary}${mockWarningText}${dbReason}\n\n- 按「**重試資料庫**」建立 DB 並跑 SpecFormula 測試\n- 或「**部署**」直接部署上線（無後端測試保護）`,
         stage: 'uiux_complete', layoutHint: 'split',
         richContent: {
           type: 'code_preview',
           data: { pages: sanitized.code.pages, components: sanitized.code.components, styles: sanitized.code.styles, tailwindConfig, currentPhase: 'uiux_complete' } as Record<string, unknown>,
         },
         quickReplies: [
-          { label: '部署上線', value: '部署', style: 'primary' as const },
+          { label: '重試資料庫', value: '__connect_database__', style: 'primary' as const },
+          { label: '部署上線（跳過測試）', value: '部署', style: 'secondary' as const },
           { label: '開始新專案', value: '__new_project__', style: 'ghost' as const },
         ],
       })
