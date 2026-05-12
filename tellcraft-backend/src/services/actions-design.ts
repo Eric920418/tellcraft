@@ -2,6 +2,7 @@ import * as yaml from 'js-yaml'
 import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
+import { assertCanCallLlm } from '../lib/conversation-budget'
 
 const logger = createLogger('actions-design')
 
@@ -63,7 +64,8 @@ function isRetryableFetchError(err: unknown): boolean {
 async function callClaude(
   systemPrompt: string,
   userMessage: string,
-  options: { maxTokens?: number; temperature?: number } = {}
+  options: { maxTokens?: number; temperature?: number } = {},
+  trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
   content?: string
@@ -72,6 +74,12 @@ async function callClaude(
   error?: string
 }> {
   let lastError = 'Unknown error'
+
+  // L31.N: budget / timeout / blocked flag guard
+  const guard = await assertCanCallLlm(trackingContext?.conversationId, 'actions_design')
+  if (!guard.allowed) {
+    return { success: false, error: guard.reason }
+  }
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
@@ -518,7 +526,7 @@ ${summaryChecklist}
 
   const maxTokens = calculateMaxTokens(missingFeatures.length)
   logger.info({ missingCount: missingFeatures.length }, '補充生成缺失 actions')
-  const response = await callClaude(MISSING_ACTIONS_SYSTEM_PROMPT, userMessage, { maxTokens, temperature: 0.1 })
+  const response = await callClaude(MISSING_ACTIONS_SYSTEM_PROMPT, userMessage, { maxTokens, temperature: 0.1 }, trackingContext)
 
   if (!response.success) {
     return { success: false, error: response.error }
@@ -629,7 +637,7 @@ ${summaryChecklist}
 請根據以上內容生成 actions.yml。每個 action 的 summary 必須與上方清單完全一致。`
 
   logger.info({ featureCount: features.length, maxTokens }, '生成 actions.yml')
-  const response = await callClaude(SYSTEM_PROMPT, userMessage, { maxTokens, temperature: 0.1 })
+  const response = await callClaude(SYSTEM_PROMPT, userMessage, { maxTokens, temperature: 0.1 }, trackingContext)
 
   if (!response.success) {
     return { success: false, error: response.error }
@@ -662,7 +670,7 @@ ${summaryChecklist}
 \`\`\`
 ${(response.content || '').slice(0, 2000)}
 \`\`\``
-    const reformatResponse = await callClaude(SYSTEM_PROMPT, reformatPrompt, { maxTokens, temperature: 0.1 })
+    const reformatResponse = await callClaude(SYSTEM_PROMPT, reformatPrompt, { maxTokens, temperature: 0.1 }, trackingContext)
     if (reformatResponse.success) {
       extracted = extractYamlFromLlmResponse(reformatResponse.content)
       if (extracted) {
@@ -744,7 +752,7 @@ ${summaryChecklist}
 請修正上述問題，輸出完整的修正版 YAML（用 \`\`\`yaml\`\`\` 包裹）。`
 
       logger.info({ round, errorCount: otherErrors.length }, '修復 non-summary 錯誤')
-      const fixResponse = await callClaude(SYSTEM_PROMPT, fixPrompt, { maxTokens, temperature: 0.1 })
+      const fixResponse = await callClaude(SYSTEM_PROMPT, fixPrompt, { maxTokens, temperature: 0.1 }, trackingContext)
       if (fixResponse.success) {
         const fixExtracted = extractYamlFromLlmResponse(fixResponse.content)
         if (fixExtracted) {

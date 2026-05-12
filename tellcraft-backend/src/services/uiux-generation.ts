@@ -9,6 +9,7 @@ import { z } from 'zod'
 import * as ts from 'typescript'
 import { getAnthropicClient, MODEL, trackLlmUsage, buildCacheableSystem } from '../lib/anthropic'
 import { callStructured, type StructuredOptions, type StructuredResult } from '../lib/structured-output'
+import { assertCanCallLlm } from '../lib/conversation-budget'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { selectTechniques, formatTechniquesForPrompt, formatTechniquesForPromptFast } from './design-techniques'
@@ -254,6 +255,11 @@ export async function callClaude(
   trackingContext?: LlmTrackingContext,
   onTextDelta?: (accumulatedText: string) => void
 ): Promise<{ success: boolean; content?: string; error?: string }> {
+  // L31.N: budget / timeout / blocked flag guard
+  const guard = await assertCanCallLlm(trackingContext?.conversationId, trackingContext?.purpose || 'uiux_generation')
+  if (!guard.allowed) {
+    return { success: false, error: guard.reason }
+  }
   await acquireLlmSlot()
   try {
     const anthropic = getAnthropicClient()

@@ -9,6 +9,7 @@ import type { ZodType } from 'zod'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import { getAnthropicClient, trackLlmUsage, type ModelId } from './anthropic'
 import { createLogger } from './logger'
+import { assertCanCallLlm } from './conversation-budget'
 
 const logger = createLogger('structured-output')
 
@@ -48,6 +49,12 @@ export async function callStructured<T>(
   const { schema, model, system, messages, maxTokens, temperature, thinking, purpose, trackingContext } = options
   const client = getAnthropicClient()
   const effectiveMaxTokens = thinking ? maxTokens + thinking.budget_tokens : maxTokens
+
+  // L31.N: 任何 LLM call 前 check conversation budget / global timeout / blocked flag
+  const guard = await assertCanCallLlm(trackingContext?.conversationId, `structured:${purpose}`)
+  if (!guard.allowed) {
+    return { success: false, error: guard.reason }
+  }
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {

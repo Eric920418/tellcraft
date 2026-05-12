@@ -385,6 +385,10 @@ const orchestratorQueue = new Queue('orchestrator', {
 setOrchestratorQueue(orchestratorQueue)
 setRedisClient(generalRedis)
 
+// L31.N Layer 2：注入 Redis 給 conversation-budget — 讓 blocked flag 機制生效
+// 沒注入 → 退化成只有 Layer 1+3（仍正確，只是每次 LLM call 都查 DB）
+import('./lib/conversation-budget').then(m => m.setRedis(generalRedis))
+
 // 初始化 LINE Bot Handler（注入 Messaging Client + 隊列）
 if (env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN) {
   const lineMessagingClient = new lineMessagingApi.MessagingApiClient({

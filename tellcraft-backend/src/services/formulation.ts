@@ -6,6 +6,7 @@ import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
 import { extractNullableColumnsHint } from './schema-derivation'
+import { assertCanCallLlm } from '../lib/conversation-budget'
 
 const logger = createLogger('formulation')
 
@@ -207,7 +208,8 @@ function isRetryableFetchError(err: unknown): boolean {
 async function callClaude(
   systemPrompt: CacheableSystemPrompt,
   userMessage: string,
-  options: { maxTokens?: number; temperature?: number } = {}
+  options: { maxTokens?: number; temperature?: number } = {},
+  trackingContext?: LlmTrackingContext
 ): Promise<{
   success: boolean
   content?: string
@@ -216,6 +218,12 @@ async function callClaude(
   error?: string
 }> {
   let lastError: string = 'Unknown error'
+
+  // L31.N: budget / timeout / blocked flag guard
+  const guard = await assertCanCallLlm(trackingContext?.conversationId, 'formulation_generate_feature')
+  if (!guard.allowed) {
+    return { success: false, error: guard.reason }
+  }
 
   for (let attempt = 1; attempt <= RETRY_MAX; attempt++) {
     try {
@@ -1106,7 +1114,7 @@ ${featureSchemaHints}` : ''}${nullableHint ? `
 
 ${nullableHint}` : ''}`
 
-  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 })
+  const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 }, trackingContext)
 
   if (!response.success) {
     return { success: false, error: response.error }

@@ -21,10 +21,10 @@ vi.mock('../services/skill-telemetry', () => ({
 
 // Mock env：測試環境可能沒讀 .env，明確注入 MAX_CONVERSATION_COST_USD=5.0
 vi.mock('../lib/env', () => ({
-  getEnv: () => ({ MAX_CONVERSATION_COST_USD: 5.0 }),
+  getEnv: () => ({ MAX_CONVERSATION_COST_USD: 5.0, MAX_CONVERSATION_RUNTIME_MIN: 30 }),
 }))
 
-import { checkConversationBudget, guardFixPathBudget } from '../lib/conversation-budget'
+import { checkConversationBudget, guardFixPathBudget, assertCanCallLlm } from '../lib/conversation-budget'
 
 describe('L31.M: checkConversationBudget — null/empty conversationId', () => {
   it('conversationId = null → 跳過 check（exceeded: false）', async () => {
@@ -75,14 +75,19 @@ describe('L31.M: checkConversationBudget — DB query mock', () => {
   })
 })
 
-describe('L31.M: guardFixPathBudget — return shape', () => {
+describe('L31.M/N: guardFixPathBudget — return shape', () => {
   it('未超出 → exceeded: false（caller 繼續走）', async () => {
+    // assertCanCallLlm 先查 global timeout（first_call）→ 再查 budget（cost）
+    mockQueryOne.mockResolvedValueOnce({ first_call: new Date().toISOString() })
     mockQueryOne.mockResolvedValueOnce({ cost: 0.5, calls: 5 })
     const r = await guardFixPathBudget('conv-x', 'fixMultipleFeatures')
     expect(r.exceeded).toBe(false)
   })
 
   it('超出 → exceeded: true + errorMessage + cost/limit 完整', async () => {
+    // assertCanCallLlm 先查 timeout（不過期）→ 再查 budget（超）→ 再走 backward-compat checkConversationBudget
+    mockQueryOne.mockResolvedValueOnce({ first_call: new Date().toISOString() })
+    mockQueryOne.mockResolvedValueOnce({ cost: 6.5, calls: 80 })
     mockQueryOne.mockResolvedValueOnce({ cost: 6.5, calls: 80 })
     const r = await guardFixPathBudget('conv-y', 'fixFailingAction')
     expect(r.exceeded).toBe(true)
@@ -92,5 +97,47 @@ describe('L31.M: guardFixPathBudget — return shape', () => {
       expect(r.errorMessage).toContain('fixFailingAction')
       expect(r.errorMessage).toContain('MAX_CONVERSATION_COST_USD')
     }
+  })
+
+  it('global timeout 觸發 → exceeded: true + errorMessage 含 RUNTIME', async () => {
+    const oldTime = new Date(Date.now() - 60 * 60_000).toISOString()  // 60 分鐘前
+    mockQueryOne.mockResolvedValueOnce({ first_call: oldTime })
+    // backward-compat budget query
+    mockQueryOne.mockResolvedValueOnce({ cost: 0.5, calls: 5 })
+    const r = await guardFixPathBudget('conv-timeout', 'fixFailingAction')
+    expect(r.exceeded).toBe(true)
+    if (r.exceeded) {
+      expect(r.errorMessage).toContain('MAX_CONVERSATION_RUNTIME_MIN')
+    }
+  })
+})
+
+describe('L31.N: assertCanCallLlm — 三層防禦', () => {
+  it('無 conversationId → allowed', async () => {
+    const r = await assertCanCallLlm(null, 'test')
+    expect(r.allowed).toBe(true)
+  })
+
+  it('全部通過 → allowed', async () => {
+    mockQueryOne.mockResolvedValueOnce({ first_call: new Date().toISOString() })
+    mockQueryOne.mockResolvedValueOnce({ cost: 0.5, calls: 5 })
+    const r = await assertCanCallLlm('conv-a', 'test')
+    expect(r.allowed).toBe(true)
+  })
+
+  it('Layer 3 global timeout → rule=global_timeout', async () => {
+    const oldTime = new Date(Date.now() - 90 * 60_000).toISOString()
+    mockQueryOne.mockResolvedValueOnce({ first_call: oldTime })
+    const r = await assertCanCallLlm('conv-b', 'test')
+    expect(r.allowed).toBe(false)
+    if (!r.allowed) expect(r.rule).toBe('global_timeout')
+  })
+
+  it('Layer 1 cost budget → rule=cost_budget', async () => {
+    mockQueryOne.mockResolvedValueOnce({ first_call: new Date().toISOString() })
+    mockQueryOne.mockResolvedValueOnce({ cost: 10, calls: 100 })
+    const r = await assertCanCallLlm('conv-c', 'test')
+    expect(r.allowed).toBe(false)
+    if (!r.allowed) expect(r.rule).toBe('cost_budget')
   })
 })
