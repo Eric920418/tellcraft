@@ -11,6 +11,7 @@ import { executeCoderPipeline } from '../../services/coder-generation'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration, inferFileType } from '../orchestrator-utils'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
+import { autoFixActionsAndFeatures } from '../../services/deterministic-actions-fix'
 import { runFeatureAlignmentGate } from '../../services/feature-alignment-gate'
 import { analyzeSpecIssuesInFailures } from '../../services/semantic-consistency-validator'
 import { runFormulation, generateDraftBatch, sanitizeFeatureContent, type FormulationResult } from '../../services/formulation'
@@ -141,48 +142,92 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   })
 
   // 5. RED Phase — SDD 靜態規格驗證（Feature ↔ actionsYml ↔ Schema 一致性）
+  // 失敗 → 不再 swallow（違反 CLAUDE.md「所有錯誤完整顯示前端」），讓外層 try/catch 接手
   if (bddSession.features_content && bddSession.features_content.length > 0) {
-    try {
-      const redResult = await executeRedPhase({
-        features: bddSession.features_content,
-        actionsYml: bddSession.actions_yml_content,
-        schemaSql: bddSession.schema_sql_content,
-        entityMapping: bddSession.entity_mapping_content || '',
-      })
+    let redResult = await executeRedPhase({
+      features: bddSession.features_content,
+      actionsYml: bddSession.actions_yml_content,
+      schemaSql: bddSession.schema_sql_content,
+      entityMapping: bddSession.entity_mapping_content || '',
+    })
 
-      // 更新 FlowState
-      state = await getFlowState(redis, conversationId) || state
-      state.coderRedPhasePassed = redResult.passed
-      state.coderRedPhaseIssueCount = redResult.errors + redResult.warnings
-      state.coderRedPhaseFixRounds = 0
-      await saveFlowState(redis, conversationId, state)
-
-      if (!redResult.passed) {
-        // 有 error 級問題 — 記錄但不阻塞（後續 GREEN Phase 的 fixFailingAction 會修）
-        // 日後可在此加入 LLM 自動修復 Feature 的邏輯
-        logger.warn({
-          errors: redResult.errors,
-          warnings: redResult.warnings,
-          issues: redResult.issues.filter(i => i.severity === 'error').map(i => ({
-            feature: i.featureName,
-            type: i.issueType,
-            desc: i.description,
-          })),
-        }, 'RED Phase 發現規格問題')
-
-        const report = formatRedPhaseReport(redResult)
+    // 5.5 Deterministic 修補 — method_mismatch / path_mismatch / var_in_call_table 0 LLM 修
+    // 修完同步寫 bdd_sessions + in-memory，再跑一次 RED Phase 確認
+    const hasDeterministicallyFixable = redResult.issues.some(i =>
+      i.issueType === 'method_mismatch' || i.issueType === 'path_mismatch' || i.issueType === 'var_in_call_table'
+    )
+    if (hasDeterministicallyFixable) {
+      const fixResult = autoFixActionsAndFeatures(
+        bddSession.actions_yml_content,
+        bddSession.features_content,
+      )
+      if (fixResult.changes.length > 0) {
+        const setClauses: string[] = []
+        const params: unknown[] = []
+        if (fixResult.fixedActionsYml) {
+          bddSession.actions_yml_content = fixResult.fixedActionsYml
+          params.push(fixResult.fixedActionsYml)
+          setClauses.push(`actions_yml_content = $${params.length}`)
+        }
+        if (fixResult.fixedFeatures.size > 0) {
+          bddSession.features_content = (bddSession.features_content as Array<{ name: string; actionName: string; content: string }>).map(f => {
+            const fixed = fixResult.fixedFeatures.get(f.name)
+            return fixed ? { ...f, content: fixed } : f
+          })
+          params.push(JSON.stringify(bddSession.features_content))
+          setClauses.push(`features_content = $${params.length}`)
+        }
+        if (setClauses.length > 0) {
+          params.push(bddSession.id)
+          await db.query(
+            `UPDATE bdd_sessions SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`,
+            params,
+          )
+        }
+        logger.info({ changes: fixResult.changes }, 'Deterministic actionsYml/Feature fix 已套用')
         await sendMessage(conversationId, io, {
           content: isChinese
-            ? `⚠ 規格預檢發現 ${redResult.errors} 個問題，將嘗試在代碼生成後自動修復：\n${report}`
-            : `⚠ Spec pre-check found ${redResult.errors} issue(s), will attempt auto-fix after code generation:\n${report}`,
+            ? `✓ Deterministic 修補：${fixResult.changes.length} 個 method/path/VAR 問題已自動修正（0 LLM）`
+            : `✓ Deterministic fix: ${fixResult.changes.length} method/path/VAR issue(s) auto-corrected (0 LLM)`,
           stage: 'coder_generating',
         })
-      } else {
-        logger.info({ warnings: redResult.warnings, durationMs: redResult.durationMs }, 'RED Phase 通過')
+        // 重跑 RED Phase 確認修補生效
+        redResult = await executeRedPhase({
+          features: bddSession.features_content,
+          actionsYml: bddSession.actions_yml_content,
+          schemaSql: bddSession.schema_sql_content,
+          entityMapping: bddSession.entity_mapping_content || '',
+        })
       }
-    } catch (e) {
-      // RED Phase 失敗不阻塞 Pipeline — 降級跳過
-      logger.error({ error: e }, 'RED Phase 執行失敗，降級跳過')
+    }
+
+    // 更新 FlowState
+    state = await getFlowState(redis, conversationId) || state
+    state.coderRedPhasePassed = redResult.passed
+    state.coderRedPhaseIssueCount = redResult.errors + redResult.warnings
+    state.coderRedPhaseFixRounds = 0
+    await saveFlowState(redis, conversationId, state)
+
+    if (!redResult.passed) {
+      logger.warn({
+        errors: redResult.errors,
+        warnings: redResult.warnings,
+        issues: redResult.issues.filter(i => i.severity === 'error').map(i => ({
+          feature: i.featureName,
+          type: i.issueType,
+          desc: i.description,
+        })),
+      }, 'RED Phase 發現規格問題（deterministic 修後仍剩）')
+
+      const report = formatRedPhaseReport(redResult)
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `⚠ 規格預檢仍有 ${redResult.errors} 個問題（deterministic 修補後剩餘），將交給 Pre-Coder Spec Validation 處理：\n${report}`
+          : `⚠ Spec pre-check still has ${redResult.errors} issue(s) after deterministic fix, will hand off to Pre-Coder Spec Validation:\n${report}`,
+        stage: 'coder_generating',
+      })
+    } else {
+      logger.info({ warnings: redResult.warnings, durationMs: redResult.durationMs }, 'RED Phase 通過')
     }
   }
 
@@ -193,7 +238,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
   let neonConnectionString: string | null = null
   if (bddSession.features_content && bddSession.features_content.length > 0
       && bddSession.open_api_spec_content && bddSession.isa_config_content) {
-    try {
+    {
       const derivedSchema = deriveSchemaFromBdd(
         bddSession.schema_sql_content,
         bddSession.entity_mapping_content || ''
@@ -260,16 +305,25 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           await saveFlowState(redis, conversationId, state)
 
           if (!validation.passed) {
-            // 不阻塞 Pipeline（與既有 RED Phase 行為一致），只 warning（修不了的會由 Coder 階段 fixFailingAction 兜底）
+            // 阻塞：違反 CLAUDE.md「所有錯誤完整顯示前端」原則，spec 真矛盾下繼續會生爛代碼
+            state = await getFlowState(redis, conversationId) || state
+            state.phase = 'uiux_complete'
+            state.waitingForReply = true
+            await saveFlowState(redis, conversationId, state)
             await sendMessage(conversationId, io, {
               content: validation.blockMessage || (isChinese
-                ? `⚠ Pre-Coder Spec Validation 發現 ${validation.remainingFailureCount} 個未解問題（不阻塞 Coder）`
-                : `⚠ Pre-Coder Spec Validation found ${validation.remainingFailureCount} unresolved issues (Coder will continue)`),
-              stage: 'coder_generating',
+                ? `✗ Pre-Coder Spec Validation 仍有 ${validation.remainingFailureCount} 個未解問題（${validation.rounds} 輪修復後），已阻塞 Coder 避免生成錯誤代碼。`
+                : `✗ Pre-Coder Spec Validation has ${validation.remainingFailureCount} unresolved issues after ${validation.rounds} rounds. Coder blocked to avoid bad codegen.`),
+              stage: 'coder_error',
+              quickReplies: [
+                { label: isChinese ? '重新生成 Features' : 'Regenerate Features', value: '__regenerate_features__', style: 'primary' as const },
+                { label: isChinese ? '重試 Coder' : 'Retry Coder', value: '__retry_coder__', style: 'secondary' as const },
+              ],
             })
+            return
           }
         } else {
-          // 退回舊 advisory 行為
+          // 退回舊 advisory 行為（PHASE_3B_PRE_CODER_VALIDATION=false 時）
           const stubResult = await runRedPhaseFullValidation({
             features: bddSession.features_content,
             actionsYml: bddSession.actions_yml_content,
@@ -284,18 +338,28 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           state.coderRedPhaseIssueCount = stubResult.unexpectedFailures.length
           await saveFlowState(redis, conversationId, state)
           if (!stubResult.passed) {
+            // 阻塞：advisory 模式也不再 fail-silent
             const failureSummary = stubResult.unexpectedFailures.map(f => `- [${f.failureType}] ${f.featureName} / ${f.scenarioName}: ${f.error.substring(0, 80)}`).join('\n')
+            state.phase = 'uiux_complete'
+            state.waitingForReply = true
+            await saveFlowState(redis, conversationId, state)
             await sendMessage(conversationId, io, {
-              content: isChinese ? `⚠ SDD RED Phase 發現 ${stubResult.unexpectedFailures.length} 個問題：\n${failureSummary}` : `⚠ SDD RED Phase found ${stubResult.unexpectedFailures.length} issue(s):\n${failureSummary}`,
-              stage: 'coder_generating',
+              content: isChinese
+                ? `✗ SDD RED Phase 發現 ${stubResult.unexpectedFailures.length} 個問題，已阻塞 Coder：\n${failureSummary}`
+                : `✗ SDD RED Phase found ${stubResult.unexpectedFailures.length} issue(s), Coder blocked:\n${failureSummary}`,
+              stage: 'coder_error',
+              quickReplies: [
+                { label: isChinese ? '重新生成 Features' : 'Regenerate Features', value: '__regenerate_features__', style: 'primary' as const },
+                { label: isChinese ? '重試 Coder' : 'Retry Coder', value: '__retry_coder__', style: 'secondary' as const },
+              ],
             })
+            return
           }
         }
       }
-    } catch (e) {
-      // Stub RED Phase 失敗不阻塞 Pipeline — 降級跳過
-      logger.error({ error: e }, 'RED Phase Stub 執行失敗，降級跳過')
     }
+    // ↑ 注意：原本這裡有 catch (e) swallow → 已移除（違反 CLAUDE.md「所有錯誤完整顯示前端」）
+    // 任何 Pre-Coder Spec Validation 拋錯都會冒到外層 try/catch（line ~654），完整呈現給用戶
   }
 
   // 6.5 RED Phase Routing — 路由匹配驗證（in-process Express + SupertestAdapter）
@@ -567,60 +631,57 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     }
 
     // 自動執行 SpecFormula BDD 規格驗證（Coder 完成後立即觸發，不需用戶手動點按鈕）
+    // 注意：原本這裡有 try/catch 把 testErr swallow → 違反 CLAUDE.md「所有錯誤完整顯示前端」
+    // 已移除 catch，任何 executeCoderTesting 拋錯都會冒到外層 catch（line ~654）並完整 surface
     if (neonConnectionString) {
-      try {
-        // 先發送預覽代碼（讓用戶在等待測試期間可以預覽）
-        const autoTestMockWarnings = result.mockDataWarnings || []
-        const autoTestMockWarningText = autoTestMockWarnings.length > 0
-          ? (isChinese
-            ? `\n\n⚠️ ${autoTestMockWarnings.length} 個組件仍使用假資料：${autoTestMockWarnings.map(w => `\`${w}\``).join('、')}`
-            : `\n\n⚠️ ${autoTestMockWarnings.length} component(s) still use mock data: ${autoTestMockWarnings.join(', ')}`)
-          : ''
-        await sendMessage(conversationId, io, {
-          content: isChinese
-            ? `**後端代碼生成完成！**\n\n${result.summary}${autoTestMockWarningText}\n\n正在自動執行 BDD 規格驗證...`
-            : `**Backend code generation complete!**\n\n${result.summary}${autoTestMockWarningText}\n\nRunning BDD spec validation automatically...`,
-          stage: 'coder_testing',
-          layoutHint: 'split',
-          richContent: {
-            type: 'code_preview',
-            data: {
-              pages: mergedPages,
-              components: mergedComponents,
-              styles,
-              tailwindConfig,
-              currentPhase: 'coder_testing',
-              serverActions,
-              apiRoutes,
-              dbLib,
-              hasServerActions: true,
-              neonConnectionString,
-            } as Record<string, unknown>,
-          },
-        })
-
-        await executeCoderTesting({
-          taskId: input.taskId,
-          projectId, conversationId, userId, redis, io,
-          codePreviewData: {
+      // 先發送預覽代碼（讓用戶在等待測試期間可以預覽）
+      const autoTestMockWarnings = result.mockDataWarnings || []
+      const autoTestMockWarningText = autoTestMockWarnings.length > 0
+        ? (isChinese
+          ? `\n\n⚠️ ${autoTestMockWarnings.length} 個組件仍使用假資料：${autoTestMockWarnings.map(w => `\`${w}\``).join('、')}`
+          : `\n\n⚠️ ${autoTestMockWarnings.length} component(s) still use mock data: ${autoTestMockWarnings.join(', ')}`)
+        : ''
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `**後端代碼生成完成！**\n\n${result.summary}${autoTestMockWarningText}\n\n正在自動執行 BDD 規格驗證...`
+          : `**Backend code generation complete!**\n\n${result.summary}${autoTestMockWarningText}\n\nRunning BDD spec validation automatically...`,
+        stage: 'coder_testing',
+        layoutHint: 'split',
+        richContent: {
+          type: 'code_preview',
+          data: {
             pages: mergedPages,
             components: mergedComponents,
             styles,
             tailwindConfig,
+            currentPhase: 'coder_testing',
             serverActions,
             apiRoutes,
             dbLib,
             hasServerActions: true,
             neonConnectionString,
-          },
-        } as any)
+          } as Record<string, unknown>,
+        },
+      })
 
-        logger.info({ projectId, conversationId, ...summarizeResult(result) }, 'Coder Skill + SpecFormula 完成')
-        return  // executeCoderTesting 內部已處理完成訊息和 FlowState
-      } catch (testErr) {
-        logger.warn({ err: testErr, projectId }, 'SpecFormula 自動測試失敗，降級為手動觸發')
-        // 降級：走下面原有的完成訊息邏輯（顯示 __verify_backend__ 按鈕）
-      }
+      await executeCoderTesting({
+        taskId: input.taskId,
+        projectId, conversationId, userId, redis, io,
+        codePreviewData: {
+          pages: mergedPages,
+          components: mergedComponents,
+          styles,
+          tailwindConfig,
+          serverActions,
+          apiRoutes,
+          dbLib,
+          hasServerActions: true,
+          neonConnectionString,
+        },
+      } as any)
+
+      logger.info({ projectId, conversationId, ...summarizeResult(result) }, 'Coder Skill + SpecFormula 完成')
+      return  // executeCoderTesting 內部已處理完成訊息和 FlowState
     }
 
     // 發送完成訊息（無 Neon DB 或 SpecFormula 自動觸發失敗時的降級路徑）
@@ -723,6 +784,45 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
       stage: 'error',
     })
     return
+  }
+
+  // Deterministic pre-pass — method_mismatch / path_mismatch / var_in_call_table 0 LLM 修
+  // 跟 coder-phases.ts:5.5 同邏輯；__realign_bdd__ 不會跑 executeRedPhase，這層獨立補位
+  {
+    const determResult = autoFixActionsAndFeatures(
+      bddSession.actions_yml_content,
+      bddSession.features_content,
+    )
+    if (determResult.changes.length > 0) {
+      const setClauses: string[] = []
+      const params: unknown[] = []
+      if (determResult.fixedActionsYml) {
+        bddSession.actions_yml_content = determResult.fixedActionsYml
+        params.push(determResult.fixedActionsYml)
+        setClauses.push(`actions_yml_content = $${params.length}`)
+      }
+      if (determResult.fixedFeatures.size > 0) {
+        bddSession.features_content = bddSession.features_content.map(f => {
+          const fixed = determResult.fixedFeatures.get(f.name)
+          return fixed ? { ...f, content: fixed } : f
+        })
+        params.push(JSON.stringify(bddSession.features_content))
+        setClauses.push(`features_content = $${params.length}`)
+      }
+      if (setClauses.length > 0) {
+        params.push(bddSession.id)
+        await db.query(
+          `UPDATE bdd_sessions SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`,
+          params,
+        )
+      }
+      await sendMessage(conversationId, io, {
+        content: isChinese
+          ? `✓ Deterministic pre-pass：${determResult.changes.length} 個 method/path/VAR 問題已自動修正（0 LLM）`
+          : `✓ Deterministic pre-pass: ${determResult.changes.length} method/path/VAR issue(s) auto-corrected (0 LLM)`,
+        stage: 'coder_testing',
+      })
+    }
   }
 
   const { runFeatureAlignmentGate } = await import('../../services/feature-alignment-gate')

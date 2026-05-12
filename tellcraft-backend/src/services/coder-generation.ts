@@ -15,7 +15,7 @@ import { callStructured } from '../lib/structured-output'
 import type { GeneratedComponent } from './uiux-generation'
 import type { GeneratedCode } from '../types/flow-state'
 import { createLogger } from '../lib/logger'
-import { isQueryAction } from './actions-design'
+import { deriveActionMethod } from './actions-design'
 import { sanitizeNamedImports } from '../utils/sanitize-named-imports'
 import { validateComponentSyntax } from './syntax-validator'
 import { recordTelemetry, truncateFeedback } from './skill-telemetry'
@@ -2226,7 +2226,7 @@ export function generateApiRoutes(
   if (parsed?.actions) {
     for (const a of parsed.actions) {
       actionMeta.set(a.name, {
-        method: (typeof a.method === 'string' ? a.method : (isQueryAction(a) ? 'GET' : 'POST')).toUpperCase(),
+        method: deriveActionMethod(a),
         path: typeof a.path === 'string' ? a.path : `/api/${a.name}`,
       })
     }

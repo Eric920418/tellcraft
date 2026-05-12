@@ -21,7 +21,7 @@
 
 import * as yaml from 'js-yaml'
 import { Pool } from 'pg'
-import { isQueryAction, convertToOpenAPI } from './actions-design'
+import { deriveActionMethod, convertToOpenAPI } from './actions-design'
 import { parseSchemasFromString, runAllFeatures, type ScenarioResult, type StepResult, type SpecFormulaTestResult } from './specformula-runner'
 import { deriveSchemaFromBdd } from './schema-derivation'
 import { StubHttpAdapter } from '../lib/specformula/http/stub-adapter'
@@ -104,7 +104,7 @@ function parseActionsYmlMeta(actionsYml: string): ActionMeta[] {
     return parsed.actions.map(a => ({
       name: a.name,
       summary: a.summary || '',
-      method: (typeof a.method === 'string' ? a.method : (isQueryAction(a) ? 'GET' : 'POST')).toUpperCase(),
+      method: deriveActionMethod(a),
       path: typeof a.path === 'string' ? a.path : `/api/${a.name}`,
       rules: a.rules,
     }))
@@ -446,7 +446,7 @@ export async function executeRedPhase(input: RedPhaseInput): Promise<RedPhaseRes
           featureName: displayName,
           issueType: 'method_mismatch',
           severity: 'error',
-          description: `Feature 註解 # [${annotations.method}] 但 actionsYml 推導為 ${action.method}（基於 isQueryAction 規則）`,
+          description: `Feature 註解 # [${annotations.method}] 但 actionsYml 推導為 ${action.method}（基於 deriveActionMethod：actionsYml 缺 method: 欄位或名稱前綴未匹配）`,
           suggestion: `將 Feature 的 # [${annotations.method}] 改為 # [${action.method}]，或確認 actionsYml 的 rules 類型是否正確`,
         })
       }

@@ -962,8 +962,10 @@ export function convertToOpenAPI(actionsYml: string, projectName?: string): stri
 
   // 轉換 actions → paths
   for (const action of parsed.actions) {
-    const isQuery = isQueryAction(action)
-    const method = (typeof action.method === 'string' ? action.method : (isQuery ? 'GET' : 'POST')).toLowerCase()
+    const methodUpper = deriveActionMethod(action)
+    const method = methodUpper.toLowerCase()
+    const isQuery = methodUpper === 'GET'
+    const hasRequestBody = methodUpper === 'POST' || methodUpper === 'PUT' || methodUpper === 'PATCH'
     const pathKey = typeof action.path === 'string' ? action.path : `/api/${action.name}`
 
     // 分析 rules 判斷錯誤回應
@@ -981,7 +983,7 @@ export function convertToOpenAPI(actionsYml: string, projectName?: string): stri
     }
 
     // Request body / parameters
-    if (!isQuery && action.input) {
+    if (hasRequestBody && action.input) {
       const inputType = (action.input as Record<string, unknown>).type as string | undefined
       if (inputType && schemas[inputType]) {
         operation.requestBody = {
@@ -1001,7 +1003,7 @@ export function convertToOpenAPI(actionsYml: string, projectName?: string): stri
           },
         }
       }
-    } else if (isQuery && action.input) {
+    } else if (!hasRequestBody && action.input) {
       const inputProps = (action.input as Record<string, unknown>).properties as Record<string, unknown> | undefined
       if (inputProps) {
         operation.parameters = Object.entries(inputProps).map(([name, def]) => {
@@ -1092,6 +1094,36 @@ export function isQueryAction(action: { name?: string; summary?: string; rules?:
   const hasResponseRule = action.rules.some(r => r.type === '後置（回應）')
   const hasStateRule = action.rules.some(r => r.type === '後置（狀態）')
   return hasResponseRule && !hasStateRule
+}
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+/**
+ * 完整 HTTP method 推導（取代 isQueryAction 的二元 GET/POST）。
+ *
+ * 優先級：
+ * 1. action.method 顯式設定 → 直接使用（uppercase 標準化）
+ * 2. 名稱前綴匹配：delete_/remove_→DELETE, update_/edit_→PUT, patch_→PATCH, create_/add_→POST
+ * 3. isQueryAction → GET / POST 的二元降級
+ *
+ * 修這個的原因：原本只有 GET/POST 推導讓 update_xxx/delete_xxx action 被誤推導為 POST，
+ * 跟 BDD 生成的 Feature 註解 # [PUT]/# [DELETE]/# [PATCH] 必衝突，導致 RED Phase
+ * method_mismatch error 雪崩。
+ */
+export function deriveActionMethod(action: { name?: string; summary?: string; method?: unknown; rules?: Array<{ type: string }> }): HttpMethod {
+  if (typeof action.method === 'string' && action.method.trim()) {
+    const m = action.method.trim().toUpperCase()
+    if (m === 'GET' || m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE') return m as HttpMethod
+  }
+  const nameHint = (action.name || '').toLowerCase()
+  // 認證類強制 POST（保持與 isQueryAction 一致）
+  if (/^(login|signin|register|signup|logout|signout|reset_password|change_password|forgot_password)/.test(nameHint)) return 'POST'
+  if (/^(delete|remove|destroy)_/.test(nameHint)) return 'DELETE'
+  if (/^patch_/.test(nameHint)) return 'PATCH'
+  if (/^(update|edit|modify)_/.test(nameHint)) return 'PUT'
+  if (/^(create|add|insert|register|submit)_/.test(nameHint)) return 'POST'
+  // 名稱無前綴 → 退回 query 推導
+  return isQueryAction(action) ? 'GET' : 'POST'
 }
 
 function mapTypeToOpenAPI(tsType: string | undefined): Record<string, unknown> {
