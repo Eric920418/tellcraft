@@ -2034,6 +2034,46 @@ async function autoFixFeatures(
         logger.warn({ err: e, feature: displayName }, 'R1: autoFillScenarioScopeSetup 失敗，fallthrough')
       }
 
+      // R3-A: 擴大 deterministic 覆蓋（Check 4/8/10）— 獨立 kill switch
+      const r3aEnabled = process.env.R3A_DETERMINISTIC_EXPANSION !== 'false'
+      if (r3aEnabled) {
+        // R3-A Helper 1: Check 4 response_field_naming（snake → camel）
+        try {
+          const { autoFixResponseFieldNaming } = await import('./deterministic-feature-fix')
+          const r = autoFixResponseFieldNaming(curContent, featureIssues)
+          if (r.renamedFields.length > 0) {
+            curContent = r.content
+            for (const f of r.renamedFields) allFixed.push({ checkName: 'response_field_naming', field: f.to })
+          }
+        } catch (e) {
+          logger.warn({ err: e, feature: displayName }, 'R3-A: autoFixResponseFieldNaming 失敗，fallthrough')
+        }
+
+        // R3-A Helper 2: Check 10 datatable_empty_row（刪掉全空 row）
+        try {
+          const { autoRemoveEmptyDataRows } = await import('./deterministic-feature-fix')
+          const r = autoRemoveEmptyDataRows(curContent, featureIssues)
+          if (r.removedRows.length > 0) {
+            curContent = r.content
+            for (const row of r.removedRows) allFixed.push({ checkName: 'datatable_empty_row', field: `line ${row.line}`, entity: row.entity })
+          }
+        } catch (e) {
+          logger.warn({ err: e, feature: displayName }, 'R3-A: autoRemoveEmptyDataRows 失敗，fallthrough')
+        }
+
+        // R3-A Helper 3: Check 8 check_constraint（enum/range 替換成合法值）
+        try {
+          const { autoFixCheckConstraintViolation } = await import('./deterministic-feature-fix')
+          const r = autoFixCheckConstraintViolation(curContent, featureIssues, schemasForRepair)
+          if (r.fixedValues.length > 0) {
+            curContent = r.content
+            for (const v of r.fixedValues) allFixed.push({ checkName: 'check_constraint', field: `${v.column}:${v.from}→${v.to}`, entity: v.entity })
+          }
+        } catch (e) {
+          logger.warn({ err: e, feature: displayName }, 'R3-A: autoFixCheckConstraintViolation 失敗，fallthrough')
+        }
+      }
+
       if (allFixed.length > 0) {
         workingFeatures[fi] = { ...workingFeatures[fi], content: curContent }
         r1FixCount += allFixed.length

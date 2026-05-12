@@ -1054,3 +1054,247 @@ export function autoFillScenarioScopeSetup(
 
   return { content: lines.join('\n'), fixedFields, skipped }
 }
+
+// ============================================================
+// R3-A: 擴大 deterministic 覆蓋（Check 4 / 8 / 10）— 取代 LLM
+// ============================================================
+
+function findThenResponseHeaderLines(content: string): Array<{ headerLineIdx: number; cells: string[] }> {
+  const lines = content.split('\n')
+  const results: Array<{ headerLineIdx: number; cells: string[] }> = []
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    if (!/(?:Then|And)\s+.+\(\d+\)回應.*with\s+table:/.test(trimmed)) continue
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = lines[j].trim()
+      if (t === '') continue
+      if (!t.startsWith('|')) break
+      const cells = t.split('|').map(c => c.trim()).filter(Boolean)
+      results.push({ headerLineIdx: j, cells })
+      break
+    }
+  }
+  return results
+}
+
+/**
+ * R3-A Helper 1: Check 4 response_field_naming
+ * Then 表 header 含 snake_case → 轉 camelCase（只動 header，不動 data row 內容）
+ */
+export function autoFixResponseFieldNaming(
+  content: string,
+  issues: AlignmentIssue[],
+): { content: string; renamedFields: Array<{ from: string; to: string }>; skipped: Array<{ field: string; reason: string }> } {
+  const targets = issues.filter(
+    i => i.checkName === 'response_field_naming' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, renamedFields: [], skipped: [] }
+  }
+
+  const lines = content.split('\n')
+  const renamedFields: Array<{ from: string; to: string }> = []
+  const skipped: Array<{ field: string; reason: string }> = []
+
+  const snakeFields = new Set<string>()
+  for (const issue of targets) {
+    const m = issue.description.match(/Response 欄位 "([^"]+)" 是 snake_case/)
+    if (!m) {
+      skipped.push({ field: '?', reason: 'description 格式不符' })
+      continue
+    }
+    snakeFields.add(m[1])
+  }
+
+  if (snakeFields.size === 0) return { content, renamedFields: [], skipped }
+
+  const responseHeaders = findThenResponseHeaderLines(content)
+  for (const { headerLineIdx, cells } of responseHeaders) {
+    let changed = false
+    const newCells = cells.map(rawCell => {
+      const prefixMatch = rawCell.match(/^([><$]?)(.*)$/)
+      const prefix = prefixMatch?.[1] ?? ''
+      const rest = prefixMatch?.[2] ?? rawCell
+      const dotIdx = rest.lastIndexOf('.')
+      const base = dotIdx >= 0 ? rest.substring(0, dotIdx + 1) : ''
+      const fieldName = dotIdx >= 0 ? rest.substring(dotIdx + 1) : rest
+
+      if (!snakeFields.has(fieldName)) return rawCell
+      const camel = fieldName.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+      if (camel === fieldName) return rawCell
+      renamedFields.push({ from: fieldName, to: camel })
+      changed = true
+      return `${prefix}${base}${camel}`
+    })
+    if (changed) {
+      const origLine = lines[headerLineIdx]
+      const indentMatch = origLine.match(/^(\s*)/)
+      const indent = indentMatch?.[1] ?? ''
+      lines[headerLineIdx] = `${indent}| ${newCells.join(' | ')} |`
+    }
+  }
+
+  return { content: lines.join('\n'), renamedFields, skipped }
+}
+
+/**
+ * R3-A Helper 2: Check 10 datatable_empty_row
+ * entity_setup DataTable 整 row 全空 / 只有 < $ 前綴 cell → 刪掉該 row
+ * 主動 scan（不依賴 issue description）— 避免行號漂移
+ */
+export function autoRemoveEmptyDataRows(
+  content: string,
+  issues: AlignmentIssue[],
+): { content: string; removedRows: Array<{ entity: string; line: number }>; skipped: Array<{ entity: string; reason: string }> } {
+  const targets = issues.filter(
+    i => i.checkName === 'datatable_empty_row' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, removedRows: [], skipped: [] }
+  }
+  void targets
+
+  const lines = content.split('\n')
+  const setupSteps = extractEntitySetupWithData(content)
+  const linesToDelete = new Set<number>()
+  const removedRows: Array<{ entity: string; line: number }> = []
+
+  for (const step of setupSteps) {
+    for (const row of step.dataRows) {
+      const hasRealValue = row.cells.some(raw => {
+        const c = (raw || '').trim()
+        if (!c) return false
+        if (/^<[\w.]+$/.test(c)) return false
+        if (/^\$[\w.]+$/.test(c)) return false
+        return true
+      })
+      if (!hasRealValue) {
+        linesToDelete.add(row.line)
+        removedRows.push({ entity: step.entityName, line: row.line })
+      }
+    }
+  }
+
+  if (linesToDelete.size === 0) {
+    return { content, removedRows: [], skipped: [] }
+  }
+
+  const newLines = lines.filter((_, idx) => !linesToDelete.has(idx + 1))
+  return { content: newLines.join('\n'), removedRows, skipped: [] }
+}
+
+/**
+ * R3-A Helper 3: Check 8 check_constraint
+ * entity_setup 內的值違反 CHECK 約束 → enum 替換成第一個合法值 / range 替換成邊界值
+ *
+ * 安全限制：
+ * - 只動 entity_setup（前置資料），不動 When call table（避免改用戶測試意圖）
+ * - 環境變數 R3A_FIX_CHECK_CONSTRAINT=false 可一鍵 disable（中風險）
+ */
+export function autoFixCheckConstraintViolation(
+  content: string,
+  issues: AlignmentIssue[],
+  schemas: DatabaseSchema[],
+): { content: string; fixedValues: Array<{ entity: string; column: string; from: string; to: string }>; skipped: Array<{ column: string; reason: string }> } {
+  if (process.env.R3A_FIX_CHECK_CONSTRAINT === 'false') {
+    return { content, fixedValues: [], skipped: [] }
+  }
+  const targets = issues.filter(
+    i => i.checkName === 'check_constraint' && i.severity === 'error',
+  )
+  if (targets.length === 0) {
+    return { content, fixedValues: [], skipped: [] }
+  }
+
+  let lines = content.split('\n')
+  const fixedValues: Array<{ entity: string; column: string; from: string; to: string }> = []
+  const skipped: Array<{ column: string; reason: string }> = []
+
+  for (const issue of targets) {
+    const m = issue.description.match(/"準備一個([^"]+)" DataTable 值 "([^"]+)" 違反欄位 (\w+) 的 CHECK 約束/)
+    if (!m) {
+      skipped.push({ column: '?', reason: 'description 格式不符' })
+      continue
+    }
+    const entityName = m[1].trim()
+    const fromValue = m[2]
+    const columnName = m[3]
+
+    let columnDef: ColumnDefinition | null = null
+    for (const schema of schemas) {
+      for (const table of schema.tables) {
+        const col = table.columns.find(c => c.name === columnName)
+        if (col) { columnDef = col; break }
+      }
+      if (columnDef) break
+    }
+    if (!columnDef?.checkConstraint) {
+      skipped.push({ column: columnName, reason: 'schema 找不到 CHECK constraint' })
+      continue
+    }
+    const spec = parseCheckConstraintSpec(columnDef.checkConstraint)
+    if (!spec) {
+      skipped.push({ column: columnName, reason: 'CHECK constraint 解析失敗' })
+      continue
+    }
+
+    let toValue: string
+    if (spec.kind === 'enum') {
+      toValue = spec.values[0]
+    } else {
+      switch (spec.op) {
+        case '>=': toValue = String(spec.value); break
+        case '<=': toValue = String(spec.value); break
+        case '>': toValue = String(spec.value + 1); break
+        case '<': toValue = String(spec.value - 1); break
+        case '=': toValue = String(spec.value); break
+      }
+    }
+
+    const currentContent = lines.join('\n')
+    const setupSteps = extractEntitySetupWithData(currentContent)
+    const matchSetup = setupSteps.find(s => s.entityName === entityName)
+    if (!matchSetup) {
+      skipped.push({ column: columnName, reason: `entity_setup 找不到 ${entityName}` })
+      continue
+    }
+
+    let colIdx = -1
+    for (let i = 0; i < matchSetup.rawHeaders.length; i++) {
+      const h = matchSetup.rawHeaders[i].replace(/^[><]/, '').trim()
+      const variants = [h, toSnakeCase(h), toCamelCase(h)]
+      if (variants.includes(columnName)) {
+        colIdx = i
+        break
+      }
+    }
+    if (colIdx === -1) {
+      skipped.push({ column: columnName, reason: '在 entity_setup header 找不到 column' })
+      continue
+    }
+
+    let mutated = false
+    for (const row of matchSetup.dataRows) {
+      const lineIdx = row.line - 1
+      const origLine = lines[lineIdx]
+      const cells = origLine.split('|')
+      const targetIdx = colIdx + 1
+      if (targetIdx >= cells.length - 1) continue
+      const cellRaw = cells[targetIdx]
+      const cellTrim = cellRaw.trim().replace(/^['"]|['"]$/g, '')
+      if (cellTrim !== fromValue) continue
+      const hasQuote = /^['"]/.test(cellRaw.trim())
+      const newCellContent = hasQuote ? `'${toValue}'` : toValue
+      cells[targetIdx] = ` ${newCellContent} `
+      lines[lineIdx] = cells.join('|')
+      mutated = true
+    }
+    if (mutated) {
+      fixedValues.push({ entity: entityName, column: columnName, from: fromValue, to: toValue })
+    } else {
+      skipped.push({ column: columnName, reason: 'data row 找不到該值（可能已被前面修過）' })
+    }
+  }
+
+  return { content: lines.join('\n'), fixedValues, skipped }
+}

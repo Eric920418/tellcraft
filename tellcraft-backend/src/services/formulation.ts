@@ -5,7 +5,7 @@ import { getEnv } from '../lib/env'
 import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
-import { extractNullableColumnsHint } from './schema-derivation'
+import { extractNullableColumnsHint, extractFkRelationshipHint, extractCheckConstraintHint } from './schema-derivation'
 
 const logger = createLogger('formulation')
 
@@ -805,6 +805,12 @@ export async function generateSingleFeature(
   // 實際 token 增量受 helper 內部過濾控制（fully-NOT-NULL 的 table 不輸出）
   const nullableHint = extractNullableColumnsHint(schemaSql, entityMapping)
 
+  // R3-B：FK relationship + CHECK constraint hints（dynamic block 注入，不影響 cache）
+  // env R3B_PROMPT_HINTS=false 一鍵 disable
+  const r3bEnabled = process.env.R3B_PROMPT_HINTS !== 'false'
+  const fkHint = r3bEnabled ? extractFkRelationshipHint(schemaSql, entityMapping) : ''
+  const checkConstraintHint = r3bEnabled ? extractCheckConstraintHint(schemaSql, entityMapping) : ''
+
   // ── Prompt Caching: 靜態 ISA 規則放 Block 1（跨 feature 快取），動態 feature info 放 Block 2 ──
   const staticSystemPrompt = `You are a senior BDD analyst. Output a Gherkin Feature File for the specified function.
 
@@ -1105,7 +1111,15 @@ ${featureSchemaHints}` : ''}${nullableHint ? `
 
 ---
 
-${nullableHint}` : ''}`
+${nullableHint}` : ''}${fkHint ? `
+
+---
+
+${fkHint}` : ''}${checkConstraintHint ? `
+
+---
+
+${checkConstraintHint}` : ''}`
 
   const response = await callClaude(systemPrompt, userMessage, { maxTokens: 8192 }, trackingContext)
 

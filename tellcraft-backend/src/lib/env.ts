@@ -84,6 +84,12 @@ const envSchema = z.object({
   R1_DETERMINISTIC_ALIGNMENT_FIX: z.stringbool().default(true),
   // R2: 跨 loop fingerprint cache — BDD pipeline 4 loop 共享 issue 嘗試紀錄
   R2_FIX_ATTEMPT_CACHE: z.stringbool().default(true),
+  // R3-A: 擴大 deterministic 覆蓋（Check 4/8/10）
+  R3A_DETERMINISTIC_EXPANSION: z.stringbool().default(true),
+  // R3-A 子開關：Check 8 check_constraint 自動替換值（中風險 — 可能改用戶測試意圖）
+  R3A_FIX_CHECK_CONSTRAINT: z.stringbool().default(true),
+  // R3-B: formulation.ts dynamic block 加 FK + CHECK constraint hints
+  R3B_PROMPT_HINTS: z.stringbool().default(true),
   ENABLE_UI_EVALUATOR: z.stringbool().default(false),            // UI Evaluator 黑盒 QA（PR1 Harness Engineering，staging 先開啟）
   UI_EVALUATOR_TIMEOUT_MS: z.coerce.number().default(45000),     // Evaluator 單輪預算，超時降級跳過
   ENABLE_DESIGN_QUALITY_REPORT: z.stringbool().default(false),   // P3 結構化設計品質報告（dimension scoring + fixPlan，advisory），staging 先開

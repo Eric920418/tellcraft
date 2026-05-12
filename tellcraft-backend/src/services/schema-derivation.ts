@@ -206,6 +206,160 @@ export function extractNullableColumnsHint(
 }
 
 // ============================================================
+// R3-B: BDD 生成階段的 schema 引導 hint（dynamic block 注入）
+// ============================================================
+
+/**
+ * R3-B Helper 1: 列出每個 entity 的 FK target，提醒 LLM 必須先建 parent entity
+ *
+ * 從 schemaSql 解析 `column REFERENCES table(col)` 模式
+ * 輸出範例：
+ *   - **訂單項目** (OrderItem) FK:
+ *     - orderId → Order.id（必須先建 Order）
+ *     - productId → Product.id
+ */
+export function extractFkRelationshipHint(
+  schemaSql: string,
+  entityMapping: string,
+  relatedEntities?: string[]
+): string {
+  const tables = parseCreateTables(schemaSql)
+  const entityToTable = parseEntityToTableMapping(entityMapping)
+  if (tables.length === 0 || entityToTable.size === 0) return ''
+
+  const relatedSet = relatedEntities && relatedEntities.length > 0
+    ? new Set(relatedEntities.map(e => e.toLowerCase()))
+    : null
+
+  // table → entity 反查
+  const tableToEntity = new Map<string, string>()
+  for (const [entity, table] of entityToTable) {
+    tableToEntity.set(table.toLowerCase(), entity)
+  }
+
+  const lines: string[] = []
+  for (const [chineseName, tableName] of entityToTable) {
+    if (relatedSet) {
+      if (!relatedSet.has(chineseName.toLowerCase()) && !relatedSet.has(tableName.toLowerCase())) continue
+    }
+    const table = tables.find(t => t.tableName.toLowerCase() === tableName.toLowerCase())
+    if (!table) continue
+
+    const fks: string[] = []
+    for (const col of table.columns) {
+      if (/^\s*(PRIMARY\s+KEY|UNIQUE|CHECK|CONSTRAINT)\b/i.test(col)) continue
+      // 偵測 `colName ... REFERENCES TableName(col)` 模式
+      const m = col.match(/^\s*(\w+)\s+.*?REFERENCES\s+(\w+)\s*\(\s*(\w+)\s*\)/i)
+      if (!m) continue
+      const fkColumn = m[1]
+      const refTable = m[2]
+      const refCol = m[3]
+      const parentEntity = tableToEntity.get(refTable.toLowerCase()) ?? refTable
+      fks.push(`${fkColumn} → ${parentEntity}.${refCol}（必須先建 ${parentEntity}）`)
+    }
+    if (fks.length === 0) continue
+    lines.push(`- **${chineseName}** (${tableName}) FK:`)
+    for (const fk of fks) lines.push(`  - ${fk}`)
+  }
+
+  if (lines.length === 0) return ''
+
+  return [
+    '## Schema FK 關係提示（避免 entity_setup INSERT 失敗）',
+    '',
+    '以下 entity 的 FK 欄位指向其他 entity 的主鍵。在 `準備一個 X, with table:` 時必須：',
+    '- 先建立 parent entity（用 `> ParentEntity1.id` 宣告，或 `$ParentEntity.id` 引用既有）',
+    '- FK 欄位給有效的 parent ID（不要憑空寫死 UUID）',
+    '',
+    ...lines,
+  ].join('\n')
+}
+
+/**
+ * R3-B Helper 2: 列出每個 column 的 CHECK constraint 合法值
+ *
+ * 從 schemaSql 解析 `CHECK (col IN ('a','b'))` 或 `CHECK (col >= N)` 模式
+ * 輸出範例：
+ *   - **訂單** (Order):
+ *     - status: IN ('pending', 'confirmed', 'completed', 'cancelled')
+ *     - quantity: >= 1
+ */
+export function extractCheckConstraintHint(
+  schemaSql: string,
+  entityMapping: string,
+  relatedEntities?: string[]
+): string {
+  const tables = parseCreateTables(schemaSql)
+  const entityToTable = parseEntityToTableMapping(entityMapping)
+  if (tables.length === 0 || entityToTable.size === 0) return ''
+
+  const relatedSet = relatedEntities && relatedEntities.length > 0
+    ? new Set(relatedEntities.map(e => e.toLowerCase()))
+    : null
+
+  const lines: string[] = []
+  for (const [chineseName, tableName] of entityToTable) {
+    if (relatedSet) {
+      if (!relatedSet.has(chineseName.toLowerCase()) && !relatedSet.has(tableName.toLowerCase())) continue
+    }
+    const table = tables.find(t => t.tableName.toLowerCase() === tableName.toLowerCase())
+    if (!table) continue
+
+    const checks: string[] = []
+    for (const col of table.columns) {
+      // 偵測 inline CHECK：`colName ... CHECK (xxx)`
+      // 用 balanced paren 提取 CHECK 內整段（避免 `IN ('a','b')` 含內層 paren 被截斷）
+      const colNameMatch = col.match(/^\s*(\w+)\s+/)
+      if (!colNameMatch) continue
+      const colName = colNameMatch[1]
+      if (/^\s*(PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)\b/i.test(col)) continue
+
+      const checkIdx = col.search(/\bCHECK\s*\(/i)
+      if (checkIdx === -1) continue
+      // 從 `CHECK (` 後找平衡的 `)`
+      const openIdx = col.indexOf('(', checkIdx)
+      if (openIdx === -1) continue
+      let depth = 1
+      let closeIdx = -1
+      for (let k = openIdx + 1; k < col.length; k++) {
+        const ch = col[k]
+        if (ch === '(') depth++
+        else if (ch === ')') { depth--; if (depth === 0) { closeIdx = k; break } }
+      }
+      if (closeIdx === -1) continue
+      const checkExpr = col.substring(openIdx + 1, closeIdx).trim()
+
+      // 提取 enum: `colName IN ('a','b')`
+      const inMatch = checkExpr.match(/\bIN\s*\(([^)]+)\)/i)
+      if (inMatch) {
+        const values = inMatch[1].split(',').map(v => v.trim().replace(/^['"]|['"]$/g, ''))
+        checks.push(`${colName}: IN (${values.map(v => `'${v}'`).join(', ')})`)
+        continue
+      }
+      // 數值比較
+      const cmpMatch = checkExpr.match(/(\w+)\s*(>=|<=|>|<|=)\s*(-?\d+(?:\.\d+)?)/)
+      if (cmpMatch) {
+        checks.push(`${colName}: ${cmpMatch[2]} ${cmpMatch[3]}`)
+        continue
+      }
+    }
+    if (checks.length === 0) continue
+    lines.push(`- **${chineseName}** (${tableName}):`)
+    for (const c of checks) lines.push(`  - ${c}`)
+  }
+
+  if (lines.length === 0) return ''
+
+  return [
+    '## Schema CHECK 約束合法值（避免 INSERT 失敗）',
+    '',
+    '以下欄位有 CHECK 約束，entity_setup DataTable 必須用清單內的值。違反會讓 INSERT 失敗。',
+    '',
+    ...lines,
+  ].join('\n')
+}
+
+// ============================================================
 // SQL 解析 + 轉換
 // ============================================================
 
