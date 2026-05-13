@@ -21,7 +21,7 @@ export interface ActionsFixResult {
   fixedActionsYml: string | null  // null 代表無變動
   fixedFeatures: Map<string, string>  // featureName → fixed content（無變動的不放）
   changes: Array<{
-    type: 'method_set' | 'path_set' | 'var_in_call_table_removed'
+    type: 'method_set' | 'path_set' | 'var_in_call_table_removed' | 'empty_table_literal_removed'
     target: string  // action name 或 feature name
     detail: string
   }>
@@ -179,7 +179,52 @@ export function autoFixVarInCallTable(
 }
 
 /**
+ * 修 Feature content：偵測 `with table:\n  []` 失敗 pattern
+ *
+ * LLM 用 `[]` literal 表達空陣列回應，但 Gherkin DataTable 語法要求至少一個 header row
+ * （`| col |`），DocString 必須 `"""..."""`，`[]` 直接 parser 噴 got '[]'。
+ *
+ * 修法：移除整個 `, with table:` 子句 + `[]` 那行
+ * 修後 step 變成 `Then X(200)回應`（只驗 status，不驗 body）— 比原意更寬鬆但語法合法
+ *
+ * 注：用 SpecFormula 角度，「只驗 status 200」對「應回空陣列」的測試覆蓋下降，但
+ * Gherkin 本來就難以精確表達「body 必須是空陣列」，這個取捨可接受。
+ */
+export function autoFixEmptyTableLiteral(
+  content: string,
+): { fixed: string | null; removedCount: number } {
+  const lines = content.split('\n')
+  let removedCount = 0
+  const result: string[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    // 偵測「step 行含 with table:」+「下一個非空行只有 []」
+    if (/^\s*(?:Then|And|When|Given)\s+.+,\s*with\s+table\s*:\s*$/i.test(line)) {
+      let j = i + 1
+      while (j < lines.length && lines[j].trim() === '') j++
+      if (j < lines.length && lines[j].trim() === '[]') {
+        // 移除 step 行的 `, with table:` 子句
+        result.push(line.replace(/,\s*with\s+table\s*:\s*$/i, ''))
+        // 跳過至（含）`[]` 行
+        i = j
+        removedCount++
+        continue
+      }
+    }
+    result.push(line)
+  }
+
+  if (removedCount === 0) return { fixed: null, removedCount: 0 }
+  return { fixed: result.join('\n'), removedCount }
+}
+
+/**
  * 整合：對一組 features + actionsYml 跑全部 deterministic 修補
+ *
+ * 多 helper 串接：同一個 feature 可能同時觸發 var_in_call_table 與 empty_table_literal
+ * 修補，串接時要保留前一個 helper 的修補結果。
  */
 export function autoFixActionsAndFeatures(
   actionsYml: string,
@@ -192,16 +237,35 @@ export function autoFixActionsAndFeatures(
   const actionsResult = autoFixActionsMethodPathFromFeatures(actionsYml, features)
   allChanges.push(...actionsResult.changes)
 
-  // 2. Feature content: var_in_call_table
+  // 2. Feature content: 串接修補（var_in_call_table → empty_table_literal）
   for (const f of features) {
-    const r = autoFixVarInCallTable(f.content)
-    if (r.fixed !== null) {
-      fixedFeatures.set(f.name || f.actionName, r.fixed)
+    let currentContent = f.content
+    let anyFix = false
+
+    const r1 = autoFixVarInCallTable(currentContent)
+    if (r1.fixed !== null) {
+      currentContent = r1.fixed
+      anyFix = true
       allChanges.push({
         type: 'var_in_call_table_removed',
         target: f.name || f.actionName,
-        detail: `removed ${r.removedCount} VAR prefix(es) in call table headers`,
+        detail: `removed ${r1.removedCount} VAR prefix(es) in call table headers`,
       })
+    }
+
+    const r2 = autoFixEmptyTableLiteral(currentContent)
+    if (r2.fixed !== null) {
+      currentContent = r2.fixed
+      anyFix = true
+      allChanges.push({
+        type: 'empty_table_literal_removed',
+        target: f.name || f.actionName,
+        detail: `removed ${r2.removedCount} broken \`with table: []\` clause(s)`,
+      })
+    }
+
+    if (anyFix) {
+      fixedFeatures.set(f.name || f.actionName, currentContent)
     }
   }
 

@@ -151,12 +151,10 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       entityMapping: bddSession.entity_mapping_content || '',
     })
 
-    // 5.5 Deterministic 修補 — method_mismatch / path_mismatch / var_in_call_table 0 LLM 修
-    // 修完同步寫 bdd_sessions + in-memory，再跑一次 RED Phase 確認
-    const hasDeterministicallyFixable = redResult.issues.some(i =>
-      i.issueType === 'method_mismatch' || i.issueType === 'path_mismatch' || i.issueType === 'var_in_call_table'
-    )
-    if (hasDeterministicallyFixable) {
+    // 5.5 Deterministic 修補 — method/path/var_in_call_table/empty_table_literal 0 LLM 修
+    // 無條件跑：成本可忽略（regex 掃 ~ms），且 empty `[]` literal 在 executeRedPhase 不會偵測到
+    // （static check 不 parse Gherkin），只有跑到 Pre-Coder Spec Validation 才會 parse error
+    {
       const fixResult = autoFixActionsAndFeatures(
         bddSession.actions_yml_content,
         bddSession.features_content,
@@ -168,6 +166,14 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
           bddSession.actions_yml_content = fixResult.fixedActionsYml
           params.push(fixResult.fixedActionsYml)
           setClauses.push(`actions_yml_content = $${params.length}`)
+
+          // 若 actionsYml 被改動，必須同步重生 OpenAPI spec
+          // （SpecFormula 從 open_api_spec_content 讀路徑跑測試 — 不重生會用舊扁平路徑 → 404）
+          const { convertToOpenAPI } = await import('../../services/actions-design')
+          const newOpenApiSpec = convertToOpenAPI(fixResult.fixedActionsYml)
+          bddSession.open_api_spec_content = newOpenApiSpec
+          params.push(newOpenApiSpec)
+          setClauses.push(`open_api_spec_content = $${params.length}`)
         }
         if (fixResult.fixedFeatures.size > 0) {
           bddSession.features_content = (bddSession.features_content as Array<{ name: string; actionName: string; content: string }>).map(f => {
@@ -184,11 +190,11 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
             params,
           )
         }
-        logger.info({ changes: fixResult.changes }, 'Deterministic actionsYml/Feature fix 已套用')
+        logger.info({ changes: fixResult.changes, regeneratedOpenApi: !!fixResult.fixedActionsYml }, 'Deterministic actionsYml/Feature fix 已套用')
         await sendMessage(conversationId, io, {
           content: isChinese
-            ? `✓ Deterministic 修補：${fixResult.changes.length} 個 method/path/VAR 問題已自動修正（0 LLM）`
-            : `✓ Deterministic fix: ${fixResult.changes.length} method/path/VAR issue(s) auto-corrected (0 LLM)`,
+            ? `✓ Deterministic 修補：${fixResult.changes.length} 個 method/path/VAR/empty-table 問題已自動修正（0 LLM）${fixResult.fixedActionsYml ? ' + OpenAPI spec 同步重生' : ''}`
+            : `✓ Deterministic fix: ${fixResult.changes.length} method/path/VAR/empty-table issue(s) auto-corrected (0 LLM)${fixResult.fixedActionsYml ? ' + OpenAPI spec regenerated' : ''}`,
           stage: 'coder_generating',
         })
         // 重跑 RED Phase 確認修補生效
@@ -786,7 +792,7 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
     return
   }
 
-  // Deterministic pre-pass — method_mismatch / path_mismatch / var_in_call_table 0 LLM 修
+  // Deterministic pre-pass — method/path/var_in_call_table/empty_table_literal 0 LLM 修
   // 跟 coder-phases.ts:5.5 同邏輯；__realign_bdd__ 不會跑 executeRedPhase，這層獨立補位
   {
     const determResult = autoFixActionsAndFeatures(
@@ -800,6 +806,13 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
         bddSession.actions_yml_content = determResult.fixedActionsYml
         params.push(determResult.fixedActionsYml)
         setClauses.push(`actions_yml_content = $${params.length}`)
+
+        // 若 actionsYml 被改動，必須同步重生 OpenAPI spec
+        // （SpecFormula 從 open_api_spec_content 讀路徑跑測試 — 不重生會用舊扁平路徑 → 404）
+        const { convertToOpenAPI } = await import('../../services/actions-design')
+        const newOpenApiSpec = convertToOpenAPI(determResult.fixedActionsYml)
+        params.push(newOpenApiSpec)
+        setClauses.push(`open_api_spec_content = $${params.length}`)
       }
       if (determResult.fixedFeatures.size > 0) {
         bddSession.features_content = bddSession.features_content.map(f => {
@@ -818,8 +831,8 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
       }
       await sendMessage(conversationId, io, {
         content: isChinese
-          ? `✓ Deterministic pre-pass：${determResult.changes.length} 個 method/path/VAR 問題已自動修正（0 LLM）`
-          : `✓ Deterministic pre-pass: ${determResult.changes.length} method/path/VAR issue(s) auto-corrected (0 LLM)`,
+          ? `✓ Deterministic pre-pass：${determResult.changes.length} 個 method/path/VAR/empty-table 問題已自動修正（0 LLM）${determResult.fixedActionsYml ? ' + OpenAPI spec 同步重生' : ''}`
+          : `✓ Deterministic pre-pass: ${determResult.changes.length} method/path/VAR/empty-table issue(s) auto-corrected (0 LLM)${determResult.fixedActionsYml ? ' + OpenAPI spec regenerated' : ''}`,
         stage: 'coder_testing',
       })
     }
