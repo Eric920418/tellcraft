@@ -159,20 +159,29 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
         bddSession.actions_yml_content,
         bddSession.features_content,
       )
-      if (fixResult.changes.length > 0) {
+
+      // 5.5a — OpenAPI 同步檢查（獨立於 deterministic fix 是否觸發）
+      // 為何獨立：actionsYml 可能在前一輪 R5 已被改成新格式並 persist，但 open_api_spec_content
+      //   是 BDD phase 一次性生成、之後不重生 → 累積 stale 狀態。R5.1 第一版只在 fixResult
+      //   觸發時重生，bb0d1081 重試 Coder 時 fixResult 為空（actionsYml 已是新格式）→ 仍 stale → 404
+      // 修法：每次都對比 actionsYml 算出的 OpenAPI 跟 DB 的，不同步就重生。convertToOpenAPI
+      //   是純函數 ~ms 成本，重生 idempotent
+      const { convertToOpenAPI } = await import('../../services/actions-design')
+      const candidateActionsYml = fixResult.fixedActionsYml || bddSession.actions_yml_content
+      const expectedOpenApi = convertToOpenAPI(candidateActionsYml)
+      const openApiOutOfSync = expectedOpenApi !== bddSession.open_api_spec_content
+
+      if (fixResult.changes.length > 0 || openApiOutOfSync) {
         const setClauses: string[] = []
         const params: unknown[] = []
         if (fixResult.fixedActionsYml) {
           bddSession.actions_yml_content = fixResult.fixedActionsYml
           params.push(fixResult.fixedActionsYml)
           setClauses.push(`actions_yml_content = $${params.length}`)
-
-          // 若 actionsYml 被改動，必須同步重生 OpenAPI spec
-          // （SpecFormula 從 open_api_spec_content 讀路徑跑測試 — 不重生會用舊扁平路徑 → 404）
-          const { convertToOpenAPI } = await import('../../services/actions-design')
-          const newOpenApiSpec = convertToOpenAPI(fixResult.fixedActionsYml)
-          bddSession.open_api_spec_content = newOpenApiSpec
-          params.push(newOpenApiSpec)
+        }
+        if (openApiOutOfSync) {
+          bddSession.open_api_spec_content = expectedOpenApi
+          params.push(expectedOpenApi)
           setClauses.push(`open_api_spec_content = $${params.length}`)
         }
         if (fixResult.fixedFeatures.size > 0) {
@@ -190,20 +199,29 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
             params,
           )
         }
-        logger.info({ changes: fixResult.changes, regeneratedOpenApi: !!fixResult.fixedActionsYml }, 'Deterministic actionsYml/Feature fix 已套用')
+        logger.info({ changes: fixResult.changes, openApiOutOfSync }, 'Deterministic actionsYml/Feature/OpenAPI fix 已套用')
+        const parts: string[] = []
+        if (fixResult.changes.length > 0) {
+          parts.push(isChinese
+            ? `${fixResult.changes.length} 個 method/path/VAR/empty-table 問題自動修正（0 LLM）`
+            : `${fixResult.changes.length} method/path/VAR/empty-table issue(s) auto-corrected (0 LLM)`)
+        }
+        if (openApiOutOfSync) {
+          parts.push(isChinese ? 'OpenAPI spec 同步重生（解 stale path 404）' : 'OpenAPI spec regenerated (fix stale path 404)')
+        }
         await sendMessage(conversationId, io, {
-          content: isChinese
-            ? `✓ Deterministic 修補：${fixResult.changes.length} 個 method/path/VAR/empty-table 問題已自動修正（0 LLM）${fixResult.fixedActionsYml ? ' + OpenAPI spec 同步重生' : ''}`
-            : `✓ Deterministic fix: ${fixResult.changes.length} method/path/VAR/empty-table issue(s) auto-corrected (0 LLM)${fixResult.fixedActionsYml ? ' + OpenAPI spec regenerated' : ''}`,
+          content: '✓ Deterministic 修補：' + parts.join(' + '),
           stage: 'coder_generating',
         })
-        // 重跑 RED Phase 確認修補生效
-        redResult = await executeRedPhase({
-          features: bddSession.features_content,
-          actionsYml: bddSession.actions_yml_content,
-          schemaSql: bddSession.schema_sql_content,
-          entityMapping: bddSession.entity_mapping_content || '',
-        })
+        // 重跑 RED Phase 確認修補生效（修了東西才有必要重跑）
+        if (fixResult.changes.length > 0) {
+          redResult = await executeRedPhase({
+            features: bddSession.features_content,
+            actionsYml: bddSession.actions_yml_content,
+            schemaSql: bddSession.schema_sql_content,
+            entityMapping: bddSession.entity_mapping_content || '',
+          })
+        }
       }
     }
 
@@ -776,10 +794,11 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
     id: string
     features_content: Array<{ name: string; actionName: string; content: string }> | null
     actions_yml_content: string | null
+    open_api_spec_content: string | null
     schema_sql_content: string | null
     entity_mapping_content: string | null
   }>(
-    `SELECT id, features_content, actions_yml_content, schema_sql_content, entity_mapping_content
+    `SELECT id, features_content, actions_yml_content, open_api_spec_content, schema_sql_content, entity_mapping_content
      FROM bdd_sessions WHERE project_id = $1 ORDER BY updated_at DESC LIMIT 1`,
     [projectId]
   )
@@ -799,19 +818,25 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
       bddSession.actions_yml_content,
       bddSession.features_content,
     )
-    if (determResult.changes.length > 0) {
+
+    // OpenAPI 同步檢查（獨立於 deterministic fix）— bb0d1081 案例已驗證：actionsYml 已是新格式
+    // 但 OpenAPI spec 仍 stale，導致 SpecFormula 404 雪崩
+    const { convertToOpenAPI } = await import('../../services/actions-design')
+    const candidateActionsYml = determResult.fixedActionsYml || bddSession.actions_yml_content
+    const expectedOpenApi = convertToOpenAPI(candidateActionsYml)
+    const openApiOutOfSync = expectedOpenApi !== bddSession.open_api_spec_content
+
+    if (determResult.changes.length > 0 || openApiOutOfSync) {
       const setClauses: string[] = []
       const params: unknown[] = []
       if (determResult.fixedActionsYml) {
         bddSession.actions_yml_content = determResult.fixedActionsYml
         params.push(determResult.fixedActionsYml)
         setClauses.push(`actions_yml_content = $${params.length}`)
-
-        // 若 actionsYml 被改動，必須同步重生 OpenAPI spec
-        // （SpecFormula 從 open_api_spec_content 讀路徑跑測試 — 不重生會用舊扁平路徑 → 404）
-        const { convertToOpenAPI } = await import('../../services/actions-design')
-        const newOpenApiSpec = convertToOpenAPI(determResult.fixedActionsYml)
-        params.push(newOpenApiSpec)
+      }
+      if (openApiOutOfSync) {
+        bddSession.open_api_spec_content = expectedOpenApi
+        params.push(expectedOpenApi)
         setClauses.push(`open_api_spec_content = $${params.length}`)
       }
       if (determResult.fixedFeatures.size > 0) {
@@ -829,10 +854,17 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
           params,
         )
       }
+      const parts: string[] = []
+      if (determResult.changes.length > 0) {
+        parts.push(isChinese
+          ? `${determResult.changes.length} 個 method/path/VAR/empty-table 問題自動修正（0 LLM）`
+          : `${determResult.changes.length} method/path/VAR/empty-table issue(s) auto-corrected (0 LLM)`)
+      }
+      if (openApiOutOfSync) {
+        parts.push(isChinese ? 'OpenAPI spec 同步重生（解 stale path 404）' : 'OpenAPI spec regenerated (fix stale path 404)')
+      }
       await sendMessage(conversationId, io, {
-        content: isChinese
-          ? `✓ Deterministic pre-pass：${determResult.changes.length} 個 method/path/VAR/empty-table 問題已自動修正（0 LLM）${determResult.fixedActionsYml ? ' + OpenAPI spec 同步重生' : ''}`
-          : `✓ Deterministic pre-pass: ${determResult.changes.length} method/path/VAR/empty-table issue(s) auto-corrected (0 LLM)${determResult.fixedActionsYml ? ' + OpenAPI spec regenerated' : ''}`,
+        content: '✓ Deterministic pre-pass：' + parts.join(' + '),
         stage: 'coder_testing',
       })
     }

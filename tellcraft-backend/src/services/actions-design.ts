@@ -1077,7 +1077,11 @@ export function convertToOpenAPI(actionsYml: string, projectName?: string): stri
     }
 
     operation.responses = responses
-    paths[pathKey] = { [method]: operation }
+    // 同 pathKey 不同 method 必須 merge（不能直接覆蓋）— RESTful 設計下 /api/admin/faqs 同時有 GET (list) + POST (create) 是正常的
+    if (!paths[pathKey] || typeof paths[pathKey] !== 'object') {
+      paths[pathKey] = {}
+    }
+    (paths[pathKey] as Record<string, unknown>)[method] = operation
   }
 
   return yaml.dump(openapi, { indent: 2, lineWidth: 120, noRefs: true })
