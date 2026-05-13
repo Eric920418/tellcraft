@@ -14,7 +14,7 @@ import { Pool } from 'pg'
 import { hashSync } from 'bcryptjs'
 import { createLogger } from '../lib/logger'
 import { deriveSchemaFromBdd } from './schema-derivation'
-import { convertToOpenAPI } from './actions-design'
+import { convertToOpenAPI, deriveActionMethod } from './actions-design'
 import type { GeneratedComponent } from './uiux-generation'
 import { extractDispatchSummaries, guessHttpMethodForSummary } from './coder-generation'
 import { sanitizeFeatureContent } from './formulation'
@@ -2378,16 +2378,19 @@ function generateTestServerCode(
             .map((w: string, i: number) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
             .join('')
 
-      const isQuery = action.rules?.some(r => r.type === '後置（回應）') && !action.rules?.some(r => r.type === '後置（狀態）')
-      const method = (action.method || (isQuery ? 'GET' : 'POST')).toUpperCase()
+      // 統一用 R5 的 deriveActionMethod 推導 method（識別 PUT/PATCH/DELETE，避免 isQuery 二元判斷）
+      const method = deriveActionMethod(action)
       const apiPath = action.path || `/api/${action.name}`
       const statusCode = method === 'POST' ? 201 : 200
 
+      // Express method-specific router — 不用 app.all（RESTful pair 共用 path 時 app.all 會先註冊者勝出，
+      // bb0d1081 案例：list_faqs (GET) + create_faq (POST) 同 path → POST 永遠被 GET handler 攔截 → 回 [] → 9+ Create 全 fail）
+      // 五個 HTTP method 之外 fallback all（不會發生但 defensive）
+      const expressMethod = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? method.toLowerCase() : 'all'
+
       actionImports.push(`import { ${fnName} } from './lib/actions/${kebabName}'`)
 
-      // 註冊所有 HTTP 方法 — 同一 Feature 內可能有 POST/GET/PUT/DELETE 操作
-      // status code 由 action 函數的 __status 欄位控制
-      actionRoutes.push(`app.all('${apiPath}', async (req, res) => {
+      actionRoutes.push(`app.${expressMethod}('${apiPath}', async (req, res) => {
   try {
     const input = req.method === 'GET' ? req.query : req.body
     console.log('[TestServer DEBUG] ${apiPath}', req.method, JSON.stringify(input).substring(0, 300))
