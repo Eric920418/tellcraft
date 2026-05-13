@@ -111,19 +111,39 @@ export class DataTableResponseValidate {
       // ===== 單行驗證 =====
       // L24.B: 若 Feature 的 Then headers 與 top-level wrap 欄位（items/total/page/...）
       //        不匹配（代表 Feature 期望的是 item 欄位而非 wrap 欄位） → drill 到 arrayTarget[0]
+      // L24.D (page-sections bb0d1081 case)：array response + 單行 expected 含 id 欄位 →
+      //   按 id find 對應 row（解「Given 加新 entity + Then 驗該 entity 存在於 list」常見 BDD 模式）
+      const row = rows[0];
       let responseMap: Record<string, unknown>;
+
+      // 嘗試 find-by-id：expected row 有 id 欄位且能 resolve → array.find
+      const findByIdRow = (arr: unknown[]): Record<string, unknown> | null => {
+        const idValue = row['id'];
+        if (!idValue) return null;
+        let resolved: unknown;
+        try {
+          resolved = this.resolver.resolveVariable(idValue);
+        } catch { return null; }
+        if (resolved === null || resolved === undefined || resolved === '') return null;
+        const resolvedStr = String(resolved);
+        const found = arr.find(item => {
+          if (!item || typeof item !== 'object') return false;
+          const itemId = (item as Record<string, unknown>)['id'];
+          return itemId != null && String(itemId) === resolvedStr;
+        });
+        return found ? (found as Record<string, unknown>) : null;
+      };
+
       if (Array.isArray(parsed)) {
-        responseMap = parsed.length > 0 ? (parsed[0] as Record<string, unknown>) : {};
+        responseMap = findByIdRow(parsed) ?? (parsed.length > 0 ? (parsed[0] as Record<string, unknown>) : {});
       } else if (arrayTarget && parsed && typeof parsed === 'object') {
         const topLevelObj = parsed as Record<string, unknown>;
         const firstNonVarHeader = validateHeaders
           .map(h => h.trim())
           .find(h => !h.startsWith('>') && !h.startsWith('<'));
         if (firstNonVarHeader && !(firstNonVarHeader in topLevelObj)) {
-          // Feature 驗證的欄位在 top-level 找不到 → drill 到 array 第一元素
-          responseMap = arrayTarget.length > 0
-            ? (arrayTarget[0] as Record<string, unknown>)
-            : {};
+          // Feature 驗證的欄位在 top-level 找不到 → drill 到 array（先嘗試 find-by-id，再 fallback [0]）
+          responseMap = findByIdRow(arrayTarget) ?? (arrayTarget.length > 0 ? (arrayTarget[0] as Record<string, unknown>) : {});
         } else {
           responseMap = topLevelObj;
         }
@@ -131,7 +151,6 @@ export class DataTableResponseValidate {
         responseMap = parsed as Record<string, unknown>;
       }
 
-      const row = rows[0];
       this.validateSingleRow(summary, validateHeaders, row, responseMap);
 
       // VAR-System 變數擷取
