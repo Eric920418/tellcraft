@@ -137,24 +137,34 @@ async function validateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
         entityMapping: bddSession.entity_mapping_content || '',
       })
 
-      // 4.5 Deterministic 修補 — method_mismatch / path_mismatch / var_in_call_table 0 LLM 修
-      // 同 coder-phases.ts:156-202 邏輯（之前漏在 LangGraph 路徑），舊對話 retry 也會被修
-      const hasDeterministicallyFixable = redResult.issues.some(i =>
-        i.issueType === 'method_mismatch' || i.issueType === 'path_mismatch' || i.issueType === 'var_in_call_table'
-      )
-      if (hasDeterministicallyFixable && bddSession.actions_yml_content) {
+      // 4.5 Deterministic 修補（與 coder-phases.ts:5.5 同步 — R5.1 v2 邏輯）
+      // 無條件跑：empty `[]` literal 在 executeRedPhase 偵測不到，且 OpenAPI 同步檢查獨立於 fixResult
+      if (bddSession.actions_yml_content) {
         const { autoFixActionsAndFeatures } = await import('../../services/deterministic-actions-fix')
         const fixResult = autoFixActionsAndFeatures(
           bddSession.actions_yml_content,
           bddSession.features_content,
         )
-        if (fixResult.changes.length > 0) {
+
+        // OpenAPI 同步檢查 — bb0d1081 案例：actionsYml 已是新格式但 OpenAPI 仍 stale，
+        // 不獨立檢查的話雪崩 75 個 404
+        const { convertToOpenAPI } = await import('../../services/actions-design')
+        const candidateActionsYml = fixResult.fixedActionsYml || bddSession.actions_yml_content
+        const expectedOpenApi = convertToOpenAPI(candidateActionsYml)
+        const openApiOutOfSync = expectedOpenApi !== bddSession.open_api_spec_content
+
+        if (fixResult.changes.length > 0 || openApiOutOfSync) {
           const setClauses: string[] = []
           const params: unknown[] = []
           if (fixResult.fixedActionsYml) {
             bddSession.actions_yml_content = fixResult.fixedActionsYml
             params.push(fixResult.fixedActionsYml)
             setClauses.push(`actions_yml_content = $${params.length}`)
+          }
+          if (openApiOutOfSync) {
+            bddSession.open_api_spec_content = expectedOpenApi
+            params.push(expectedOpenApi)
+            setClauses.push(`open_api_spec_content = $${params.length}`)
           }
           if (fixResult.fixedFeatures.size > 0) {
             bddSession.features_content = (bddSession.features_content as Array<{ name: string; actionName: string; content: string }>).map(f => {
@@ -171,20 +181,29 @@ async function validateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
               params,
             )
           }
-          logger.info({ changes: fixResult.changes }, 'LangGraph Coder: Deterministic actionsYml/Feature fix 已套用')
+          logger.info({ changes: fixResult.changes, openApiOutOfSync }, 'LangGraph Coder: Deterministic actionsYml/Feature/OpenAPI fix 已套用')
+          const parts: string[] = []
+          if (fixResult.changes.length > 0) {
+            parts.push(isChinese
+              ? `${fixResult.changes.length} 個 method/path/VAR/empty-table 問題自動修正（0 LLM）`
+              : `${fixResult.changes.length} method/path/VAR/empty-table issue(s) auto-corrected (0 LLM)`)
+          }
+          if (openApiOutOfSync) {
+            parts.push(isChinese ? 'OpenAPI spec 同步重生（解 stale path 404）' : 'OpenAPI spec regenerated (fix stale path 404)')
+          }
           await sendMessage(conversationId, io, {
-            content: isChinese
-              ? `✓ Deterministic 修補：${fixResult.changes.length} 個 method/path/VAR 問題已自動修正（0 LLM）`
-              : `✓ Deterministic fix: ${fixResult.changes.length} method/path/VAR issue(s) auto-corrected (0 LLM)`,
+            content: '✓ Deterministic 修補：' + parts.join(' + '),
             stage: 'coder_generating',
           })
           // 重跑 RED Phase 確認修補生效
-          redResult = await executeRedPhase({
-            features: bddSession.features_content,
-            actionsYml: bddSession.actions_yml_content,
-            schemaSql: bddSession.schema_sql_content,
-            entityMapping: bddSession.entity_mapping_content || '',
-          })
+          if (fixResult.changes.length > 0) {
+            redResult = await executeRedPhase({
+              features: bddSession.features_content,
+              actionsYml: bddSession.actions_yml_content,
+              schemaSql: bddSession.schema_sql_content,
+              entityMapping: bddSession.entity_mapping_content || '',
+            })
+          }
         }
       }
 
