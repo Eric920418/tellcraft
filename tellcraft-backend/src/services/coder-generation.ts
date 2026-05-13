@@ -2380,7 +2380,73 @@ ${methodHandlers.join('\n\n')}
     })
   }
 
-  return files
+  // Post-process: merge files with same path（RESTful 設計下同 path 不同 method 是常態：
+  // list_faqs GET /api/admin/faqs + create_faq POST /api/admin/faqs 必須共存於 route.ts）
+  // 不 merge 的話後者 push 會 UPSERT 覆蓋前者 → list_* endpoint 全消失 → 404 雪崩
+  return mergeRouteFilesByPath(files)
+}
+
+/**
+ * 把 path 相同的多個 route.ts 合併成單一檔案（不同 method 都保留）
+ */
+function mergeRouteFilesByPath(files: GeneratedComponent[]): GeneratedComponent[] {
+  const byPath = new Map<string, GeneratedComponent[]>()
+  for (const f of files) {
+    if (!byPath.has(f.path)) byPath.set(f.path, [])
+    byPath.get(f.path)!.push(f)
+  }
+
+  const result: GeneratedComponent[] = []
+  for (const [path, group] of byPath) {
+    if (group.length === 1) {
+      result.push(group[0])
+      continue
+    }
+
+    const allImports = new Set<string>()
+    const handlersByMethod = new Map<string, string>()
+    const descriptions: string[] = []
+
+    for (const f of group) {
+      if (f.description) descriptions.push(f.description)
+      const lines = f.content.split('\n')
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed.startsWith('import ') && trimmed.endsWith("'")) {
+          allImports.add(trimmed)
+        }
+      }
+      const fnRegex = /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s*\(/g
+      let m: RegExpExecArray | null
+      while ((m = fnRegex.exec(f.content)) !== null) {
+        const method = m[1]
+        const start = m.index
+        const braceStart = f.content.indexOf('{', start)
+        if (braceStart < 0) continue
+        let depth = 1
+        let i = braceStart + 1
+        while (i < f.content.length && depth > 0) {
+          const ch = f.content[i]
+          if (ch === '{') depth++
+          else if (ch === '}') depth--
+          i++
+        }
+        if (depth !== 0) continue
+        const handlerCode = f.content.slice(start, i)
+        if (!handlersByMethod.has(method)) {
+          handlersByMethod.set(method, handlerCode)
+        }
+      }
+    }
+
+    const mergedContent = `${Array.from(allImports).join('\n')}\n\n${SAFE_API_ERROR_HELPER}\n\n${Array.from(handlersByMethod.values()).join('\n\n')}\n`
+    result.push({
+      path,
+      content: mergedContent,
+      description: descriptions.join(' + '),
+    })
+  }
+  return result
 }
 
 // ============================================================
