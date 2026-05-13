@@ -101,9 +101,17 @@ Vercel (Next.js 16, sin1, maxDuration 60)
 | Remotion | `components/remotion/` + `building-scene/` | | Fast Build 工廠 + BDD 蓋房子 3D |
 | Landing | `components/landing/` | ~1978 | 16 個自包含組件 |
 
-### LangGraph 編排（Feature Flag `USE_LANGGRAPH`，預設 off）
+### LangGraph 編排（Feature Flag `USE_LANGGRAPH`，**code 預設 false / prod env 真實值 true** — bb0d1081 事件確認）
 
 `graph/`：`classify → phase_router → skill subgraph → END`，Pointer State Pattern（State ~1KB，大資料留 Redis+PG）。`graph/checkpointer.ts` 用 PostgresSaver（migration 032）。新增/修改 phase handler 必須同步 `graph/nodes/phase-router.ts`。
+
+🚨 **修 Coder/BDD/RED Phase 相關邏輯時必須雙路徑同步改**：
+- BullMQ 路徑：`workers/phase-handlers/coder-phases.ts`（`executeCoderSkill` / `executeRealignBdd` / `executeCoderTesting`）
+- LangGraph 路徑：`graph/subgraphs/coder-subgraph.ts`（`bddNode` / `codeGenNode` / `testNode`）
+- **改前必跑：`grep -rn "<關鍵函數名>" tellcraft-backend/src/{workers,graph,services} 2>/dev/null`** 確認所有觸發點
+- **改後必驗：log 模組名 `module:"coder-phases"` vs `module:"coder-subgraph"` 兩種都會出現**，缺一就是漏改
+- R5.1 事件：v1/v2/v3 三輪只改 BullMQ 路徑，用戶 prod 走 LangGraph 完全沒套用，浪費三輪部署
+- 治本：deterministic-fix / OpenAPI sync / 認證 check 等核心邏輯**應抽 helper** 兩邊 import 共用，從 source 層保證不漏接
 
 ### Skill 系統
 
@@ -225,6 +233,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 ### 流程編排與 phase 狀態
 
 - **新增 phase 必須五處同步**：`handleContinueFlow` 路由（含超時）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union + `graph/nodes/phase-router.ts`
+- 🚨 **改 Coder/RED Phase/BDD 邏輯必須雙路徑同步**：BullMQ (`workers/phase-handlers/coder-phases.ts`) + LangGraph (`graph/subgraphs/coder-subgraph.ts`)。**prod 開啟 USE_LANGGRAPH=true（與 code default false 脫節）**。改前 `grep -rn "<key fn>" src/{workers,graph,services}` 確認所有觸發點；改後 worker log 看 `module:"coder-phases"` 和 `module:"coder-subgraph"` 兩種都出現才完整。R5.1 v1-v3 漏接 LangGraph 浪費三輪部署。**新邏輯應抽 helper 兩邊 import 共用**
 - **生成中 phase 孤兒偵測三層**：(1) conv-lock 不存在+60s→恢復 (2) lock 存在但 startedAt>5min+無心跳→過期恢復 (3) 20min 超時
 - **handleProcessMessage→handleContinueFlow 必須帶 `skipPrefilterAndCredit: true`**，否則 prefilter + credit 雙重執行（雙重扣款）。BullMQ `continue-flow` job 直接呼叫不帶
 - **Skill 函數提前 return 必須保存 FlowState**，否則用戶對話永久卡死
@@ -355,4 +364,4 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 前端（`.env.local`）：`VPS_API_URL`, `NEXT_PUBLIC_VPS_{API,WS}_URL`, `NEXT_PUBLIC_SUPABASE_{URL,ANON_KEY}`, `NEXT_PUBLIC_LIFF_ID`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_{ORG,PROJECT,AUTH_TOKEN}`
 
-後端（`tellcraft-backend/.env`）：定義在 `lib/env.ts` Zod schema（三層 REQUIRED/OPTIONAL/功能開關）。關鍵：`NEON_API_KEY` / `NEON_DEFAULT_REGION`（預設 `aws-ap-southeast-1`，注意 `aws-ap-northeast-1` 已從 Neon 移除）。常用開關：`ENABLE_PROMPT_CACHING`(true) / `FAST_BUILD_MERGED_ANIM_RWD`(true) / `ENABLE_DIFF_OUTPUT`(false) / `USE_LANGGRAPH`(false) / `ENABLE_UI_EVALUATOR` / `ENABLE_AXE_CORE` / `ENABLE_READABILITY_CHECK` / `ENABLE_DESIGN_QUALITY_REPORT` / `VENDORED_FAST_PATH` / `DESIGN_TOKEN_SEVERITY`(warning) / `USE_FROZEN_DESIGN_SYSTEM_PIPELINE`(true) / `SYNC_DESIGN_SYSTEM_AFTER_ITERATION`(true) / `ENABLE_DESIGN_MD_EXPORT`(true) / `PHASE_3A_SPEC_FIRST_REPAIR` / `PHASE_3B_PRE_CODER_VALIDATION` / `PHASE_3C_DRY_RUN_THEN_VALIDATION` / `MAX_CONVERSATION_COST_USD`(20) / `ALIGNMENT_GATE_MAX_{LLM_CALLS,COST_USD}`
+後端（`tellcraft-backend/.env`）：定義在 `lib/env.ts` Zod schema（三層 REQUIRED/OPTIONAL/功能開關）。關鍵：`NEON_API_KEY` / `NEON_DEFAULT_REGION`（預設 `aws-ap-southeast-1`，注意 `aws-ap-northeast-1` 已從 Neon 移除）。常用開關：`ENABLE_PROMPT_CACHING`(true) / `FAST_BUILD_MERGED_ANIM_RWD`(true) / `ENABLE_DIFF_OUTPUT`(false) / `USE_LANGGRAPH`(**code false 但 prod env true** — 改 Coder/BDD 邏輯必須雙路徑同步，見「防雷清單」) / `ENABLE_UI_EVALUATOR` / `ENABLE_AXE_CORE` / `ENABLE_READABILITY_CHECK` / `ENABLE_DESIGN_QUALITY_REPORT` / `VENDORED_FAST_PATH` / `DESIGN_TOKEN_SEVERITY`(warning) / `USE_FROZEN_DESIGN_SYSTEM_PIPELINE`(true) / `SYNC_DESIGN_SYSTEM_AFTER_ITERATION`(true) / `ENABLE_DESIGN_MD_EXPORT`(true) / `PHASE_3A_SPEC_FIRST_REPAIR` / `PHASE_3B_PRE_CODER_VALIDATION` / `PHASE_3C_DRY_RUN_THEN_VALIDATION` / `MAX_CONVERSATION_COST_USD`(20) / `ALIGNMENT_GATE_MAX_{LLM_CALLS,COST_USD}`
