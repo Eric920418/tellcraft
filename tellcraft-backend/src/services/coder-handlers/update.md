@@ -6,6 +6,13 @@
 For optional/partial UPDATE fields, use the `COALESCE(${input.x}, x)` pattern.
 
 ```typescript
+// Precondition (params) validation — REQUIRED for every field BDD's rule type "前置（參數）" mentions.
+// For each "Required parameters must be provided (X, Y, ...)" rule OR any "Missing X causes failure"
+// scenario, add validation. Empty string and undefined both count as "missing".
+if (!input.xxx || (typeof input.xxx === 'string' && input.xxx.trim() === '')) {
+  throw new Error('xxx is required')
+}
+
 // Use the EXACT parameter name from the Feature When table header. Do NOT use `input.id || input.xxxId`.
 const entityId = input.<ExactHeaderNameFromFeature>
 if (!entityId) throw new Error('<ExactHeaderNameFromFeature> is required')
@@ -15,6 +22,8 @@ const existing = await sql`SELECT * FROM table_name WHERE id = ${entityId} AND u
 if (existing.length === 0) throw new Error('not found or not owned by current user')
 
 // ✅ Partial UPDATE — pass each input field through COALESCE so undefined keeps the original value
+// ⚠️ EXCEPTION: for fields validated as required above, use ${input.X} directly (NOT COALESCE) since
+//    undefined already triggered the throw — using COALESCE here would silently preserve original.
 const [row] = await sql`
   UPDATE table_name SET
     title       = COALESCE(${input.title},       title),
