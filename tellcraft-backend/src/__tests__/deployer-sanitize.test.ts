@@ -505,6 +505,30 @@ describe('依賴掃描', () => {
     expect(result.extraDependencies['motion']).toBeUndefined()
   })
 
+  it('L34: 偵測 dynamic import — `await import(\'@vercel/blob\')`（bb0d1081 案例）', () => {
+    const code = makeCode({
+      pages: [makeFile('app/api/upload/route.ts', `export async function POST() {
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const { put } = await import('@vercel/blob')
+    return put('x', null as any, { access: 'public' })
+  }
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.extraDependencies['@vercel/blob']).toBeDefined()
+    expect(result.extraDependencies['@vercel/blob']).toBe('^0.20.0')
+  })
+
+  it('L34: 偵測 dynamic import `import(\'pkg\').then(...)` 寫法', () => {
+    const code = makeCode({
+      pages: [makeFile('app/api/x/route.ts', `export async function GET() {
+  return import('jsonwebtoken').then(jwt => jwt.sign({}, 'secret'))
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.extraDependencies['jsonwebtoken']).toBeDefined()
+  })
+
   it('未知 @radix-ui 套件使用通用 fallback 版本', () => {
     const code = makeCode({
       pages: [makeFile('app/page.tsx', `import * as Foo from '@radix-ui/react-foo'\nexport default function Page() { return <Foo.Root /> }`)],

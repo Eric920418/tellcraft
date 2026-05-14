@@ -870,36 +870,31 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
   const basePkgs = new Set(Object.keys(BASE_DEPS))
   const importRegex = /import\s+[\s\S]*?\s+from\s+['"]([^./][^'"]*)['"]/g
   const requireRegex = /require\(['"]([^./][^'"]*)['"]\)/g
+  // L34: dynamic import — bb0d1081 `await import('@vercel/blob')` 之前 regex 抓不到 → build 撞 Module not found
+  const dynamicImportRegex = /\bimport\s*\(\s*['"]([^./][^'"]*)['"]\s*\)/g
+
+  const collectDep = (raw: string, allowReactNext = true): void => {
+    const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
+    if (basePkgs.has(pkg)) return
+    if (allowReactNext && (pkg.startsWith('next/') || pkg.startsWith('react/') || pkg.startsWith('react-dom/'))) return
+    if (pkg.startsWith('@types/') || pkg.startsWith('node:')) return
+    if (KNOWN_PACKAGES[pkg]) {
+      extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
+    } else if (pkg.startsWith('@radix-ui/')) {
+      extraDependencies[pkg] = '^1.1.0'
+    } else {
+      fixes.push(`⚠️ 未知依賴 ${pkg}（不在 KNOWN_PACKAGES 中）`)
+    }
+  }
 
   for (const file of allFiles) {
-    let m
-    // 重置 regex lastIndex
+    let m: RegExpExecArray | null
     importRegex.lastIndex = 0
-    while ((m = importRegex.exec(file.content)) !== null) {
-      const raw = m[1]
-      const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
-      if (!basePkgs.has(pkg) && !pkg.startsWith('next/') && !pkg.startsWith('react/') && !pkg.startsWith('react-dom/')) {
-        if (KNOWN_PACKAGES[pkg]) {
-          extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
-        } else if (pkg.startsWith('@radix-ui/')) {
-          extraDependencies[pkg] = '^1.1.0' // Radix 通用 fallback 版本
-        } else if (!pkg.startsWith('@types/') && !pkg.startsWith('node:')) {
-          fixes.push(`⚠️ 未知依賴 ${pkg}（不在 KNOWN_PACKAGES 中）`)
-        }
-      }
-    }
+    while ((m = importRegex.exec(file.content)) !== null) collectDep(m[1])
     requireRegex.lastIndex = 0
-    while ((m = requireRegex.exec(file.content)) !== null) {
-      const raw = m[1]
-      const pkg = raw.startsWith('@') ? raw.split('/').slice(0, 2).join('/') : raw.split('/')[0]
-      if (!basePkgs.has(pkg)) {
-        if (KNOWN_PACKAGES[pkg]) {
-          extraDependencies[pkg] = KNOWN_PACKAGES[pkg]
-        } else if (!pkg.startsWith('@types/') && !pkg.startsWith('node:')) {
-          fixes.push(`⚠️ 未知依賴 ${pkg}（不在 KNOWN_PACKAGES 中）`)
-        }
-      }
-    }
+    while ((m = requireRegex.exec(file.content)) !== null) collectDep(m[1], false)
+    dynamicImportRegex.lastIndex = 0
+    while ((m = dynamicImportRegex.exec(file.content)) !== null) collectDep(m[1])
   }
 
   if (Object.keys(extraDependencies).length > 0) {
