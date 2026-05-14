@@ -411,6 +411,35 @@ function buildActionSystemPrompt(action?: ActionEntry): CacheableSystemPrompt {
     handlers.push('column-alias')
   }
 
+  // --- Tier A2: 結構性盲區補強 handlers ---
+
+  // Pagination handler — 任何有 input.page / input.pageSize / input.limit / input.offset 的查詢
+  // 或 rule/name 文字提到分頁，或 query-list 預設加（防分頁 offset 邊界錯）
+  const inputProps = (action.input as Record<string, unknown> | undefined)?.properties as Record<string, unknown> | undefined
+  const inputHasPagination = !!(inputProps && (inputProps.page || inputProps.pageSize || inputProps.limit || inputProps.offset))
+  if (inputHasPagination || /分頁|page|paginat|pageSize|limit|offset/i.test(allText)) {
+    handlers.push('pagination')
+  }
+
+  // Search handler — name 或 rule 提及搜尋類關鍵字
+  if (/search|find|keyword|搜尋|查詢關鍵|filter/i.test(allText) && !/^(get|list|fetch)_/.test(action.name || '')) {
+    handlers.push('search')
+  }
+
+  // Auth-guard handler — 任何非 public action（name 不含 public/anon）+ rule 暗示需要認證
+  // 不重複加 auth (那個是 login/register 用)；auth-guard 是「行動前的權限檢查」
+  const isPublicAction = /public|anon|guest|visitor|signup|register|login|reset_password|forgot_password/i.test(nameHint)
+  if (!isPublicAction && (hasStateRules || hasResponseRules)) {
+    handlers.push('auth-guard')
+  }
+
+  // Soft-delete-aware handler — 看 schema 有沒有 deleted_at column
+  // 注：這裡無法直接讀 schema string（在 user prompt 帶入），用啟發式 — 若任何 rule 提到 deleted/已刪除/復原/restore
+  // 或 name 含 delete/restore 都加。Schema 沒 deleted_at 時 template 自己會 noop
+  if (/delete|restore|刪除|復原|recover|trash|deleted_at/i.test(allText)) {
+    handlers.push('soft-delete-aware')
+  }
+
   return buildCacheableSystem(BASE_PROMPT, getCoderHandlersJoined(handlers))
 }
 

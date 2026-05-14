@@ -67,3 +67,19 @@ handlers:
     file: email-sender.md
     description: Resend 發信（驗證信/通知信/magic-link）+ HTML escape
     trigger: name 匹配 /email|寄信|通知|notify|verify|confirm|mail|發信/i
+  - id: pagination
+    file: pagination.md
+    description: 分頁查詢（LIMIT/OFFSET + 邊界 + items/total/page/pageSize/totalPages 回應結構）
+    trigger: rule 文字匹配 /分頁|page|paginat|pageSize|limit|offset/i 或 input 含 page/pageSize 欄位
+  - id: search
+    file: search.md
+    description: 關鍵字搜尋（ILIKE + parameterized + 長度上限防 DoS）
+    trigger: name 匹配 /search|find|query|搜尋|查詢/i 或 rule 文字匹配 /搜尋|keyword|search/i
+  - id: auth-guard
+    file: auth-guard.md
+    description: 認證+授權守門（401 / 403 / 404 嚴格區分，user_id 所有權檢查）
+    trigger: rule 文字匹配 /授權|認證|權限|擁有|own|admin|forbidden|unauthor/i 或所有非 public action
+  - id: soft-delete-aware
+    file: soft-delete-aware.md
+    description: 軟刪除感知（所有 query 加 deleted_at IS NULL，僅 Schema 含 deleted_at 才套）
+    trigger: Schema DDL 含 deleted_at column 的 table 上所有 action

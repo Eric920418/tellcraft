@@ -61,6 +61,11 @@ export const CODER_HANDLER_IDS = [
   'cascade',
   'column-alias',
   'email-sender',
+  // Tier A2 — 結構性盲區補強
+  'pagination',
+  'search',
+  'auth-guard',
+  'soft-delete-aware',
 ] as const
 
 export type CoderHandlerId = typeof CODER_HANDLER_IDS[number]

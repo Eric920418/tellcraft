@@ -29,8 +29,8 @@ describe('getCoderHandler — 全部 handler 可載入', () => {
     })
   }
 
-  it('14 個 handler 全部有註冊', () => {
-    expect(CODER_HANDLER_IDS).toHaveLength(14)
+  it('18 個 handler 全部有註冊', () => {
+    expect(CODER_HANDLER_IDS).toHaveLength(18)
   })
 
   it('email-sender handler 已註冊', () => {
