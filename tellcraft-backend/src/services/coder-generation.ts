@@ -2779,36 +2779,55 @@ export async function identifyMockDataComponents(
 ): Promise<{ needsRewrite: GeneratedComponent[]; unchanged: GeneratedComponent[] }> {
   const allComponents = [...code.pages, ...code.components]
 
-  // Haiku LLM 識別（需要 availableActions）
+  // Tier A3: Haiku ∪ regex 聯集識別 — Haiku 可能漏掉某些 high-confidence mock pattern
+  // (例：const X_DATA = [{...}, {...}, {...}] 三 row 以上)，regex 比較 strict 但 recall 更高
+  // 兩者皆判定需改寫的，最終 UNION（取最大集），降低 mock data 殘留率
+  let haikuIndices: Set<number> | null = null
   if (options?.availableActions && options.availableActions.length > 0) {
     const indices = await classifyComponentsWithHaiku(
       allComponents,
       options.availableActions,
       options.trackingContext,
     )
-
     if (indices !== null) {
-      const indexSet = new Set(indices)
-      const needsRewrite: GeneratedComponent[] = []
-      const unchanged: GeneratedComponent[] = []
-      for (let i = 0; i < allComponents.length; i++) {
-        if (indexSet.has(i)) {
-          needsRewrite.push(allComponents[i])
-        } else {
-          unchanged.push(allComponents[i])
-        }
-      }
-      logger.info({ needsRewrite: needsRewrite.length, unchanged: unchanged.length, method: 'haiku' }, '組件分類完成')
-      return { needsRewrite, unchanged }
+      haikuIndices = new Set(indices)
+    } else {
+      logger.warn('Haiku 識別失敗，僅靠 regex')
     }
-
-    logger.warn('Haiku 識別失敗，降級到 regex')
   }
 
-  // Fallback: regex
-  const result = identifyByRegex(allComponents)
-  logger.info({ needsRewrite: result.needsRewrite.length, unchanged: result.unchanged.length, method: 'regex' }, '組件分類完成')
-  return result
+  // Regex 識別 — 不再只當 fallback，與 Haiku 結果做 UNION
+  const regexResult = identifyByRegex(allComponents)
+  const regexPathSet = new Set(regexResult.needsRewrite.map(c => c.path))
+
+  const needsRewrite: GeneratedComponent[] = []
+  const unchanged: GeneratedComponent[] = []
+  let haikuOnly = 0
+  let regexOnly = 0
+  let bothMatch = 0
+  for (let i = 0; i < allComponents.length; i++) {
+    const comp = allComponents[i]
+    const inHaiku = haikuIndices?.has(i) ?? false
+    const inRegex = regexPathSet.has(comp.path)
+    const flagged = inHaiku || inRegex
+    if (flagged) {
+      needsRewrite.push(comp)
+      if (inHaiku && inRegex) bothMatch++
+      else if (inHaiku) haikuOnly++
+      else regexOnly++
+    } else {
+      unchanged.push(comp)
+    }
+  }
+  logger.info({
+    needsRewrite: needsRewrite.length,
+    unchanged: unchanged.length,
+    haikuOnly,
+    regexOnly,
+    bothMatch,
+    method: haikuIndices ? 'haiku_union_regex' : 'regex_only',
+  }, '組件分類完成 (Tier A3 union)')
+  return { needsRewrite, unchanged }
 }
 
 // ============================================================
@@ -3408,6 +3427,23 @@ export async function executeCoderPipeline(
   // 二次掃描：記錄仍殘留的 mock data 組件（用於警告用戶）
   const finalMockScan = scanForRemainingMockData(rewrittenFrontend, mockDataFiles)
   const mockDataWarnings = finalMockScan.map(r => r.path)
+
+  // Tier A3: telemetry 量化 mock 殘留率（給週報追蹤）
+  void recordTelemetry({
+    skillName: 'coder',
+    eventType: mockDataWarnings.length > 0 ? 'coder_test_fail' : 'coder_test_fix_success',
+    patternKey: mockDataWarnings.length > 0 ? 'mock_data_residual' : 'mock_data_clean',
+    outcome: mockDataWarnings.length > 0 ? 'failed' : 'success',
+    phase: 'mock_data_scan',
+    severity: mockDataWarnings.length > 0 ? 'warning' : 'info',
+    userId: trackingContext?.userId,
+    conversationId: trackingContext?.conversationId,
+    payload: {
+      mockDataLeftCount: mockDataWarnings.length,
+      totalComponents: rewrittenFrontend.length + unchanged.length,
+      mockDataLeftPaths: mockDataWarnings.slice(0, 10),  // 前 10 個避免 payload 太大
+    },
+  }).catch(() => {})
   if (mockDataWarnings.length > 0) {
     logger.warn({ components: mockDataWarnings }, '二次改寫後仍有組件殘留 mock data')
   }

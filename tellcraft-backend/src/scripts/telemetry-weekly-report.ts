@@ -22,10 +22,12 @@ import {
   measurePromptChangeEffects,
   getActivePromptChanges,
   findDirectionACandidates,
+  findStructuralFailureCandidates,
   findUnregisteredSanitizePatterns,
   type WeeklyReportWithDelta,
   type PromptChangeEffect,
   type DirectionACandidate,
+  type StructuralFailureCandidate,
   type WeeklyReportRow,
   type FailureOverviewRow,
   type FailureByPhaseRow,
@@ -241,6 +243,19 @@ function formatDirectionACandidates(candidates: DirectionACandidate[]): string {
   return lines.join('\n') + '\n'
 }
 
+function formatStructuralFailureCandidates(candidates: StructuralFailureCandidate[]): string {
+  if (candidates.length === 0) {
+    return '_（本週無 ≥5 次 結構性失敗候選 — 系統可能已穩定，或週流量低）_\n'
+  }
+  const lines: string[] = []
+  for (const c of candidates) {
+    lines.push(
+      `- [ ] \`${c.pattern_key}\` (${c.event_type} @ ${c.skill_name}, ${c.count}/week) — ${c.recommendation}`
+    )
+  }
+  return lines.join('\n') + '\n'
+}
+
 // ============================================================
 // Action Items
 // ============================================================
@@ -392,6 +407,7 @@ function renderMarkdown(
   report: WeeklyReportWithDelta,
   effects: PromptChangeEffect[],
   directionA: DirectionACandidate[],
+  structuralCandidates: StructuralFailureCandidate[],
   unregistered: string[],
   failureData?: { byOutcome: FailureOverviewRow[]; byPhase: FailureByPhaseRow[]; topRootCauses: RootCauseRow[]; recoveryStats: RecoveryRow[] }
 ): string {
@@ -441,6 +457,23 @@ ${formatRetirementCandidates(effects)}
 > 常見場景：pattern 在 deployer sanitize 已有修復，但 QG 路徑沒有 → 同步到 QG rule-based。
 
 ${formatDirectionACandidates(directionA)}
+
+---
+
+## Structural Failure Candidates (Self-Learning Loop)
+
+> Tier A2 sibling — 高頻**結構性失敗**事件（threshold 5/週），LLM 修不掉的 pattern。
+> Target events: red_validation_fail / alignment_blocked / coder_test_fail / coder_test_fix_give_up /
+> fix_convergence_failed / qg_high_retry_count
+>
+> **Self-Learning Loop SOP**:
+> 1. reviewer 看本表 → 找 top 3-5 候選
+> 2. 評估能否寫成 deterministic fix（加 deterministic-feature-fix.ts / deterministic-actions-fix.ts）
+> 3. 寫測試 + register-prompt-change.ts 記 audit
+> 4. 整合進 autoFixActionsAndFeatures pipeline
+> 5. 下週看本表該 pattern count 是否歸零
+
+${formatStructuralFailureCandidates(structuralCandidates)}
 
 ---
 
@@ -503,12 +536,13 @@ async function main() {
     ])
 
     const directionA = findDirectionACandidates(report.topPatterns, activeChanges)
+    const structuralCandidates = findStructuralFailureCandidates(report.topPatterns)
     const unregistered = findUnregisteredSanitizePatterns(activeChanges)
 
     if (json) {
-      process.stdout.write(JSON.stringify({ report, effects, directionA, unregistered, failureData }, null, 2) + '\n')
+      process.stdout.write(JSON.stringify({ report, effects, directionA, structuralCandidates, unregistered, failureData }, null, 2) + '\n')
     } else {
-      process.stdout.write(renderMarkdown(report, effects, directionA, unregistered, failureData))
+      process.stdout.write(renderMarkdown(report, effects, directionA, structuralCandidates, unregistered, failureData))
     }
   } catch (err) {
     console.error('週報生成失敗：', err)

@@ -66,6 +66,7 @@ export type EventType =
   | 'conversation_budget_exceeded' // L31.M: per-conversation budget cap 觸發
   | 'fix_convergence_failed'       // L31.O: fix loop 連續兩輪錯誤指紋一致 → LLM 修不動
   | 'cross_loop_fix_skipped'       // R2: 跨 loop cache hit，skip LLM 修補
+  | 'qg_high_retry_count'          // Tier A4: UIUX QG 進到 3+ 輪修復（high signal 給週報追蹤）
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
@@ -692,6 +693,57 @@ export interface DirectionACandidate {
  * 從 top patterns 中找出「高頻 + 可以用 regex 修 + 目前只在 QG 被抓但 deployer 已有修」的候選。
  * 這意味著 LLM 在兩個 pipeline stage 都犯同樣錯誤，但只有一處有 deterministic 修復。
  */
+/**
+ * Self-Learning Loop (Tier A2 sibling): 結構性失敗 pattern 高頻監控
+ *
+ * 跟 findDirectionACandidates 不同：這個函數**明確聚焦**在結構性失敗事件
+ * （red_validation_fail / alignment_blocked / coder_test_fail / coder_test_fix_give_up），
+ * threshold 較低（5 次/週）。目的是讓週報直接看到「LLM 仍解不掉、應變 deterministic 的高頻 pattern」。
+ *
+ * 用法：reviewer 看週報拿到候選 → 評估是否寫成新 deterministic fix 函數
+ * （加進 deterministic-feature-fix.ts / deterministic-actions-fix.ts）→ 用
+ * register-prompt-change.ts 記 audit。
+ */
+export interface StructuralFailureCandidate {
+  pattern_key: string
+  event_type: string
+  count: number
+  skill_name: string
+  recommendation: string
+}
+
+export function findStructuralFailureCandidates(
+  topPatterns: WeeklyReportRow[],
+  threshold = 5
+): StructuralFailureCandidate[] {
+  const TARGET_EVENT_TYPES = new Set([
+    'red_validation_fail',
+    'alignment_blocked',
+    'coder_test_fail',
+    'coder_test_fix_give_up',
+    'fix_convergence_failed',
+    'qg_high_retry_count',  // Tier A4 加的
+  ])
+
+  return topPatterns
+    .filter(row => TARGET_EVENT_TYPES.has(row.event_type) && row.count >= threshold)
+    .map(row => ({
+      pattern_key: row.pattern_key,
+      event_type: row.event_type,
+      count: row.count,
+      skill_name: row.skill_name,
+      recommendation: row.event_type === 'fix_convergence_failed'
+        ? `LLM 修 ≥2 輪指紋一致 — 寫 deterministic fix 取代 LLM repair`
+        : row.event_type === 'qg_high_retry_count'
+        ? `UIUX QG 多次失敗 — 考慮啟動 vendored designmd fallback`
+        : row.event_type === 'coder_test_fail' || row.event_type === 'coder_test_fix_give_up'
+        ? `Coder 業務邏輯重複失敗 — 看是否需要新 coder-handlers 模板`
+        : `規格驗證/對齊重複失敗 — 看是否需要新 deterministic feature fix`,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 15)
+}
+
 export function findDirectionACandidates(
   topPatterns: WeeklyReportRow[],
   activeChanges: PromptChange[],

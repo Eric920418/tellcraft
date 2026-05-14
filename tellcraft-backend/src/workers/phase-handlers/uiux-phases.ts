@@ -43,6 +43,7 @@ import {
   DESIGN_BRIEF_LIMITS,
 } from '../intent-helpers'
 import { handlePhaseError } from '../phase-router'
+import { recordTelemetry } from '../../services/skill-telemetry'
 import { createLogger } from '../../lib/logger'
 
 // Lazy imports to avoid circular dependencies
@@ -2173,13 +2174,29 @@ export async function executeQualityGate(
     progress: { current: 3, total: 3, step: '品質檢查' },
   })
 
-  const MAX_FIX_ATTEMPTS = 3
+  // Tier A4: 3 → 5 — 多 2 輪 LLM 修復通常能再救 10-20% 邊界 case，成本增加可接受
+  // 第 3 輪起 telemetry 標記 'qg_high_retry_count' 給週報追蹤，
+  // 若高頻發生（>20% 對話進到 3 輪+）→ 建議啟動 vendored designmd template fallback
+  const MAX_FIX_ATTEMPTS = 5
   let currentCode = { ...uiuxGeneratedCode }
   let report = runQualityGate(currentCode, state.uiuxDesignTier, state.uiuxDesignMood)
   let totalAutoFixed = 0
 
   // 自動修復循環
   for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !report.passed; attempt++) {
+    // Tier A4: 高 retry 計數 telemetry 信號（給未來 vendored fallback 觸發判斷用）
+    if (attempt >= 3) {
+      void recordTelemetry({
+        skillName: 'quality_gate',
+        eventType: 'qg_high_retry_count',
+        patternKey: `attempt_${attempt + 1}`,
+        outcome: 'failed',
+        phase: 'uiux_quality_gate',
+        severity: 'warning',
+        userId: state.userId, conversationId,
+        payload: { attempt: attempt + 1, totalAutoFixed, criticalCount: 0 },
+      }).catch(() => {})
+    }
     let criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,
