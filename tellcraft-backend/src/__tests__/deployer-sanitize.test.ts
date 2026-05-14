@@ -1320,8 +1320,8 @@ describe('E: extractReferencedTables', () => {
 
   it('包含 INSERT INTO 與 UPDATE 表名', () => {
     const files = [
-      vf('lib/actions/create.ts', `INSERT INTO contact_inquiries (id) VALUES ($1)`),
-      vf('lib/actions/update.ts', `UPDATE pricing_section SET title = $1`),
+      vf('lib/actions/create.ts', `await sql\`INSERT INTO contact_inquiries (id) VALUES ($1)\``),
+      vf('lib/actions/update.ts', `await sql\`UPDATE pricing_section SET title = $1\``),
     ]
     const tables = extractReferencedTables(files)
     expect(tables).toContain('contact_inquiries')
@@ -1330,7 +1330,7 @@ describe('E: extractReferencedTables', () => {
 
   it('忽略 pg_* / information_schema 系統表', () => {
     const files = [
-      vf('lib/actions/admin.ts', `SELECT * FROM pg_tables WHERE schemaname = 'public'`),
+      vf('lib/actions/admin.ts', `await sql\`SELECT * FROM pg_tables WHERE schemaname = 'public'\``),
     ]
     const tables = extractReferencedTables(files)
     expect(tables).not.toContain('pg_tables')
@@ -1338,7 +1338,7 @@ describe('E: extractReferencedTables', () => {
 
   it('忽略 SQL 關鍵字（VALUES / SELECT / WHERE）誤抓', () => {
     const files = [
-      vf('lib/actions/x.ts', `INSERT INTO foo VALUES ($1, $2)`),
+      vf('lib/actions/x.ts', `await sql\`INSERT INTO foo VALUES ($1, $2)\``),
     ]
     const tables = extractReferencedTables(files)
     expect(tables).toContain('foo')
@@ -1348,9 +1348,9 @@ describe('E: extractReferencedTables', () => {
 
   it('lib/db.ts 與 client component 不掃（只掃 actions/api routes）', () => {
     const files = [
-      vf('lib/db.ts', `FROM dummy_table`),
-      vf('app/page.tsx', `// FROM should_not_appear`),
-      vf('lib/actions/foo.ts', `FROM real_table`),
+      vf('lib/db.ts', `sql\`FROM dummy_table\``),
+      vf('app/page.tsx', `sql\`FROM should_not_appear\``),
+      vf('lib/actions/foo.ts', `sql\`FROM real_table\``),
     ]
     const tables = extractReferencedTables(files)
     expect(tables).toEqual(['real_table'])
@@ -1358,11 +1358,48 @@ describe('E: extractReferencedTables', () => {
 
   it('去重相同表名', () => {
     const files = [
-      vf('lib/actions/get.ts', `FROM hero_section`),
-      vf('lib/actions/update.ts', `UPDATE hero_section SET ...`),
+      vf('lib/actions/get.ts', `sql\`FROM hero_section\``),
+      vf('lib/actions/update.ts', `sql\`UPDATE hero_section SET ...\``),
     ]
     const tables = extractReferencedTables(files)
     expect(tables.filter(t => t === 'hero_section').length).toBe(1)
+  })
+
+  it('L35: 不抓字串字面值如 _stepSummary 中的「Update Page Section」(bb0d1081 case)', () => {
+    // 真實 Coder 生成的 route.ts pattern：呼叫 Server Action 帶 _stepSummary
+    // 之前 regex 在這段 string literal 上撞到 `UPDATE Page` / `Update Site` 等
+    // 誤判 deployer 報「Neon 缺表 page/site/pricing」假錯誤（bb0d1081 案例）
+    const files = [
+      vf('app/api/update_page_section/route.ts', `
+import { updatePageSection } from '@/lib/actions/update-page-section'
+export async function PUT(req) {
+  const body = await req.json()
+  const result = await updatePageSection({ _stepSummary: 'Update Page Section', ...body })
+  return NextResponse.json(result)
+}`),
+      vf('app/api/update_site_setting/route.ts', `
+  await updateSiteSetting({ _stepSummary: 'Update Site Setting', ...body })`),
+      vf('app/api/update_pricing_plan/route.ts', `
+  await updatePricingPlan({ _stepSummary: 'Update Pricing Plan', ...body })`),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables).not.toContain('page')
+    expect(tables).not.toContain('site')
+    expect(tables).not.toContain('pricing')
+    expect(tables).toEqual([])  // 沒任何 sql template，應該返回空
+  })
+
+  it('L35: sql template 內仍正確抓 + 字串字面值不干擾', () => {
+    const files = [
+      vf('lib/actions/update-page.ts', `
+export async function updatePageSection(input: any) {
+  const stepSummary = 'Update Page Section'  // 這應該被忽略
+  await sql\`UPDATE page_sections SET title = \${input.title}\`  // 這應該抓到 page_sections
+}`),
+    ]
+    const tables = extractReferencedTables(files)
+    expect(tables).toContain('page_sections')
+    expect(tables).not.toContain('page')
   })
 })
 

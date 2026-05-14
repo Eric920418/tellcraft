@@ -3595,20 +3595,25 @@ function dedupeRedundantWhereClauses(content: string): { content: string; count:
  */
 export function extractReferencedTables(files: VercelFile[]): string[] {
   const tables = new Set<string>()
+  // L35: 只在 sql tagged template literal `sql\`...\`` 內掃描，避免誤抓
+  // 字串字面值如 `_stepSummary: 'Update Page Section'` 之前被 regex 誤判為 SQL
+  // (因為 `Update Page` 匹配 `(?:UPDATE)\s+([a-z_]+)`)，導致 deployer 報「Neon 缺表 page」等假錯誤
+  const sqlBlockRe = /\bsql\s*`([^`]+)`/g
+  const tableRefRe = /(?:FROM|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)\b/gi
   for (const f of files) {
     if (!f.file.startsWith('lib/actions/') && !f.file.startsWith('app/api/')) continue
     if (!/\.(tsx?|jsx?)$/.test(f.file)) continue
-    // 匹配 sql\` ... FROM <table> ... \` / INSERT INTO <table> / UPDATE <table> / DELETE FROM <table>
-    // 表名用 [a-z_][a-z0-9_]* 通配（PostgreSQL 標準命名）
-    const re = /(?:FROM|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)\b/gi
-    let m: RegExpExecArray | null
-    while ((m = re.exec(f.data)) !== null) {
-      const name = m[1].toLowerCase()
-      // 跳過 PostgreSQL 系統表 / 常見 SQL 關鍵字（避免誤抓 `INSERT INTO ... VALUES` 之類）
-      if (['values', 'select', 'where', 'on'].includes(name)) continue
-      // 跳過 pg_*、information_schema.* 系統表
-      if (name.startsWith('pg_') || name.startsWith('information_schema')) continue
-      tables.add(name)
+    sqlBlockRe.lastIndex = 0
+    let block: RegExpExecArray | null
+    while ((block = sqlBlockRe.exec(f.data)) !== null) {
+      tableRefRe.lastIndex = 0
+      let m: RegExpExecArray | null
+      while ((m = tableRefRe.exec(block[1])) !== null) {
+        const name = m[1].toLowerCase()
+        if (['values', 'select', 'where', 'on'].includes(name)) continue
+        if (name.startsWith('pg_') || name.startsWith('information_schema')) continue
+        tables.add(name)
+      }
     }
   }
   return [...tables].sort()
