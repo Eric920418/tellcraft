@@ -144,6 +144,8 @@ async function validateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
         const fixResult = autoFixActionsAndFeatures(
           bddSession.actions_yml_content,
           bddSession.features_content,
+          bddSession.schema_sql_content || undefined,
+          bddSession.entity_mapping_content || undefined,
         )
 
         // OpenAPI 同步檢查 — bb0d1081 案例：actionsYml 已是新格式但 OpenAPI 仍 stale，

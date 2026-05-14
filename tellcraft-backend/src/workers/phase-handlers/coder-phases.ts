@@ -158,6 +158,8 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       const fixResult = autoFixActionsAndFeatures(
         bddSession.actions_yml_content,
         bddSession.features_content,
+        bddSession.schema_sql_content || undefined,
+        bddSession.entity_mapping_content || undefined,
       )
 
       // 5.5a — OpenAPI 同步檢查（獨立於 deterministic fix 是否觸發）
@@ -817,6 +819,8 @@ export async function executeRealignBdd(input: CoderSkillInput): Promise<void> {
     const determResult = autoFixActionsAndFeatures(
       bddSession.actions_yml_content,
       bddSession.features_content,
+      bddSession.schema_sql_content || undefined,
+      bddSession.entity_mapping_content || undefined,
     )
 
     // OpenAPI 同步檢查（獨立於 deterministic fix）— bb0d1081 案例已驗證：actionsYml 已是新格式

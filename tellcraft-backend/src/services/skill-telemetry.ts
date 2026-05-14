@@ -67,6 +67,7 @@ export type EventType =
   | 'fix_convergence_failed'       // L31.O: fix loop 連續兩輪錯誤指紋一致 → LLM 修不動
   | 'cross_loop_fix_skipped'       // R2: 跨 loop cache hit，skip LLM 修補
   | 'qg_high_retry_count'          // Tier A4: UIUX QG 進到 3+ 輪修復（high signal 給週報追蹤）
+  | 'unique_constraint_deduped'    // Tier B2: BDD 多 row 同 unique column 衝突自動 dedup
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'

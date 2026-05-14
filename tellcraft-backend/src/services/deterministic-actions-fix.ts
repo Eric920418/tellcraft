@@ -21,7 +21,7 @@ export interface ActionsFixResult {
   fixedActionsYml: string | null  // null 代表無變動
   fixedFeatures: Map<string, string>  // featureName → fixed content（無變動的不放）
   changes: Array<{
-    type: 'method_set' | 'path_set' | 'var_in_call_table_removed' | 'empty_table_literal_removed'
+    type: 'method_set' | 'path_set' | 'var_in_call_table_removed' | 'empty_table_literal_removed' | 'unique_constraint_deduped'
     target: string  // action name 或 feature name
     detail: string
   }>
@@ -229,6 +229,8 @@ export function autoFixEmptyTableLiteral(
 export function autoFixActionsAndFeatures(
   actionsYml: string,
   features: Array<{ name?: string; actionName: string; content: string }>,
+  schemaSql?: string,
+  entityMappingYaml?: string,
 ): ActionsFixResult {
   const allChanges: ActionsFixResult['changes'] = []
   const fixedFeatures = new Map<string, string>()
@@ -266,6 +268,37 @@ export function autoFixActionsAndFeatures(
 
     if (anyFix) {
       fixedFeatures.set(f.name || f.actionName, currentContent)
+    }
+  }
+
+  // 3. Tier B2: Unique constraint dedup（同 entity 同 unique column 重複值加 suffix）
+  // 跨 features 整體跑（每 feature 內部按 scope dedup）。需要 schemaSql 才能判斷 UNIQUE columns。
+  if (schemaSql) {
+    // 把上一輪可能修過的 content 帶進去（保留 var/empty-table 修補結果）
+    const featuresForDedup = features.map(f => ({
+      ...f,
+      content: fixedFeatures.get(f.name || f.actionName) ?? f.content,
+    }))
+    // lazy require 避免循環依賴
+    const { dedupUniqueColumnValuesInFeatures } = require('./unique-constraint-dedup') as typeof import('./unique-constraint-dedup')
+    const dedupResult = dedupUniqueColumnValuesInFeatures(featuresForDedup, schemaSql, entityMappingYaml)
+    if (dedupResult.changes.length > 0) {
+      // 用 group by featureName 整合 changes（一個 feature 可能多 row 改）
+      const byFeature = new Map<string, number>()
+      for (const c of dedupResult.changes) {
+        byFeature.set(c.featureName, (byFeature.get(c.featureName) ?? 0) + 1)
+      }
+      for (const [featureName, count] of byFeature) {
+        allChanges.push({
+          type: 'unique_constraint_deduped',
+          target: featureName,
+          detail: `auto-suffixed ${count} unique column value(s) to avoid duplicate key violation`,
+        })
+      }
+      // 寫回 fixedFeatures map
+      for (const [name, content] of dedupResult.fixedFeatures) {
+        fixedFeatures.set(name, content)
+      }
     }
   }
 
