@@ -64,11 +64,30 @@ export class EntityNonExistenceValidate {
       }
 
       if (hasAllPks) {
-        const exists = await this.existsByPk(tableDef, pkValues, pool);
-        if (exists) {
-          throw new Error(
-            `${entityName} with ${JSON.stringify(Object.fromEntries(pkValues))} should not exist`
-          );
+        // L28.D: PK + 額外非 PK 欄位 → 全部 AND 查，不只看 PK
+        // 否則 BDD 寫 `應該不存在一個X, with table: | id | isVisible | | $x | true |` 期望
+        // 「id=X 且 isVisible=true 的 row 不存在」會被誤判為「id=X 的 row 不存在」
+        // → BDD 想驗的「條件式不存在」變成「絕對不存在」，但 Background 剛建立該 PK，必失敗
+        const extraConditions = this.buildProbeConditions(row, tableDef);
+        if (extraConditions.size > 0) {
+          // 合併 PK + 額外條件
+          const allConditions = new Map<string, unknown>(pkValues);
+          for (const [k, v] of extraConditions) allConditions.set(k, v);
+          tableDef.setQueryColumns([...allConditions.keys()]);
+          const exists = await this.existsByProbe(tableDef, allConditions, pool);
+          if (exists) {
+            throw new Error(
+              `${entityName} with ${JSON.stringify(Object.fromEntries(allConditions))} should not exist`
+            );
+          }
+        } else {
+          // 純 PK 查（既有行為）
+          const exists = await this.existsByPk(tableDef, pkValues, pool);
+          if (exists) {
+            throw new Error(
+              `${entityName} with ${JSON.stringify(Object.fromEntries(pkValues))} should not exist`
+            );
+          }
         }
       } else {
         const conditions = this.buildProbeConditions(row, tableDef);
