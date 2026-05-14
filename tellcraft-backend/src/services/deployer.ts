@@ -1615,7 +1615,19 @@ export async function executeDeployment(
     // Auth 系統：AUTH_SECRET 由 injectVercelEnvVarIfNotExists 不覆蓋注入；
     // 為了 scan 比對先把它記入 injected 名單
     const hasAuthFile = files.some(f => f.file === 'auth.ts')
-    const injectedKeys = new Set([...Object.keys(envVars), ...(hasAuthFile ? ['AUTH_SECRET'] : [])])
+    // L36: JWT_SECRET — 客戶 Coder 生成的 admin login 用 `process.env.JWT_SECRET` 簽 token，
+    // 若 Vercel 沒注入 → admin login 第一句就 throw → 用戶看「登入失敗，請稍後再試」(bb0d1081 案例)
+    // 偵測：scan 客戶 code 是否有 process.env.JWT_SECRET reference
+    const needsJwtSecret = files.some(f => {
+      if (!/\.(tsx?|jsx?)$/.test(f.file)) return false
+      if (!f.file.startsWith('lib/') && !f.file.startsWith('app/')) return false
+      return /process\.env\.JWT_SECRET\b|process\.env\[\s*['"]JWT_SECRET['"]\s*\]/.test(f.data)
+    })
+    const injectedKeys = new Set([
+      ...Object.keys(envVars),
+      ...(hasAuthFile ? ['AUTH_SECRET'] : []),
+      ...(needsJwtSecret ? ['JWT_SECRET'] : []),
+    ])
 
     // 掃描客戶 app 代碼引用了哪些 process.env.X，與已注入清單比對
     const envScan = scanProcessEnvReferences(files, injectedKeys)
@@ -1651,6 +1663,13 @@ export async function executeDeployment(
     if (hasAuthFile) {
       const crypto = await import('crypto')
       await injectVercelEnvVarIfNotExists(projectName, 'AUTH_SECRET', crypto.randomBytes(32).toString('base64'))
+    }
+
+    // L36: JWT_SECRET — 客戶 admin login / API auth 用，每客戶獨立隨機 secret
+    // 用 IfNotExists 不覆蓋（user 自己手動設過的不動，保留既有 token 不失效）
+    if (needsJwtSecret) {
+      const crypto = await import('crypto')
+      await injectVercelEnvVarIfNotExists(projectName, 'JWT_SECRET', crypto.randomBytes(32).toString('hex'))
     }
 
     logger.info(
@@ -3686,7 +3705,8 @@ export function scanProcessEnvReferences(
   const referenced = new Set<string>()
   // Tellcraft 平台自身的 env（用於後端 BDD 測試），絕不該出現在客戶 app 代碼中
   const TELLCRAFT_INTERNAL = new Set([
-    'JWT_SECRET',  // Tellcraft 後端 only
+    // L36: JWT_SECRET 移除 — 客戶 Coder 生成的 admin login / API auth 合法使用，
+    // 由 deployer 自動 inject 隨機 secret（見 deployer.ts:1654+ needsJwtSecret 分支）
     'NEON_API_KEY',
     'VERCEL_ACCESS_TOKEN',
     'ANTHROPIC_API_KEY',

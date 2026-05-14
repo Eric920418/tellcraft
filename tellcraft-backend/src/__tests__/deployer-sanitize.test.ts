@@ -1227,11 +1227,20 @@ describe('B: scanProcessEnvReferences', () => {
     expect(report.referenced).toContain('MY_API_KEY')
   })
 
-  it('Tellcraft 內部 env (JWT_SECRET / NEON_API_KEY) 不報 missing', () => {
+  it('Tellcraft 內部 env (NEON_API_KEY 等) 不報 missing', () => {
     // 客戶 app 不該 reference 這些；若 LLM 誤生成不該因此 fail
-    const files = [vf('lib/foo.ts', `const t = process.env.JWT_SECRET`)]
+    const files = [vf('lib/foo.ts', `const t = process.env.NEON_API_KEY`)]
     const report = scanProcessEnvReferences(files, new Set())
-    expect(report.missing).not.toContain('JWT_SECRET')
+    expect(report.missing).not.toContain('NEON_API_KEY')
+  })
+
+  it('L36: JWT_SECRET 是客戶 app 合法 env（admin login 簽 token 用）', () => {
+    // 之前誤列入 TELLCRAFT_INTERNAL 導致 deployer skip 注入 → admin login throw
+    // 現在應被視為合法 reference，且 deployer 自動注入到 Vercel
+    const files = [vf('lib/actions/admin-login.ts', `const jwtSecret = process.env.JWT_SECRET`)]
+    const report = scanProcessEnvReferences(files, new Set())
+    expect(report.referenced).toContain('JWT_SECRET')
+    expect(report.missing).toContain('JWT_SECRET')
   })
 
   it('只掃 runtime 路徑（lib/, app/）', () => {
