@@ -4,6 +4,9 @@ import {
   getCmsSkeletonDdl,
   getCmsSkeletonManifest,
   generateSkeletonFeatures,
+  generateSkeletonServerActions,
+  isSkeletonActionName,
+  getSkeletonFeatureMeta,
   CMS_SKELETON_ENTITY_MAPPING,
   CMS_SKELETON_VERSION,
 } from '../services/cms-skeleton'
@@ -205,5 +208,159 @@ describe('CMS Skeleton — generateSkeletonFeatures', () => {
     const login = features.find(f => f.name === 'Admin Login')!
     expect(login.content).toContain('Missing password causes failure')
     expect(login.content).toContain('Then 操作失敗')
+  })
+})
+
+describe('CMS Skeleton — generateSkeletonServerActions (Week 2)', () => {
+  it('回傳 5 個 Server Action files', () => {
+    const actions = generateSkeletonServerActions()
+    expect(actions.length).toBe(5)
+    const names = actions.map(a => a.actionName).sort()
+    expect(names).toEqual([
+      'admin_login', 'admin_logout', 'get_site_settings',
+      'list_admins', 'update_admin_profile',
+    ])
+  })
+
+  it('admin_login Server Action 含 bcrypt + JWT + DB query', () => {
+    const actions = generateSkeletonServerActions()
+    const login = actions.find(a => a.actionName === 'admin_login')!
+    expect(login.filePath).toBe('lib/actions/admin-login.ts')
+    expect(login.fnName).toBe('adminLogin')
+    expect(login.content).toContain("import bcrypt from 'bcryptjs'")
+    expect(login.content).toContain("import jwt from 'jsonwebtoken'")
+    expect(login.content).toContain('bcrypt.compare')
+    expect(login.content).toContain('jwt.sign')
+    expect(login.content).toContain('FROM admins')
+    expect(login.content).toContain('deleted_at IS NULL')
+    expect(login.content).toContain('__status: 200')
+    expect(login.content).toContain('JWT_SECRET is not configured')
+  })
+
+  it('每個 Server Action 都用 sql tagged template + soft-delete 感知（如適用）', () => {
+    const actions = generateSkeletonServerActions()
+    for (const a of actions) {
+      // logout 例外（無 DB query）
+      if (a.actionName === 'admin_logout') continue
+      expect(a.content).toMatch(/sql`/)
+    }
+    // 涉及 admins 表的 SELECT 都要 deleted_at filter
+    const adminQueries = actions.filter(a =>
+      a.actionName === 'admin_login' || a.actionName === 'list_admins' || a.actionName === 'update_admin_profile'
+    )
+    for (const a of adminQueries) {
+      expect(a.content).toContain('deleted_at IS NULL')
+    }
+  })
+
+  it('canonical password 用 manifest 預設', () => {
+    const actions = generateSkeletonServerActions()
+    const login = actions.find(a => a.actionName === 'admin_login')!
+    // expiresIn 從 slot 預設
+    expect(login.content).toContain("'7d'")
+  })
+
+  it('支援 jwtExpiresIn slot override', () => {
+    const actions = generateSkeletonServerActions({ jwtExpiresIn: '30d' })
+    const login = actions.find(a => a.actionName === 'admin_login')!
+    expect(login.content).toContain("'30d'")
+    expect(login.content).not.toContain("'7d'")
+  })
+})
+
+describe('CMS Skeleton — injectCmsSkeletonFeaturesIfApplicable (formulation hook)', () => {
+  const loadHook = async () => {
+    const mod = await import('../services/formulation')
+    return mod.injectCmsSkeletonFeaturesIfApplicable
+  }
+
+  const cmsFeatures = [
+    { name: 'Admin Login', actionName: 'admin_login', content: '功能: Admin Login\n' },
+    { name: 'List Faqs', actionName: 'list_faqs', content: '功能: List Faqs\n' },
+    { name: 'Create Faq', actionName: 'create_faq', content: '功能: Create Faq\n' },
+    { name: 'Update Faq', actionName: 'update_faq', content: '功能: Update Faq\n' },
+    { name: 'Delete Faq', actionName: 'delete_faq', content: '功能: Delete Faq\n' },
+    { name: 'List Pricing Plans', actionName: 'list_pricing_plans', content: '功能: List Pricing Plans\n' },
+    { name: 'Create Pricing Plan', actionName: 'create_pricing_plan', content: '功能: Create Pricing Plan\n' },
+    { name: 'Update Pricing Plan', actionName: 'update_pricing_plan', content: '功能: Update Pricing Plan\n' },
+    { name: 'Delete Pricing Plan', actionName: 'delete_pricing_plan', content: '功能: Delete Pricing Plan\n' },
+    { name: 'List Testimonials', actionName: 'list_testimonials', content: '功能: List Testimonials\n' },
+    { name: 'Create Testimonial', actionName: 'create_testimonial', content: '功能: Create Testimonial\n' },
+    { name: 'Get Site Settings', actionName: 'get_site_settings', content: '功能: Get Site Settings\n' },
+  ]
+  const cmsSchema = `
+CREATE TABLE faqs (id SERIAL PRIMARY KEY, question TEXT);
+CREATE TABLE pricing_plans (id SERIAL PRIMARY KEY, name TEXT);
+CREATE TABLE testimonials (id SERIAL PRIMARY KEY, content TEXT);
+`.trim()
+  const cmsMapping = `entity_mapping:\n  Faq: faqs\n  PricingPlan: pricing_plans\n  Testimonial: testimonials`
+
+  it('非 CMS shape 維持原樣（短路 detect）', async () => {
+    const hook = await loadHook()
+    const features = [
+      { name: 'Calculate Tax', actionName: 'calculate_tax', content: '功能: Calculate Tax\n' },
+    ]
+    const result = await hook(features, 'CREATE TABLE t1 (id INT);', 'entity_mapping:\n  T1: t1')
+    expect(result.features.length).toBe(features.length)
+  })
+
+  it('CMS shape 注入 missing skeleton features', async () => {
+    const hook = await loadHook()
+    const result = await hook(cmsFeatures, cmsSchema, cmsMapping)
+    const names = result.features.map(f => f.actionName)
+    expect(names).toContain('admin_logout')
+    expect(names).toContain('list_admins')
+    expect(names).toContain('update_admin_profile')
+    expect(names.filter(n => n === 'admin_login').length).toBe(1)
+    expect(names.filter(n => n === 'get_site_settings').length).toBe(1)
+  })
+
+  it('CMS shape append DDL 與 entity_mapping（IF NOT EXISTS 安全）', async () => {
+    const hook = await loadHook()
+    const result = await hook(cmsFeatures, cmsSchema, cmsMapping)
+    expect(result.schemaSql).toContain('CREATE TABLE IF NOT EXISTS admins')
+    expect(result.schemaSql).toContain('CREATE TABLE IF NOT EXISTS site_settings')
+    expect(result.entityMapping).toMatch(/^\s*Admin:\s+admins/m)
+    expect(result.entityMapping).toMatch(/^\s*SiteSetting:\s+site_settings/m)
+  })
+
+  it('idempotent：跑兩次結果跟跑一次完全等價', async () => {
+    const hook = await loadHook()
+    const once = await hook(cmsFeatures, cmsSchema, cmsMapping)
+    const twice = await hook(once.features, once.schemaSql, once.entityMapping)
+
+    expect(twice.features.length).toBe(once.features.length)
+    expect(twice.schemaSql).toBe(once.schemaSql)
+    expect(twice.entityMapping).toBe(once.entityMapping)
+    const adminsTableCount = (twice.schemaSql.match(/CREATE TABLE IF NOT EXISTS admins/g) || []).length
+    expect(adminsTableCount).toBe(1)
+    const adminMapCount = (twice.entityMapping.match(/^\s*Admin:\s+admins/gm) || []).length
+    expect(adminMapCount).toBe(1)
+  })
+})
+
+describe('CMS Skeleton — isSkeletonActionName / getSkeletonFeatureMeta', () => {
+  it('isSkeletonActionName 正確識別 5 個 canonical', () => {
+    expect(isSkeletonActionName('admin_login')).toBe(true)
+    expect(isSkeletonActionName('admin_logout')).toBe(true)
+    expect(isSkeletonActionName('list_admins')).toBe(true)
+    expect(isSkeletonActionName('update_admin_profile')).toBe(true)
+    expect(isSkeletonActionName('get_site_settings')).toBe(true)
+  })
+
+  it('非 skeleton actionName 回 false', () => {
+    expect(isSkeletonActionName('create_faq')).toBe(false)
+    expect(isSkeletonActionName('list_pricing_plans')).toBe(false)
+    expect(isSkeletonActionName('update_site_setting')).toBe(false)  // 注意是 site_setting 單數，非 skeleton
+  })
+
+  it('getSkeletonFeatureMeta 回 method/path', () => {
+    expect(getSkeletonFeatureMeta('admin_login')).toEqual({ method: 'POST', path: '/api/admin/login' })
+    expect(getSkeletonFeatureMeta('list_admins')).toEqual({ method: 'GET', path: '/api/admin/admins' })
+    expect(getSkeletonFeatureMeta('update_admin_profile')).toEqual({ method: 'PUT', path: '/api/admin/profile' })
+  })
+
+  it('非 skeleton actionName 回 null', () => {
+    expect(getSkeletonFeatureMeta('create_faq')).toBeNull()
   })
 })

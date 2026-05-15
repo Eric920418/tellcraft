@@ -19,6 +19,12 @@ export {
   type SkeletonTable,
 } from './schemas'
 export { generateSkeletonFeatures, type SkeletonFeature } from './bdd-scaffold'
+export {
+  generateSkeletonServerActions,
+  isSkeletonActionName,
+  getSkeletonFeatureMeta,
+  type SkeletonServerAction,
+} from './server-action-templates'
 
 export type CmsSkeletonManifest = typeof manifest
 

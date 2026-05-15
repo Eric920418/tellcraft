@@ -1348,11 +1348,20 @@ export async function runFormulation(
 
     logger.info({ generated: generatedFeatures.length, total: completedNamesSet.size }, 'Formulation 完成')
 
-    return {
-      success: true,
+    // CMS Skeleton Phase 1 Week 2: 偵測到 CMS shape 就補上 5 個 canonical features
+    // （若 LLM 已生成同 actionName 的就 skip，避免覆蓋用戶業務客製）
+    // plan 75-splendid-token.md / commit 5c2b59bf
+    const skeletonFeatures = await injectCmsSkeletonFeaturesIfApplicable(
+      generatedFeatures,
       schemaSql,
       entityMapping,
-      features: generatedFeatures,
+    )
+
+    return {
+      success: true,
+      schemaSql: skeletonFeatures.schemaSql,
+      entityMapping: skeletonFeatures.entityMapping,
+      features: skeletonFeatures.features,
     }
   } catch (error) {
     logger.error({ err: error }, '執行失敗')
@@ -1360,6 +1369,81 @@ export async function runFormulation(
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
     }
+  }
+}
+
+// ============================================================
+// CMS Skeleton Hook (Phase 1 Week 2)
+// ============================================================
+
+/**
+ * 若 BDD 結果符合 CMS shape，補上 5 個 canonical skeleton features 跟對應 DDL。
+ * 已存在的 actionName 不覆蓋（保留用戶業務客製）。
+ *
+ * 純 deterministic, 0 LLM call。Fail-soft：任何錯誤回原 input。
+ */
+// Export for unit testing — idempotency 是核心契約，必須能直接驗證
+export async function injectCmsSkeletonFeaturesIfApplicable(
+  features: GeneratedFeature[],
+  schemaSql: string,
+  entityMapping: string,
+): Promise<{ features: GeneratedFeature[]; schemaSql: string; entityMapping: string }> {
+  try {
+    const { detectCmsShape, generateSkeletonFeatures, getCmsSkeletonDdl, CMS_SKELETON_ENTITY_MAPPING } =
+      await import('./cms-skeleton')
+
+    const report = detectCmsShape({ features, schemaSql })
+    if (!report.isCmsShape) {
+      return { features, schemaSql, entityMapping }
+    }
+
+    logger.info({
+      score: report.score,
+      threshold: report.threshold,
+      reasons: report.reasons.map(r => r.rule),
+    }, 'CMS Skeleton: 偵測到 CMS shape，補 canonical features + DDL')
+
+    const skeletonFeatures = generateSkeletonFeatures()
+    const existingActionNames = new Set(features.map(f => f.actionName))
+    const toAdd = skeletonFeatures.filter(sf => !existingActionNames.has(sf.actionName))
+
+    if (toAdd.length === 0) {
+      return { features, schemaSql, entityMapping }  // 全已存在，不重複
+    }
+
+    const mergedFeatures: GeneratedFeature[] = [
+      ...features,
+      ...toAdd.map(sf => ({ name: sf.name, actionName: sf.actionName, content: sf.content })),
+    ]
+
+    // DDL 追加（IF NOT EXISTS 安全）
+    const skeletonDdl = getCmsSkeletonDdl(['admins', 'site_settings'])
+    const mergedSchemaSql = schemaSql.includes('CREATE TABLE IF NOT EXISTS admins')
+      ? schemaSql
+      : schemaSql.trim() + '\n\n-- CMS Skeleton tables (auto-injected)\n' + skeletonDdl
+
+    // Entity mapping 追加（不覆蓋）
+    let mergedEntityMapping = entityMapping
+    for (const [entity, table] of Object.entries(CMS_SKELETON_ENTITY_MAPPING)) {
+      const re = new RegExp(`^\\s*${entity}\\s*:`, 'm')
+      if (!re.test(mergedEntityMapping)) {
+        mergedEntityMapping = mergedEntityMapping.trim() + `\n  ${entity}: ${table}`
+      }
+    }
+
+    logger.info({
+      added: toAdd.map(f => f.actionName),
+      totalFeatures: mergedFeatures.length,
+    }, 'CMS Skeleton: 注入完成')
+
+    return {
+      features: mergedFeatures,
+      schemaSql: mergedSchemaSql,
+      entityMapping: mergedEntityMapping,
+    }
+  } catch (e) {
+    logger.warn({ err: e }, 'CMS Skeleton inject 失敗 — fail-soft 回原 features')
+    return { features, schemaSql, entityMapping }
   }
 }
 

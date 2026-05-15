@@ -992,6 +992,46 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 - Magic-link verify 失敗（過期/不存在）→ NextAuth `signIn` return null → action 回 error，不拋到 500
 - Magic-link 自動註冊：查無 email 則 INSERT users，若 `password_hash NOT NULL` 導致 INSERT 失敗 → 拒絕登入（passwordless signup 降級）
 
+#### M8：CMS Skeleton（vendored 骨架 + LLM Slot 客製化，🟡 進行中 — Week 1+2 完成 2026-05-15）
+
+把 CMS 場景反覆出現的「技術骨架」（admin auth/CRUD/soft-delete/admin panel layout）從 LLM 生成路徑提煉成 deterministic vendored 模組，**「skeleton 死、slot 活」**：技術約定鎖住，客戶感知到的客製化（entity 欄位/業務邏輯/UI 風格/品牌）100% 留 slot 給 LLM。
+
+**動機**：bb0d1081 一頁式 CMS 跑 20+ 分鐘 / $20-30 LLM cost / 一次過率 60-85%。其中 ~30-50% 代碼是「每個 CMS 都一樣」的 boilerplate（bcrypt 流程、JWT、SQL pattern、HTTP convention）— 這部分讓 LLM 重新發明只會引入隨機 bug。
+
+**架構**（Plan 75-splendid-token.md）：
+- **Layer 1 Skeleton**：100% deterministic，零 LLM。涵蓋 admin auth、CRUD、soft-delete、pagination、admin panel layout、test admin seed
+- **Layer 2 Slots**：完全 LLM-driven。Entity 欄位/業務規則/UI 風格/品牌 identity/業務特有 action 全在這層
+
+**Week 1（提煉資產 + skeleton bundle 基礎）**：
+- [x] `services/cms-skeleton/manifest.json`：版本鎖、偵測規則（adminLoginFeature:30 + crudPairs:30 + siteSettings:20 + uploadAction:20，threshold:60）、4 modules locked/slots 定義、5 canonical_features 清單
+- [x] `services/cms-skeleton/schemas.ts`：通用 DDL（admins / site_settings / media_uploads）+ `CMS_SKELETON_ENTITY_MAPPING`
+- [x] `services/cms-skeleton/detect-cms-shape.ts`：`detectCmsShape()` 含 singularize 處理（categories→category / statuses→status / `ies→y` / `ses→s` / `s→`），跨 plural/singular 偵測 CRUD pair
+- [x] `services/cms-skeleton/bdd-scaffold.ts`：`generateSkeletonFeatures()` 產 5 個 sdd.os ISA BDD features（Admin Login / Admin Logout / List Admins / Update Admin Profile / Get Site Settings），含 negative scenarios，支援 username/password slot override
+- [x] 21 個新測試（manifest / detect / DDL / scaffold 四 describe block）
+
+**Week 2（注入 BDD/Coder pipeline）**：
+- [x] `services/cms-skeleton/server-action-templates.ts`（新檔）：5 個 canonical Server Action 完整 TS 代碼（`adminLogin` bcrypt+JWT / `adminLogout` stateless / `listAdmins` + snake_to_camel 轉換 / `updateAdminProfile` COALESCE 部分更新 / `getSiteSettings`），全用 `sql tagged template` + `deleted_at IS NULL` soft-delete filter
+- [x] `services/formulation.ts` `injectCmsSkeletonFeaturesIfApplicable()`：runFormulation 出口前 hook，偵測到 CMS shape 自動補 missing canonical features + append DDL（`IF NOT EXISTS` 防重）+ append entity_mapping（正則防重），**idempotent**（跑兩次 = 跑一次），fail-soft 包 try-catch
+- [x] `services/coder-generation.ts` Step 3 action 生成短路：識別 `isSkeletonActionName()` → 直接 render skeleton template 跳 LLM
+- [x] `services/cms-skeleton/index.ts` 補 export：`generateSkeletonServerActions` / `isSkeletonActionName` / `getSkeletonFeatureMeta`
+- [x] cms-skeleton.test.ts 從 21 → 34 tests（+13）：server action templates 形狀驗證 5 case + isSkeletonActionName/getSkeletonFeatureMeta 4 case + injectCmsSkeletonFeaturesIfApplicable hook 4 case（含 idempotent test 驗證跑兩次 schema/mapping/feature count 不重複）
+- [x] 後端 2342 → 2346 tests 全綠
+
+**Week 3-5 待辦**：
+- [ ] Week 3：前端 Slots Panel UI（讀 manifest slots，用戶 deploy 完可調 logo/theme/nav_groups/canonical password，partial regen 只動 skeleton 模組秒級完成）
+- [ ] Week 4：3 個 bb0d1081-like 場景 end-to-end 驗證（量化 LLM call 數 / 一次過率 / cost / 部署時間），telemetry 加 `cms_skeleton_used` event 給 Self-Learning Loop
+- [ ] Week 5+：擴充 — 月度看 telemetry，反覆出現的業務 feature（contact form / newsletter / FAQ）提煉進 skeleton
+
+**預期效果**（CMS 場景）：
+| 指標 | 改造前 | 改造後 |
+|------|--------|--------|
+| 一次過率 | 60-85% | 95%+ |
+| 部署到登入時間 | 20+ 分鐘 | ~5 分鐘 |
+| 每對話 LLM cost | $20-30 | $5-10 |
+| 客製化空間 | 同左 | **變大**（slot 明示哪裡可改） |
+
+**非 CMS 場景**：`detectCmsShape()` 回 `isCmsShape=false` → hook 完全短路，零影響電商/SaaS/Landing 流程。
+
 ## 部署
 
 ### CI/CD

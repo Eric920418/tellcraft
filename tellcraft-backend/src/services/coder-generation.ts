@@ -3346,11 +3346,30 @@ export async function executeCoderPipeline(
   }
 
   // Step 3: 並行生成 action 函數（限制並發 3）
+  // CMS Skeleton Phase 1 Week 2: skeleton actions（admin_login/logout/list_admins/update_admin_profile/get_site_settings）
+  // 跳過 LLM 直接 render canonical template — 0 LLM call、永不失敗
+  const { isSkeletonActionName, generateSkeletonServerActions } = await import('./cms-skeleton')
+  const skeletonActions = generateSkeletonServerActions()
+  const skeletonByActionName = new Map(skeletonActions.map(s => [s.actionName, s]))
+  const skeletonHits = actions.filter(a => isSkeletonActionName(a.name))
+  if (skeletonHits.length > 0) {
+    logger.info({
+      skeletonCount: skeletonHits.length,
+      names: skeletonHits.map(a => a.name),
+    }, 'CMS Skeleton: 識別 skeleton actions，跳過 LLM')
+  }
+
   await callbacks.onProgress(`生成 ${actions.length} 個後端函數...`, 10)
   const actionFiles = await runWithConcurrencyLimit(
     actions,
     async (action, idx) => {
       const percent = 8 + Math.floor((idx / actions.length) * 42)
+      // Skeleton short-circuit
+      const skeleton = skeletonByActionName.get(action.name)
+      if (skeleton) {
+        await callbacks.onProgress(`生成 ${action.name}（skeleton template）...`, percent)
+        return { path: skeleton.filePath, content: skeleton.content, description: '' } as GeneratedComponent
+      }
       await callbacks.onProgress(`生成 ${action.name}...`, percent)
       return generateActionFunction(action, { schemaSql, entityMapping, types, features }, trackingContext)
     },
