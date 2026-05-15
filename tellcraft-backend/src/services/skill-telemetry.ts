@@ -41,6 +41,7 @@ export type SkillName =
   | 'flowstate_recovery'
   | 'budget_guard'  // L31.M: per-conversation budget cap
   | 'actions_design'  // actions.yml 生成 + 修復
+  | 'cms_skeleton'  // Phase 1 Week 4: CMS skeleton 採用 / partial regen
 
 export type EventType =
   | 'sanitize_fix'
@@ -68,6 +69,9 @@ export type EventType =
   | 'cross_loop_fix_skipped'       // R2: 跨 loop cache hit，skip LLM 修補
   | 'qg_high_retry_count'          // Tier A4: UIUX QG 進到 3+ 輪修復（high signal 給週報追蹤）
   | 'unique_constraint_deduped'    // Tier B2: BDD 多 row 同 unique column 衝突自動 dedup
+  | 'cms_skeleton_injected'        // Phase 1 Week 4: formulation 命中 CMS shape 自動補 canonical features
+  | 'cms_skeleton_actions_short_circuit'  // Phase 1 Week 4: coder skeleton actions 跳 LLM render
+  | 'cms_skeleton_partial_regen'   // Phase 1 Week 4: user 觸發 /cms-slots/regen 端點
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
@@ -368,6 +372,63 @@ export async function aggregateWeeklyReport(days = 7, topN = 20): Promise<Weekly
     totalEvents: totalRow?.total || 0,
     topPatterns: topPatterns || [],
     escalations: escalations || [],
+  }
+}
+
+// ============================================================
+// CMS Skeleton 採用度統計（Phase 1 Week 4）
+// ============================================================
+
+export interface CmsSkeletonStats {
+  windowDays: number
+  injectedConversations: number       // distinct conversation 命中 CMS shape
+  shortCircuitEvents: number          // coder skeleton short-circuit 次數
+  totalActionsSavedFromLlm: number    // skeleton 跳過的 action 總數（直接 = 省下的 LLM call）
+  regenEvents: number                 // 用戶觸發 partial regen 次數
+  regenUniqueProjects: number         // 觸發 regen 的 distinct project
+  topInjectionScores: Array<{ score: number; count: number }>  // 命中 CMS shape 的 score 分佈
+}
+
+export async function aggregateCmsSkeletonStats(days = 7): Promise<CmsSkeletonStats> {
+  const main = await db.queryOne<{
+    injected_conversations: number
+    short_circuit_events: number
+    total_actions_saved: number
+    regen_events: number
+    regen_unique_projects: number
+  }>(
+    `SELECT
+       COUNT(DISTINCT conversation_id)::int FILTER (WHERE event_type='cms_skeleton_injected') AS injected_conversations,
+       COUNT(*)::int FILTER (WHERE event_type='cms_skeleton_actions_short_circuit') AS short_circuit_events,
+       COALESCE(SUM((payload->>'skeletonCount')::int) FILTER (WHERE event_type='cms_skeleton_actions_short_circuit'), 0)::int AS total_actions_saved,
+       COUNT(*)::int FILTER (WHERE event_type='cms_skeleton_partial_regen') AS regen_events,
+       COUNT(DISTINCT project_id)::int FILTER (WHERE event_type='cms_skeleton_partial_regen') AS regen_unique_projects
+     FROM skill_telemetry
+     WHERE created_at >= NOW() - ($1 || ' days')::interval
+       AND skill_name = 'cms_skeleton'`,
+    [String(days)]
+  )
+
+  const scoreDist = await db.queryMany<{ score: number; count: number }>(
+    `SELECT (payload->>'score')::int AS score, COUNT(*)::int AS count
+     FROM skill_telemetry
+     WHERE created_at >= NOW() - ($1 || ' days')::interval
+       AND skill_name = 'cms_skeleton'
+       AND event_type = 'cms_skeleton_injected'
+     GROUP BY (payload->>'score')::int
+     ORDER BY count DESC
+     LIMIT 5`,
+    [String(days)]
+  )
+
+  return {
+    windowDays: days,
+    injectedConversations: main?.injected_conversations ?? 0,
+    shortCircuitEvents: main?.short_circuit_events ?? 0,
+    totalActionsSavedFromLlm: main?.total_actions_saved ?? 0,
+    regenEvents: main?.regen_events ?? 0,
+    regenUniqueProjects: main?.regen_unique_projects ?? 0,
+    topInjectionScores: scoreDist || [],
   }
 }
 

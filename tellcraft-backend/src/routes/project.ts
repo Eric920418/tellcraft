@@ -516,6 +516,24 @@ router.post('/:id/cms-slots/regen', requireAuth, async (req, res) => {
 
     logger.info({ projectId: id, fileCount: changes.length }, 'CMS partial regen 完成')
 
+    // Telemetry: 用戶觸發 partial regen 次數（給週報追蹤 slot 系統使用熱度）
+    void import('../services/skill-telemetry').then(({ recordTelemetry }) =>
+      recordTelemetry({
+        skillName: 'cms_skeleton',
+        eventType: 'cms_skeleton_partial_regen',
+        patternKey: 'user_triggered_regen',
+        severity: 'info',
+        outcome: 'success',
+        userId,
+        projectId: id,
+        payload: {
+          fileCount: changes.length,
+          changedPaths: changes.map(c => c.path),
+          hasSlotsOverride: row.cms_slots !== null,
+        },
+      })
+    ).catch(() => {})
+
     res.json({
       success: true,
       changedPaths: changes.map(c => c.path),

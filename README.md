@@ -1044,9 +1044,21 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 
 **Sidebar.tsx 刻意排除 partial regen**：需要 entity 上下文（navItems），改 logo_text 要等下次完整部署套用。
 
-**Week 4-5 待辦**：
-- [ ] Week 4：3 個 bb0d1081-like 場景 end-to-end 驗證（量化 LLM call 數 / 一次過率 / cost / 部署時間），telemetry 加 `cms_skeleton_used` event 給 Self-Learning Loop
-- [ ] Week 5+：擴充 — 月度看 telemetry，反覆出現的業務 feature（contact form / newsletter / FAQ）提煉進 skeleton
+**Week 4（量化採用度 + Self-Learning Loop 接入）**：
+- [x] `services/skill-telemetry.ts` SkillName 新增 `cms_skeleton`；EventType 新增 3 個 — `cms_skeleton_injected` / `cms_skeleton_actions_short_circuit` / `cms_skeleton_partial_regen`
+- [x] 3 處埋點（皆 fire-and-forget）：
+  - **formulation.injectCmsSkeletonFeaturesIfApplicable**：命中 CMS shape 後記錄 `cms_skeleton_injected`（payload: score / threshold / reasons / addedActions / totalFeatures）
+  - **coder-generation.executeCoderPipeline Step 3 skeleton short-circuit**：跳 LLM 後記錄 `cms_skeleton_actions_short_circuit`（payload: skeletonCount / totalActions / skeletonRatio / names）
+  - **routes/project.ts POST /cms-slots/regen**：用戶觸發 partial regen 記錄 `cms_skeleton_partial_regen`（payload: fileCount / changedPaths / hasSlotsOverride）
+- [x] `aggregateCmsSkeletonStats(days)` 新 API：injected conversations / short-circuit events / 省下的 LLM action call 總和 / regen events / score 分佈
+- [x] `telemetry-weekly-report.ts` 加「CMS Skeleton 採用度」章節（在 Unregistered Patterns 後、Top Patterns 前）：表格 + 解讀建議（命中率、平均省的 call、regen 熱度、score 分佈）
+- [x] `scripts/cms-skeleton-baseline-report.ts`（新檔）：對比 skeleton 組 vs 非 skeleton 組過去 N 天的 avg LLM call / avg cost / avg duration，回 Δ%。用法：`pnpm tsx src/scripts/cms-skeleton-baseline-report.ts --days=30 [--json]`
+- [x] 前端 cms-slots 頁加「📦 Partial regen 範圍」說明卡（9 個檔列表 + slot 影響 + Sidebar 排除原因）
+- [x] 後端 2378 tests 全綠
+- [ ] **End-to-end 場景驗證需用戶手動跑** — 跑完 3 個 CMS-like 場景後再執行 `cms-skeleton-baseline-report.ts --days=30` 看真實效果
+
+**Week 5+ 持續性任務**：
+- [ ] 每月看 telemetry 週報 + baseline 報告，反覆出現的業務 feature（contact form / newsletter / FAQ）提煉進 skeleton
 
 **預期效果**（CMS 場景）：
 | 指標 | 改造前 | 改造後 |

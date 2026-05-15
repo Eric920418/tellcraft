@@ -1355,6 +1355,10 @@ export async function runFormulation(
       generatedFeatures,
       schemaSql,
       entityMapping,
+      {
+        conversationId: trackingContext?.conversationId,
+        userId: trackingContext?.userId,
+      },
     )
 
     return {
@@ -1387,6 +1391,7 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
   features: GeneratedFeature[],
   schemaSql: string,
   entityMapping: string,
+  tracking?: { conversationId?: string; userId?: string; projectId?: string },
 ): Promise<{ features: GeneratedFeature[]; schemaSql: string; entityMapping: string }> {
   try {
     const { detectCmsShape, generateSkeletonFeatures, getCmsSkeletonDdl, CMS_SKELETON_ENTITY_MAPPING } =
@@ -1435,6 +1440,27 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
       added: toAdd.map(f => f.actionName),
       totalFeatures: mergedFeatures.length,
     }, 'CMS Skeleton: 注入完成')
+
+    // Telemetry: 記錄 CMS shape 命中 + 注入結果（給週報量化採用率）
+    void import('./skill-telemetry').then(({ recordTelemetry }) =>
+      recordTelemetry({
+        skillName: 'cms_skeleton',
+        eventType: 'cms_skeleton_injected',
+        patternKey: 'formulation_auto_inject',
+        severity: 'info',
+        outcome: 'success',
+        conversationId: tracking?.conversationId,
+        userId: tracking?.userId,
+        projectId: tracking?.projectId,
+        payload: {
+          score: report.score,
+          threshold: report.threshold,
+          reasons: report.reasons.map(r => r.rule),
+          addedActions: toAdd.map(f => f.actionName),
+          totalFeatures: mergedFeatures.length,
+        },
+      })
+    ).catch(() => {})
 
     return {
       features: mergedFeatures,

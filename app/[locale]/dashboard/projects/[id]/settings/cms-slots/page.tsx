@@ -358,6 +358,33 @@ export default function ProjectCmsSlotsPage() {
                 <li>非 CMS 結構的專案不會啟用 skeleton，這頁的設定不會影響非 CMS 流程</li>
               </ul>
             </div>
+
+            {/* Partial regen 範圍說明：哪些檔會被重 render，哪些不會 */}
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded text-sm text-blue-900">
+              <p className="font-medium mb-2">📦 Partial regen 範圍（按「立即重 render」會更新的檔）</p>
+              <table className="w-full text-xs">
+                <thead className="text-left text-blue-700">
+                  <tr>
+                    <th className="py-1 pr-3 font-medium">檔案</th>
+                    <th className="py-1 pr-3 font-medium">slot 影響</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-blue-100">
+                  <tr><td className="py-1 pr-3 font-mono">lib/actions/admin-login.ts</td><td className="py-1 pr-3">jwt_expires_in</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">lib/actions/admin-logout.ts</td><td className="py-1 pr-3">(無)</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">lib/actions/list-admins.ts</td><td className="py-1 pr-3">(無)</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">lib/actions/update-admin-profile.ts</td><td className="py-1 pr-3">(無)</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">lib/actions/get-site-settings.ts</td><td className="py-1 pr-3">(無)</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">components/admin/AdminHeader.tsx</td><td className="py-1 pr-3">hasAuth</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">components/admin/FormField.tsx</td><td className="py-1 pr-3">(純通用)</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">components/admin/DeleteButton.tsx</td><td className="py-1 pr-3">(純通用)</td></tr>
+                  <tr><td className="py-1 pr-3 font-mono">components/admin/SubmitButton.tsx</td><td className="py-1 pr-3">(純通用)</td></tr>
+                </tbody>
+              </table>
+              <p className="mt-3 text-xs text-blue-800">
+                ⚠️ <strong>Sidebar.tsx 刻意排除</strong> — Sidebar 的 nav items 由業務 entity 列表動態生成，partial regen 沒有 entity 上下文。改 <code className="bg-blue-100 px-1 rounded">logo_text</code> / <code className="bg-blue-100 px-1 rounded">nav_groups</code> 要等下次<strong>完整部署</strong>才生效，partial regen 無法套用到 Sidebar。
+              </p>
+            </div>
           </div>
         )}
       </motion.div>

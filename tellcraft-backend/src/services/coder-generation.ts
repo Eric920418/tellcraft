@@ -3357,6 +3357,26 @@ export async function executeCoderPipeline(
       skeletonCount: skeletonHits.length,
       names: skeletonHits.map(a => a.name),
     }, 'CMS Skeleton: 識別 skeleton actions，跳過 LLM')
+
+    // Telemetry: 記錄省下的 LLM call 數（給週報量化「Skeleton 採用率」）
+    void import('./skill-telemetry').then(({ recordTelemetry }) =>
+      recordTelemetry({
+        skillName: 'cms_skeleton',
+        eventType: 'cms_skeleton_actions_short_circuit',
+        patternKey: 'coder_skip_llm',
+        severity: 'info',
+        outcome: 'success',
+        conversationId: trackingContext?.conversationId,
+        userId: trackingContext?.userId,
+        projectId: input.projectId,
+        payload: {
+          skeletonCount: skeletonHits.length,
+          totalActions: actions.length,
+          skeletonRatio: actions.length > 0 ? skeletonHits.length / actions.length : 0,
+          names: skeletonHits.map(a => a.name),
+        },
+      })
+    ).catch(() => {})
   }
 
   await callbacks.onProgress(`生成 ${actions.length} 個後端函數...`, 10)

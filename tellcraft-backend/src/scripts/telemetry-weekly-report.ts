@@ -19,6 +19,7 @@
 import {
   aggregateWeeklyReportWithDelta,
   aggregateFailureOverview,
+  aggregateCmsSkeletonStats,
   measurePromptChangeEffects,
   getActivePromptChanges,
   findDirectionACandidates,
@@ -33,6 +34,7 @@ import {
   type FailureByPhaseRow,
   type RootCauseRow,
   type RecoveryRow,
+  type CmsSkeletonStats,
 } from '../services/skill-telemetry'
 import { closePool } from '../db/client'
 
@@ -403,12 +405,39 @@ pnpm tsx src/scripts/register-prompt-change.ts \\
 `
 }
 
+function formatCmsSkeletonStats(stats: CmsSkeletonStats): string {
+  if (stats.injectedConversations === 0 && stats.shortCircuitEvents === 0 && stats.regenEvents === 0) {
+    return '_過去 ' + stats.windowDays + ' 天無 CMS Skeleton 事件 — 可能尚未跑過 CMS 場景或埋點未生效。_\n'
+  }
+
+  const scoreDist = stats.topInjectionScores.length > 0
+    ? stats.topInjectionScores.map(s => `${s.score} 分: ${s.count} 次`).join(' / ')
+    : '_(無)_'
+
+  return `| 指標 | 過去 ${stats.windowDays} 天 |
+|---|---|
+| 命中 CMS shape 的 conversations（distinct） | **${stats.injectedConversations}** |
+| Coder 階段 skeleton short-circuit 事件 | ${stats.shortCircuitEvents} |
+| **省下的 LLM action call**（skeleton 直接 render） | **${stats.totalActionsSavedFromLlm}** |
+| 用戶觸發 partial regen 次數 | ${stats.regenEvents} |
+| 觸發 regen 的 distinct projects | ${stats.regenUniqueProjects} |
+| CMS shape 命中 score 分佈 | ${scoreDist} |
+
+**解讀建議**：
+- \`injectedConversations\` 是 CMS skeleton 命中率分母 — 命中後該對話省的 LLM call 直接 = \`totalActionsSavedFromLlm\` 數量
+- \`shortCircuitEvents / injectedConversations\` ≈ 平均每對話跑幾次 Coder（理論上 1：1，若 > 1 表示有 retry/重生）
+- \`regenEvents\` 高 = 用戶常調整 slot；持續 = 0 表示 Slots Panel UI 未被使用
+- score 分佈中 \`80\` 是 admin + 3+ CRUD + site_settings 的 sweet spot，\`60\` 是邊界命中（adminLogin+CRUD 兩條規則）
+`
+}
+
 function renderMarkdown(
   report: WeeklyReportWithDelta,
   effects: PromptChangeEffect[],
   directionA: DirectionACandidate[],
   structuralCandidates: StructuralFailureCandidate[],
   unregistered: string[],
+  cmsStats: CmsSkeletonStats,
   failureData?: { byOutcome: FailureOverviewRow[]; byPhase: FailureByPhaseRow[]; topRootCauses: RootCauseRow[]; recoveryStats: RecoveryRow[] }
 ): string {
   const date = new Date().toISOString().slice(0, 10)
@@ -427,7 +456,16 @@ function renderMarkdown(
 
 ---
 
-${formatUnregisteredPatterns(unregistered)}## Top Patterns (with Δ vs previous period)
+${formatUnregisteredPatterns(unregistered)}## CMS Skeleton 採用度（Phase 1 Week 4）
+
+> 量化 vendored skeleton 為 CMS 場景省下多少 LLM call、用戶調整 slot 的熱度。
+> 命中 CMS shape 後系統會自動補 5 個 canonical features 且 Coder 階段跳過 LLM render — 這層 0% LLM 失敗。
+
+${formatCmsSkeletonStats(cmsStats)}
+
+---
+
+## Top Patterns (with Δ vs previous period)
 
 ${formatTopPatterns(report, statusMap)}
 
@@ -528,11 +566,20 @@ async function main() {
   const { days, json } = parseArgs()
 
   try {
-    const [report, effects, activeChanges, failureData] = await Promise.all([
+    const [report, effects, activeChanges, failureData, cmsStats] = await Promise.all([
       aggregateWeeklyReportWithDelta(days),
       measurePromptChangeEffects(),
       getActivePromptChanges(),
       aggregateFailureOverview(days).catch(() => undefined),
+      aggregateCmsSkeletonStats(days).catch(() => ({
+        windowDays: days,
+        injectedConversations: 0,
+        shortCircuitEvents: 0,
+        totalActionsSavedFromLlm: 0,
+        regenEvents: 0,
+        regenUniqueProjects: 0,
+        topInjectionScores: [],
+      })),
     ])
 
     const directionA = findDirectionACandidates(report.topPatterns, activeChanges)
@@ -540,9 +587,9 @@ async function main() {
     const unregistered = findUnregisteredSanitizePatterns(activeChanges)
 
     if (json) {
-      process.stdout.write(JSON.stringify({ report, effects, directionA, structuralCandidates, unregistered, failureData }, null, 2) + '\n')
+      process.stdout.write(JSON.stringify({ report, effects, directionA, structuralCandidates, unregistered, cmsStats, failureData }, null, 2) + '\n')
     } else {
-      process.stdout.write(renderMarkdown(report, effects, directionA, structuralCandidates, unregistered, failureData))
+      process.stdout.write(renderMarkdown(report, effects, directionA, structuralCandidates, unregistered, cmsStats, failureData))
     }
   } catch (err) {
     console.error('週報生成失敗：', err)
