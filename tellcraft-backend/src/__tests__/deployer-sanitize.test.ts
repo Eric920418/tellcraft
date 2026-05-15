@@ -7,6 +7,7 @@ import {
   deriveSmokeTestPaths,
   scanProcessEnvReferences,
   extractReferencedTables,
+  extractAdminCredentialHint,
   checkPageActionContract,
 } from '../services/deployer'
 import { buildPicsumFallbackLibrary, type ImageLibrary } from '../services/image-library-service'
@@ -1581,6 +1582,59 @@ export async function create(input: any) {
     expect(result.warnings[0]).toContain('fieldB')
     expect(result.warnings[0]).toContain('fieldC')
     expect(result.warnings[0]).not.toMatch(/fieldA(?=[^\w])/)  // fieldA 已傳，不該在 missing 裡
+  })
+})
+
+// ============================================================
+// L38: extractAdminCredentialHint — UIUX 測試帳號 hint 對齊 DB seed
+// ============================================================
+
+describe('L38: extractAdminCredentialHint', () => {
+  function vf(file: string, data: string) {
+    return { file, data }
+  }
+
+  it('抓「測試帳號：admin / admin123」中文全形冒號', () => {
+    const files = [vf('components/AdminLoginClient.tsx', `<p>測試帳號：admin / admin123</p>`)]
+    const result = extractAdminCredentialHint(files)
+    expect(result).toEqual({ username: 'admin', password: 'admin123' })
+  })
+
+  it('抓「測試帳號: admin/admin123」半形冒號 + 沒空格', () => {
+    const files = [vf('app/admin/login/page.tsx', `<p>測試帳號: admin/admin123</p>`)]
+    const result = extractAdminCredentialHint(files)
+    expect(result).toEqual({ username: 'admin', password: 'admin123' })
+  })
+
+  it('抓 Test account 英文 hint', () => {
+    const files = [vf('components/Login.tsx', `Test account: superuser / sup3rs3cret`)]
+    const result = extractAdminCredentialHint(files)
+    expect(result).toEqual({ username: 'superuser', password: 'sup3rs3cret' })
+  })
+
+  it('沒 hint 回 null', () => {
+    const files = [vf('app/page.tsx', `<h1>歡迎</h1>`)]
+    expect(extractAdminCredentialHint(files)).toBeNull()
+  })
+
+  it('過濾含 HTML/JSX tag 的假命中', () => {
+    const files = [vf('app/page.tsx', `<div>請輸入：{username} / {password}</div>`)]
+    expect(extractAdminCredentialHint(files)).toBeNull()
+  })
+
+  it('過濾過長 username/password', () => {
+    const longPwd = 'a'.repeat(100)
+    const files = [vf('app/page.tsx', `測試帳號：admin / ${longPwd}`)]
+    expect(extractAdminCredentialHint(files)).toBeNull()
+  })
+
+  it('優先回傳第一個命中（多檔多 pattern）', () => {
+    const files = [
+      vf('components/Login.tsx', `測試帳號：alice / pass1`),
+      vf('components/Other.tsx', `Test account: bob / pass2`),
+    ]
+    const result = extractAdminCredentialHint(files)
+    expect(result?.username).toBe('alice')
   })
 })
 

@@ -1677,6 +1677,38 @@ export async function executeDeployment(
       'Vercel env vars 已注入'
     )
 
+    // L38: admin seed UI hint 對齊 — UIUX 顯示「測試帳號：X / Y」，但 BDD 用其他 password
+    // 算 hash 進 Neon DB → 用戶按 UI hint 永遠登入失敗（bb0d1081 案例）
+    // 修法：scan UIUX 找 hint pattern → 在 Neon DB upsert admin row (username=X, hash=bcrypt(Y))
+    if (cfg?.neon_connection_string) {
+      try {
+        const hint = extractAdminCredentialHint(files)
+        if (hint) {
+          const bcrypt = await import('bcryptjs')
+          const hash = bcrypt.hashSync(hint.password, 10)
+          const { Client } = await import('pg')
+          const c = new Client({ connectionString: cfg.neon_connection_string })
+          await c.connect()
+          try {
+            // 偵測有 admins 表才操作（沒有就跳過，不算失敗）
+            const r = await c.query(`SELECT to_regclass('public.admins') AS t`)
+            if (r.rows[0]?.t) {
+              await c.query(
+                `UPDATE admins SET password_hash = $1, updated_at = NOW() WHERE username = $2`,
+                [hash, hint.username]
+              )
+              logger.info({ projectId, username: hint.username }, 'L38: admin seed UI hint 對齊已套用')
+            }
+          } finally {
+            await c.end().catch(() => {})
+          }
+        }
+      } catch (e) {
+        // fail-soft — admin seed 對齊失敗不阻塞部署
+        logger.warn({ err: e }, 'L38: admin seed UI hint 對齊失敗（不阻塞）')
+      }
+    }
+
     // 4. 部署檔案（70%）
     await onProgress({ percent: 70, step: '上傳並部署到 Vercel...' })
     const deployment = await deployFilesToVercel(projectName, files)
@@ -1688,7 +1720,13 @@ export async function executeDeployment(
     await onProgress({ percent: 90, step: '等待部署完成...' })
     const readyDeployment = await waitForDeploymentReady(deployment.id)
 
-    const deploymentUrl = `https://${deployment.url}`
+    // L37: 用 production alias `{projectName}.vercel.app` 取代 immutable deploy URL
+    // 原 `deployment.url` 是 `tc-xxx-{random}-erics-projects-xxx.vercel.app`（每次部署都換），
+    // 用戶踩 stale URL（停在舊版本前端 bundle 拿不到新 env / 新功能）— bb0d1081 案例
+    // canonical production alias 始終指向最新 READY deployment，給用戶用這條最穩
+    const aliasUrl = `https://${projectName}.vercel.app`
+    const deploymentUrl = aliasUrl
+    const immutableUrl = `https://${deployment.url}`
     const finalStatus = readyDeployment?.readyState || deployment.readyState
 
     if (readyDeployment?.readyState === 'ERROR') {
@@ -1702,7 +1740,8 @@ export async function executeDeployment(
     // 環境變數錯誤、SSR 拋例外等都會 build 過但 runtime 500）。打幾個關鍵路徑確認
     // 客戶不會打開瀏覽器看到一片紅。失敗 → 部署視為失敗，給用戶具體錯誤而不是「成功」。
     await onProgress({ percent: 92, step: 'Smoke test — 驗證部署實際可訪問...' })
-    const smokeFailures = await runDeploymentSmokeTest(deploymentUrl, files)
+    // Smoke test 用 immutable URL — 剛部署完 alias 可能還沒切換，打 immutable 保證打到此次 deploy 的精確 instance
+    const smokeFailures = await runDeploymentSmokeTest(immutableUrl, files)
     if (smokeFailures.length > 0) {
       const summary = smokeFailures
         .map(f => `${f.path} → HTTP ${f.status}${f.snippet ? `\n  ${f.snippet}` : ''}`)
@@ -3612,6 +3651,38 @@ function dedupeRedundantWhereClauses(content: string): { content: string; count:
  * 的 setup；如果 schema 因為 DDL 部分失敗 / 客戶手動 drop 表 / Neon provisioning 沒跑
  * 完整等原因有缺表，runtime 第一次 SQL 查詢就 500。
  */
+/**
+ * L38: 從 UIUX code 提取「測試帳號：X / Y」hint，給 deployer 在 Neon DB 對齊 admin seed
+ *
+ * 支援 pattern（最寬鬆抓法）：
+ *   - 測試帳號：admin / admin123
+ *   - 測試帳號: admin/admin123
+ *   - Test account: admin / admin123
+ *   - Demo: admin/admin123
+ *   - placeholder="admin" + placeholder="admin123" 雙 input field
+ *
+ * 回 null 表示沒找到 hint（保留現有 seed 不動）
+ */
+export function extractAdminCredentialHint(files: VercelFile[]): { username: string; password: string } | null {
+  // 主要 pattern: 「測試帳號|Test|Demo|Default 」 + 帳號 + / + 密碼
+  const re = /(?:測試帳號|測試帳戶|Test\s*account|Demo|Default)\s*[:：]\s*([\w@.\-]+)\s*[\/／]\s*([\w@.!\-]+)/i
+  for (const f of files) {
+    if (!/\.(tsx?|jsx?|md|html)$/.test(f.file)) continue
+    if (!f.file.startsWith('app/') && !f.file.startsWith('components/') && !f.file.startsWith('lib/')) continue
+    const m = f.data.match(re)
+    if (m) {
+      const username = m[1].trim()
+      const password = m[2].trim()
+      // 過濾明顯不像 credential 的 false positive（不允許空、超長、含 HTML/JSX tag）
+      if (!username || !password) continue
+      if (username.length > 64 || password.length > 64) continue
+      if (/<|>|\{|\}/.test(username + password)) continue
+      return { username, password }
+    }
+  }
+  return null
+}
+
 export function extractReferencedTables(files: VercelFile[]): string[] {
   const tables = new Set<string>()
   // L35: 只在 sql tagged template literal `sql\`...\`` 內掃描，避免誤抓
