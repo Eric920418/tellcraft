@@ -1017,8 +1017,34 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 - [x] cms-skeleton.test.ts 從 21 → 34 tests（+13）：server action templates 形狀驗證 5 case + isSkeletonActionName/getSkeletonFeatureMeta 4 case + injectCmsSkeletonFeaturesIfApplicable hook 4 case（含 idempotent test 驗證跑兩次 schema/mapping/feature count 不重複）
 - [x] 後端 2342 → 2346 tests 全綠
 
-**Week 3-5 待辦**：
-- [ ] Week 3：前端 Slots Panel UI（讀 manifest slots，用戶 deploy 完可調 logo/theme/nav_groups/canonical password，partial regen 只動 skeleton 模組秒級完成）
+**Week 3（A+B 同時做：Slots Panel UI + 提煉 admin layout 進 skeleton）**：
+- [x] `migrations/038_add_cms_slots.sql`：`projects.cms_slots JSONB`，NULL = 完全用 manifest default
+- [x] `services/cms-skeleton/slots-merge.ts`（新檔）：`getSlotsDefaults()` 攤平 manifest defaults；`mergeSlotsWithDefaults(override)` 三層 merge（跳 unknown module/slot）；`validateSlotOverrides()` 拒未知 key；`getSlotsSchemaForUI()` 給前端動態 render；`getLockedItems()` 給「為什麼這些不能改」教育區
+- [x] `services/cms-skeleton/ui-scaffold.ts`（新檔，Week 3.4 提煉產物）：把 `coder-admin-templates.ts` 5 個 layout 組件（Sidebar/AdminHeader/FormField/DeleteButton/SubmitButton）抽出，提供 `generateAdminLayoutShell(opts)` + `buildSidebarShell(navItems, opts)` + `getAdminShellOptionsFromSlots(slots)`；Sidebar logo 從 hardcoded `"Admin"` 改用 `logo_text` slot；`hasAuth` 雙變體
+- [x] `coder-admin-templates.ts` 重構：`generateAdminPanel(schema, mapping, hasAuth, slots?)` 新增 optional `slots` 參數（向下兼容，舊 callers 不用改）；內部呼叫 ui-scaffold 提供的 layout shell；entity-aware Sidebar 仍由此檔組裝 navItems
+- [x] `routes/project.ts`：新增 3 個端點 — `GET /api/project/:id/cms-slots`（merge default + override 回傳 schema/locked）/ `PATCH /api/project/:id/cms-slots`（validateSlotOverrides + UPDATE JSONB）/ `POST /api/project/:id/cms-slots/regen`（partial regen — 用 slot 值重 render 9 個 skeleton 檔 UPSERT 進 `project_files` skill_source='coder'，**零 LLM** 純 deterministic）
+- [x] `schemas/project.ts` 加 `cmsSlotsSchema`
+- [x] 前端 `app/[locale]/dashboard/projects/[id]/settings/cms-slots/page.tsx`：動態 render manifest slots 依 type 選 input（text/number/select with options/textarea for JSON array）；module group 分組；🔒 locked 區 `<details>` 摺疊；三個按鈕（儲存/立即重 render/重置全部）；專案詳情頁加「CMS 客製化」入口
+- [x] `vps-api.ts` 加 `getProjectCmsSlots` / `updateProjectCmsSlots` / `regenCmsSlots` + 5 個 type
+- [x] cms-skeleton.test.ts 從 34 → 52 tests（+18）：slots-merge 7 case（含 unknown key 拒絕 / null/undefined fallback）+ ui-scaffold 9 case（含 logo quote escape / hasAuth 雙變體 / isAdminShellPath）+ 2 補充
+- [x] 後端 2346 → 2378 tests 全綠
+
+**Partial regen 範圍**（zero LLM）：
+| 檔 | 來源 | slot 影響 |
+|---|---|---|
+| `lib/actions/admin-login.ts` | `generateSkeletonServerActions` | jwt_expires_in |
+| `lib/actions/admin-logout.ts` | 同上 | (無) |
+| `lib/actions/list-admins.ts` | 同上 | (無) |
+| `lib/actions/update-admin-profile.ts` | 同上 | (無) |
+| `lib/actions/get-site-settings.ts` | 同上 | (無) |
+| `components/admin/AdminHeader.tsx` | `generateAdminLayoutShell` | hasAuth |
+| `components/admin/FormField.tsx` | 同上 | (純通用) |
+| `components/admin/DeleteButton.tsx` | 同上 | (純通用) |
+| `components/admin/SubmitButton.tsx` | 同上 | (純通用) |
+
+**Sidebar.tsx 刻意排除 partial regen**：需要 entity 上下文（navItems），改 logo_text 要等下次完整部署套用。
+
+**Week 4-5 待辦**：
 - [ ] Week 4：3 個 bb0d1081-like 場景 end-to-end 驗證（量化 LLM call 數 / 一次過率 / cost / 部署時間），telemetry 加 `cms_skeleton_used` event 給 Self-Learning Loop
 - [ ] Week 5+：擴充 — 月度看 telemetry，反覆出現的業務 feature（contact form / newsletter / FAQ）提煉進 skeleton
 

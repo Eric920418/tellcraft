@@ -374,6 +374,25 @@ export default function ProjectDetailPage() {
           >
             Email 設定
           </Link>
+
+          {/* CMS 客製化 Slots */}
+          <Link
+            href={`/dashboard/projects/${project.id}/settings/cms-slots`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 20px',
+              fontSize: 14,
+              fontWeight: 500,
+              background: 'transparent',
+              color: 'var(--black)',
+              textDecoration: 'none',
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            CMS 客製化
+          </Link>
         </div>
       </motion.div>
 

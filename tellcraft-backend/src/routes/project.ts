@@ -20,8 +20,13 @@ import {
   getSlotsSchemaForUI,
   getLockedItems,
   CMS_SKELETON_VERSION,
+  generateSkeletonServerActions,
   type SlotsOverride,
 } from '../services/cms-skeleton'
+import {
+  generateAdminLayoutShell,
+  getAdminShellOptionsFromSlots,
+} from '../services/cms-skeleton/ui-scaffold'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { deleteNeonProject } from '../services/neon-service'
@@ -458,6 +463,68 @@ router.patch('/:id/cms-slots', requireAuth, validateBody(cmsSlotsSchema), async 
   } catch (error) {
     logger.error({ err: error }, '更新 cms-slots 失敗')
     res.status(500).json({ error: 'Failed to update cms slots' })
+  }
+})
+
+/**
+ * POST /api/project/:id/cms-slots/regen
+ * Partial regen — 用最新 slot 值重 render skeleton 檔（5 Server Actions + 4 layout shell），
+ * UPSERT 進 project_files 的 skill_source='coder' 同一份檔。
+ * 不重跑 BDD / 業務 LLM。Sidebar.tsx 不在範圍（需要 entity 上下文，等下次完整生成）。
+ *
+ * 回應：{ success, changedPaths: string[], note: string }
+ * 注意：partial regen 只寫 DB，**不會自動部署**。Vercel 預覽要客戶自己重新部署或下次 iterate。
+ */
+router.post('/:id/cms-slots/regen', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const row = await db.queryOne<{ user_id: string; cms_slots: SlotsOverride | null }>(
+      'SELECT user_id, cms_slots FROM projects WHERE id = $1',
+      [id]
+    )
+    if (!row || row.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const merged = mergeSlotsWithDefaults(row.cms_slots ?? null)
+    const adminAuth = merged.admin_auth ?? {}
+    const serverActionOpts = {
+      username: typeof adminAuth.canonical_test_username === 'string' ? adminAuth.canonical_test_username : undefined,
+      password: typeof adminAuth.canonical_test_password === 'string' ? adminAuth.canonical_test_password : undefined,
+      jwtExpiresIn: typeof adminAuth.jwt_expires_in === 'string' ? adminAuth.jwt_expires_in : undefined,
+    }
+
+    const skeletonActions = generateSkeletonServerActions(serverActionOpts)
+    const shellFiles = generateAdminLayoutShell(getAdminShellOptionsFromSlots(merged))
+
+    const changes: Array<{ path: string; content: string }> = [
+      ...skeletonActions.map(a => ({ path: a.filePath, content: a.content })),
+      ...shellFiles.map(f => ({ path: f.path, content: f.content })),
+    ]
+
+    for (const f of changes) {
+      await db.query(
+        `INSERT INTO project_files (project_id, skill_source, file_path, content, file_type, updated_at)
+         VALUES ($1, 'coder', $2, $3, 'component', NOW())
+         ON CONFLICT (project_id, skill_source, file_path)
+         DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()`,
+        [id, f.path, f.content]
+      )
+    }
+
+    logger.info({ projectId: id, fileCount: changes.length }, 'CMS partial regen 完成')
+
+    res.json({
+      success: true,
+      changedPaths: changes.map(c => c.path),
+      count: changes.length,
+      note: 'Files updated in DB. To deploy, trigger a new deployment (Vercel won\'t auto-redeploy from DB writes).',
+    })
+  } catch (error) {
+    logger.error({ err: error }, 'CMS partial regen 失敗')
+    res.status(500).json({ error: 'Partial regen failed', message: error instanceof Error ? error.message : String(error) })
   }
 })
 

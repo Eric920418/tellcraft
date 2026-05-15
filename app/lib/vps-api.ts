@@ -378,6 +378,79 @@ export async function updateProjectEmailConfig(input: {
 }
 
 /**
+ * CMS Skeleton — slot 系統型別（鏡像後端 services/cms-skeleton/slots-merge.ts）
+ */
+export type CmsSlotValue = string | number | boolean | null | string[] | number[] | Record<string, unknown>[]
+export interface CmsResolvedSlots { [moduleId: string]: { [slotKey: string]: CmsSlotValue } }
+export interface CmsSlotsOverride { [moduleId: string]: { [slotKey: string]: CmsSlotValue } }
+export interface CmsSlotDescriptor {
+  moduleId: string
+  slotKey: string
+  type: string
+  default: CmsSlotValue
+  description?: string
+  options?: string[]
+}
+export interface CmsLockedItem { moduleId: string; description: string }
+
+/**
+ * 讀取 CMS Skeleton slots（manifest default + user override merged）
+ */
+export async function getProjectCmsSlots(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{
+  version: string
+  slots: CmsResolvedSlots
+  overrides: CmsSlotsOverride | null
+  schema: CmsSlotDescriptor[]
+  locked: CmsLockedItem[]
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/cms-slots`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+/**
+ * 更新 CMS Skeleton slots
+ * 傳 slots: null 整體清除回 manifest default
+ */
+export async function updateProjectCmsSlots(input: {
+  projectId: string
+  token: string
+  slots: CmsSlotsOverride | null
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest(`/api/project/${input.projectId}/cms-slots`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ slots: input.slots }),
+  })
+}
+
+/**
+ * Partial regen — 用最新 slot 值重 render skeleton 檔（不重跑 BDD/業務 LLM）
+ * 回 changedPaths（DB 寫入），不會觸發 Vercel 自動部署
+ */
+export async function regenCmsSlots(input: {
+  projectId: string
+  token: string
+}): Promise<ApiResponse<{
+  success: boolean
+  changedPaths: string[]
+  count: number
+  note: string
+}>> {
+  return apiRequest(`/api/project/${input.projectId}/cms-slots/regen`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+/**
  * 健康檢查
  */
 export async function healthCheck(): Promise<ApiResponse<{

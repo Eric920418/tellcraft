@@ -7,6 +7,13 @@ import type { GeneratedComponent } from './uiux-generation'
 import { parseCreateTables, parseEntityToTableMapping } from './schema-derivation'
 import { IMAGE_COLUMN_PATTERN } from './coder-upload-templates'
 import { createLogger } from '../lib/logger'
+import {
+  buildSidebarShell,
+  generateAdminLayoutShell,
+  getAdminShellOptionsFromSlots,
+  type AdminShellOptions,
+} from './cms-skeleton/ui-scaffold'
+import type { ResolvedSlots } from './cms-skeleton/slots-merge'
 
 const logger = createLogger('coder-admin-templates')
 
@@ -136,6 +143,7 @@ export function generateAdminPanel(
   schemaSql: string,
   entityMapping: string,
   hasAuth: boolean,
+  slots?: ResolvedSlots | null,
 ): GeneratedComponent[] {
   const tables = parseCreateTables(schemaSql)
   const entityMap = parseEntityToTableMapping(entityMapping)
@@ -151,17 +159,24 @@ export function generateAdminPanel(
     columns: parseColumnDefinitions(t.columns),
   }))
 
-  logger.info({ entityCount: tableInfos.length, entities: tableInfos.map(t => t.tableName) }, 'Admin Panel 生成開始')
+  const shellOpts: AdminShellOptions = {
+    ...getAdminShellOptionsFromSlots(slots ?? null),
+    hasAuth,
+  }
+  logger.info(
+    { entityCount: tableInfos.length, entities: tableInfos.map(t => t.tableName), shellOpts },
+    'Admin Panel 生成開始',
+  )
 
   const files: GeneratedComponent[] = []
 
-  // 共用組件
+  // 共用組件（ui-scaffold + entity-aware Sidebar）
+  const navItemsLiteral = tableInfos
+    .map(t => `  { href: '/admin/${toKebab(t.tableName)}', label: '${t.entityName}' },`)
+    .join('\n')
   files.push(
-    { path: 'components/admin/Sidebar.tsx', content: buildSidebarComponent(tableInfos), description: 'Admin 側邊導航' },
-    { path: 'components/admin/AdminHeader.tsx', content: hasAuth ? ADMIN_HEADER_COMPONENT : ADMIN_HEADER_NO_AUTH, description: 'Admin 頂部' },
-    { path: 'components/admin/FormField.tsx', content: FORM_FIELD_COMPONENT, description: '通用表單欄位' },
-    { path: 'components/admin/DeleteButton.tsx', content: DELETE_BUTTON_COMPONENT, description: '確認刪除按鈕' },
-    { path: 'components/admin/SubmitButton.tsx', content: SUBMIT_BUTTON_COMPONENT, description: '提交按鈕' },
+    { path: 'components/admin/Sidebar.tsx', content: buildSidebarShell(navItemsLiteral, shellOpts), description: 'Admin 側邊導航' },
+    ...generateAdminLayoutShell(shellOpts).map(f => ({ path: f.path, content: f.content, description: f.description })),
     { path: 'app/admin/page.tsx', content: buildAdminDashboardPage(tableInfos), description: 'Admin Dashboard' },
   )
 
@@ -180,157 +195,9 @@ export function generateAdminPanel(
 }
 
 // ============================================================
-// 共用組件模板
+// Layout shell（Sidebar / AdminHeader / FormField / DeleteButton / SubmitButton）
+// 已抽到 cms-skeleton/ui-scaffold.ts，這層只負責 entity-aware 部分
 // ============================================================
-
-function buildSidebarComponent(tables: TableInfo[]): string {
-  const items = tables.map(t => `  { href: '/admin/${toKebab(t.tableName)}', label: '${t.entityName}' },`).join('\n')
-  return `'use client'
-
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-
-const navItems = [
-  { href: '/admin', label: 'Dashboard' },
-${items}
-]
-
-export function Sidebar() {
-  const pathname = usePathname()
-  return (
-    <aside className="w-56 min-h-screen bg-gray-900 text-white p-4">
-      <h2 className="text-lg font-bold mb-6 px-2">Admin</h2>
-      <nav className="space-y-1">
-        {navItems.map((item) => {
-          const isActive = item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href)
-          return (
-            <Link key={item.href} href={item.href}
-              className={\`block px-3 py-2 rounded text-sm \${isActive ? 'bg-white/20 font-medium' : 'hover:bg-white/10'}\`}>
-              {item.label}
-            </Link>
-          )
-        })}
-      </nav>
-    </aside>
-  )
-}
-`
-}
-
-const ADMIN_HEADER_COMPONENT = `'use client'
-
-import { signOut, useSession } from 'next-auth/react'
-
-export function AdminHeader() {
-  const { data: session } = useSession()
-  return (
-    <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6">
-      <div />
-      <div className="flex items-center gap-4">
-        {session?.user?.email && <span className="text-sm text-gray-600">{session.user.email}</span>}
-        <button onClick={() => signOut({ callbackUrl: '/admin/login' })} className="text-sm text-red-600 hover:text-red-800">
-          登出
-        </button>
-      </div>
-    </header>
-  )
-}
-`
-
-const ADMIN_HEADER_NO_AUTH = `export function AdminHeader() {
-  return (
-    <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-end px-6">
-      <span className="text-sm text-gray-500">Admin Panel</span>
-    </header>
-  )
-}
-`
-
-const FORM_FIELD_COMPONENT = `'use client'
-
-interface FormFieldProps {
-  label: string
-  name: string
-  type?: 'text' | 'email' | 'textarea' | 'number' | 'select' | 'checkbox' | 'datetime' | 'date'
-  defaultValue?: string | number | boolean
-  placeholder?: string
-  required?: boolean
-  step?: string
-  options?: { value: string; label: string }[]
-}
-
-export function FormField({ label, name, type = 'text', defaultValue, placeholder, required, step, options }: FormFieldProps) {
-  const baseClass = 'w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
-
-  if (type === 'checkbox') {
-    return (
-      <div className="flex items-center gap-2">
-        <input type="checkbox" id={name} name={name} defaultChecked={!!defaultValue} className="h-4 w-4" />
-        <label htmlFor={name} className="text-sm font-medium text-gray-700">{label}</label>
-      </div>
-    )
-  }
-
-  return (
-    <div>
-      <label htmlFor={name} className="block text-sm font-medium text-gray-700 mb-1">
-        {label}{required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      {type === 'textarea' ? (
-        <textarea id={name} name={name} defaultValue={String(defaultValue ?? '')} placeholder={placeholder}
-          required={required} rows={4} className={baseClass} />
-      ) : type === 'select' ? (
-        <select id={name} name={name} defaultValue={String(defaultValue ?? '')} required={required} className={baseClass}>
-          <option value="">-- 請選擇 --</option>
-          {options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      ) : (
-        <input id={name} name={name} type={type === 'datetime' ? 'datetime-local' : type}
-          defaultValue={type === 'datetime' && defaultValue ? String(defaultValue).slice(0, 16) : String(defaultValue ?? '')}
-          placeholder={placeholder} required={required} step={step} className={baseClass} />
-      )}
-    </div>
-  )
-}
-`
-
-const DELETE_BUTTON_COMPONENT = `'use client'
-
-import { useState, useTransition } from 'react'
-
-export function DeleteButton({ onDelete, itemName }: { onDelete: () => Promise<void>; itemName?: string }) {
-  const [confirming, setConfirming] = useState(false)
-  const [isPending, startTransition] = useTransition()
-
-  if (!confirming) {
-    return <button onClick={() => setConfirming(true)} className="text-sm text-red-600 hover:text-red-800">刪除</button>
-  }
-
-  return (
-    <span className="inline-flex gap-2 items-center">
-      <span className="text-sm text-gray-600">確定刪除{itemName ? \` \${itemName}\` : ''}？</span>
-      <button disabled={isPending} onClick={() => startTransition(async () => { await onDelete(); setConfirming(false) })}
-        className="text-sm text-red-600 font-medium disabled:opacity-50">確定</button>
-      <button onClick={() => setConfirming(false)} className="text-sm text-gray-500">取消</button>
-    </span>
-  )
-}
-`
-
-const SUBMIT_BUTTON_COMPONENT = `'use client'
-
-import { useFormStatus } from 'react-dom'
-
-export function SubmitButton({ label = '儲存' }: { label?: string }) {
-  const { pending } = useFormStatus()
-  return (
-    <button type="submit" disabled={pending}
-      className="px-6 py-2 text-white bg-blue-600 rounded-md font-medium disabled:opacity-50 hover:bg-blue-700">
-      {pending ? '處理中...' : label}
-    </button>
-  )
-}
-`
 
 function buildAdminDashboardPage(tables: TableInfo[]): string {
   const cards = tables.map(t =>

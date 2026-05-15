@@ -28,3 +28,12 @@ export const emailConfigSchema = z.object({
   resendApiKey: z.string().max(200).nullable().optional(),
   emailFrom: z.string().max(200).nullable().optional(),
 })
+
+/**
+ * CMS Skeleton Slots（用戶覆蓋 manifest 的 slot 預設值）
+ * 結構鬆散：每個 module 的 slot key → 任意 JSON 值，由 cms-skeleton manifest 約束。
+ * 完整 reset 傳空物件 {} 即可，整體清除可傳 null。
+ */
+export const cmsSlotsSchema = z.object({
+  slots: z.record(z.string(), z.record(z.string(), z.unknown())).nullable().optional(),
+})

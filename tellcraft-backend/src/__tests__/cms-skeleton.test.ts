@@ -9,7 +9,19 @@ import {
   getSkeletonFeatureMeta,
   CMS_SKELETON_ENTITY_MAPPING,
   CMS_SKELETON_VERSION,
+  getSlotsDefaults,
+  mergeSlotsWithDefaults,
+  validateSlotOverrides,
+  getSlotsSchemaForUI,
+  getLockedItems,
 } from '../services/cms-skeleton'
+import {
+  buildSidebarShell,
+  buildAdminHeader,
+  generateAdminLayoutShell,
+  getAdminShellOptionsFromSlots,
+  isAdminShellPath,
+} from '../services/cms-skeleton/ui-scaffold'
 
 describe('CMS Skeleton — manifest', () => {
   it('manifest 版本號可讀', () => {
@@ -362,5 +374,149 @@ describe('CMS Skeleton — isSkeletonActionName / getSkeletonFeatureMeta', () =>
 
   it('非 skeleton actionName 回 null', () => {
     expect(getSkeletonFeatureMeta('create_faq')).toBeNull()
+  })
+})
+
+describe('CMS Skeleton — slots-merge (Week 3)', () => {
+  it('getSlotsDefaults 含 4 個 module + 對應 default 值', () => {
+    const d = getSlotsDefaults()
+    expect(Object.keys(d).sort()).toEqual([
+      'admin_auth', 'admin_panel_layout', 'pagination', 'soft_delete',
+    ])
+    expect(d.admin_auth.canonical_test_username).toBe('admin')
+    expect(d.admin_auth.canonical_test_password).toBe('admin123')
+    expect(d.admin_auth.jwt_expires_in).toBe('7d')
+    expect(d.admin_panel_layout.theme_mode).toBe('auto')
+    expect(d.pagination.default_page_size).toBe(50)
+  })
+
+  it('mergeSlotsWithDefaults(null) 回完整 defaults', () => {
+    const m = mergeSlotsWithDefaults(null)
+    expect(m.admin_auth.canonical_test_password).toBe('admin123')
+  })
+
+  it('mergeSlotsWithDefaults override 部分 slot，未覆蓋的保留 default', () => {
+    const m = mergeSlotsWithDefaults({
+      admin_auth: { canonical_test_password: 'newpass' },
+    })
+    expect(m.admin_auth.canonical_test_password).toBe('newpass')
+    expect(m.admin_auth.canonical_test_username).toBe('admin')  // default 保留
+    expect(m.pagination.default_page_size).toBe(50)  // 整個 module 沒改也保留
+  })
+
+  it('mergeSlotsWithDefaults 跳過 unknown module/slot 不污染', () => {
+    const m = mergeSlotsWithDefaults({
+      admin_auth: { canonical_test_password: 'x', bogus_slot: 'should_skip' },
+      unknown_module: { foo: 'bar' },
+    } as any)
+    expect(m.admin_auth.canonical_test_password).toBe('x')
+    expect((m.admin_auth as any).bogus_slot).toBeUndefined()
+    expect((m as any).unknown_module).toBeUndefined()
+  })
+
+  it('validateSlotOverrides 拒 unknown module/slot', () => {
+    expect(validateSlotOverrides(null).valid).toBe(true)
+    expect(validateSlotOverrides({}).valid).toBe(true)
+    expect(validateSlotOverrides({ admin_auth: { canonical_test_password: 'x' } }).valid).toBe(true)
+    const v1 = validateSlotOverrides({ unknown_module: {} })
+    expect(v1.valid).toBe(false)
+    expect(v1.errors[0]).toContain('unknown module')
+    const v2 = validateSlotOverrides({ admin_auth: { bogus_slot: 1 } })
+    expect(v2.valid).toBe(false)
+    expect(v2.errors[0]).toContain('admin_auth.bogus_slot')
+  })
+
+  it('validateSlotOverrides 非物件 reject', () => {
+    expect(validateSlotOverrides('not-an-object').valid).toBe(false)
+    expect(validateSlotOverrides([1, 2]).valid).toBe(false)
+    expect(validateSlotOverrides({ admin_auth: 'not-an-object' }).valid).toBe(false)
+  })
+
+  it('getSlotsSchemaForUI 攤平所有 slots 含 moduleId+slotKey+type+default', () => {
+    const schema = getSlotsSchemaForUI()
+    expect(schema.length).toBeGreaterThan(8)
+    const usernameSlot = schema.find(s => s.moduleId === 'admin_auth' && s.slotKey === 'canonical_test_username')!
+    expect(usernameSlot.type).toBe('string')
+    expect(usernameSlot.default).toBe('admin')
+    expect(usernameSlot.description).toBeTruthy()
+    const themeSlot = schema.find(s => s.moduleId === 'admin_panel_layout' && s.slotKey === 'theme_mode')!
+    expect(themeSlot.options).toEqual(['light', 'dark', 'auto'])
+  })
+
+  it('getLockedItems 攤平所有鎖死約定', () => {
+    const locked = getLockedItems()
+    expect(locked.length).toBeGreaterThan(8)
+    const bcrypt = locked.find(l => l.description.includes('bcrypt'))
+    expect(bcrypt?.moduleId).toBe('admin_auth')
+  })
+})
+
+describe('CMS Skeleton — ui-scaffold (Week 3.4)', () => {
+  it('buildSidebarShell 帶 logoText 透傳到 h2', () => {
+    const sidebar = buildSidebarShell('  { href: "/admin/faqs", label: "FAQ" },', { logoText: 'My Brand' })
+    expect(sidebar).toContain('>My Brand<')
+    expect(sidebar).toContain('href: "/admin/faqs"')  // navItemsLiteral 用雙引號
+  })
+
+  it('buildSidebarShell 未傳 logoText 預設 "Admin"', () => {
+    const sidebar = buildSidebarShell('  { href: "/admin/x", label: "X" },')
+    expect(sidebar).toContain('>Admin<')
+  })
+
+  it('buildSidebarShell logo 帶引號安全 escape', () => {
+    const sidebar = buildSidebarShell('  { href: "/admin/x", label: "X" },', { logoText: "Bob's CMS" })
+    // 不破壞 JSX
+    expect(sidebar).toContain("Bob\\'s CMS")
+  })
+
+  it('buildAdminHeader 兩變體（含 auth / 無 auth）內容不同', () => {
+    const withAuth = buildAdminHeader({ hasAuth: true })
+    const noAuth = buildAdminHeader({ hasAuth: false })
+    expect(withAuth).toContain('signOut')
+    expect(noAuth).not.toContain('signOut')
+    expect(noAuth).toContain('Admin Panel')
+  })
+
+  it('generateAdminLayoutShell 回 4 個檔（不含 Sidebar）', () => {
+    const files = generateAdminLayoutShell({ hasAuth: true })
+    const paths = files.map(f => f.path).sort()
+    expect(paths).toEqual([
+      'components/admin/AdminHeader.tsx',
+      'components/admin/DeleteButton.tsx',
+      'components/admin/FormField.tsx',
+      'components/admin/SubmitButton.tsx',
+    ])
+  })
+
+  it('getAdminShellOptionsFromSlots 從 resolved slots 抽 logo+theme', () => {
+    const opts = getAdminShellOptionsFromSlots({
+      admin_panel_layout: { logo_text: 'Acme', theme_mode: 'dark' },
+    } as any)
+    expect(opts.logoText).toBe('Acme')
+    expect(opts.themeMode).toBe('dark')
+  })
+
+  it('getAdminShellOptionsFromSlots logo 空字串退回 default', () => {
+    const opts = getAdminShellOptionsFromSlots({
+      admin_panel_layout: { logo_text: '', theme_mode: 'light' },
+    } as any)
+    expect(opts.logoText).toBe('Admin')
+    expect(opts.themeMode).toBe('light')
+  })
+
+  it('getAdminShellOptionsFromSlots null/undefined 安全 fallback', () => {
+    const a = getAdminShellOptionsFromSlots(null)
+    expect(a.logoText).toBe('Admin')
+    expect(a.themeMode).toBe('auto')
+    const b = getAdminShellOptionsFromSlots(undefined)
+    expect(b.logoText).toBe('Admin')
+  })
+
+  it('isAdminShellPath 識別 5 個 layout 檔', () => {
+    expect(isAdminShellPath('components/admin/Sidebar.tsx')).toBe(true)
+    expect(isAdminShellPath('components/admin/AdminHeader.tsx')).toBe(true)
+    expect(isAdminShellPath('components/admin/FormField.tsx')).toBe(true)
+    expect(isAdminShellPath('app/admin/page.tsx')).toBe(false)
+    expect(isAdminShellPath('lib/actions/admin-login.ts')).toBe(false)
   })
 })

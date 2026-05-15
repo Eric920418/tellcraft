@@ -25,6 +25,18 @@ export {
   getSkeletonFeatureMeta,
   type SkeletonServerAction,
 } from './server-action-templates'
+export {
+  getSlotsDefaults,
+  mergeSlotsWithDefaults,
+  validateSlotOverrides,
+  getSlotsSchemaForUI,
+  getLockedItems,
+  type ResolvedSlots,
+  type SlotsOverride,
+  type SlotValue,
+  type SlotDescriptor,
+  type LockedItem,
+} from './slots-merge'
 
 export type CmsSkeletonManifest = typeof manifest
 
