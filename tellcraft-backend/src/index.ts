@@ -385,6 +385,12 @@ const orchestratorQueue = new Queue('orchestrator', {
 setOrchestratorQueue(orchestratorQueue)
 setRedisClient(generalRedis)
 
+// Phase I: 注入 project routes 的 queue + redis（給 import-design endpoint 用）
+import('./routes/project').then(({ setProjectOrchestratorQueue, setProjectRedisClient }) => {
+  setProjectOrchestratorQueue(orchestratorQueue)
+  setProjectRedisClient(generalRedis)
+})
+
 // R2: 注入 Redis 給 fix-attempt-cache（跨 loop fingerprint cache，BDD pipeline only）
 // 沒注入 → cache 退化為 no-op，fail-open（4 個 loop 各自跑 LLM）
 import('./lib/fix-attempt-cache').then(m => m.setFixAttemptCacheRedis(generalRedis))

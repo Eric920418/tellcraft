@@ -1,8 +1,27 @@
 import { Router, type Router as RouterType } from 'express'
 import archiver from 'archiver'
+import { Queue } from 'bullmq'
+import type Redis from 'ioredis'
 import { requireAuth, requireActiveSubscription, requirePlan } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
-import { createProjectSchema, templateOverridesSchema, batchDeleteSchema, emailConfigSchema } from '../schemas/project'
+import { createProjectSchema, templateOverridesSchema, batchDeleteSchema, emailConfigSchema, cmsSlotsSchema } from '../schemas/project'
+import { parseTellcraftDesignMd } from '../services/design-md-importer'
+import { freezeDesignSystem } from '../services/design-system-freeze'
+import { getEnv } from '../lib/env'
+
+// Phase I: BullMQ queue + Redis client（在 index.ts 注入後 endpoint 才能用）
+let orchestratorQueue: Queue | null = null
+let redisClient: Redis | null = null
+export function setProjectOrchestratorQueue(q: Queue) { orchestratorQueue = q }
+export function setProjectRedisClient(r: Redis) { redisClient = r }
+import {
+  mergeSlotsWithDefaults,
+  validateSlotOverrides,
+  getSlotsSchemaForUI,
+  getLockedItems,
+  CMS_SKELETON_VERSION,
+  type SlotsOverride,
+} from '../services/cms-skeleton'
 import * as db from '../db/client'
 import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { deleteNeonProject } from '../services/neon-service'
@@ -367,6 +386,78 @@ router.get('/:id/email-config', requireAuth, async (req, res) => {
   } catch (error) {
     logger.error({ err: error }, '讀取 email 配置失敗')
     res.status(500).json({ error: 'Failed to load email config' })
+  }
+})
+
+/**
+ * GET /api/project/:id/cms-slots
+ * 讀取 CMS Skeleton slots（merge manifest default + user override）
+ * 回傳：{ version, slots(merged), overrides(raw), schema(動態 render), locked(只讀展示) }
+ */
+router.get('/:id/cms-slots', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+
+    const row = await db.queryOne<{ user_id: string; cms_slots: SlotsOverride | null }>(
+      'SELECT user_id, cms_slots FROM projects WHERE id = $1',
+      [id]
+    )
+    if (!row || row.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const overrides = row.cms_slots ?? null
+    const merged = mergeSlotsWithDefaults(overrides)
+
+    res.json({
+      version: CMS_SKELETON_VERSION,
+      slots: merged,
+      overrides,
+      schema: getSlotsSchemaForUI(),
+      locked: getLockedItems(),
+    })
+  } catch (error) {
+    logger.error({ err: error }, '讀取 cms-slots 失敗')
+    res.status(500).json({ error: 'Failed to load cms slots' })
+  }
+})
+
+/**
+ * PATCH /api/project/:id/cms-slots
+ * 更新 CMS Skeleton slots
+ * body: { slots: { [moduleId]: { [slotKey]: value } } | null }
+ * 整體清除：傳 slots: null（回 manifest default 行為）
+ * 不在 manifest 內的 key 直接拒絕（400）
+ */
+router.patch('/:id/cms-slots', requireAuth, validateBody(cmsSlotsSchema), async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user!.id
+    const { slots } = req.body as { slots?: SlotsOverride | null }
+
+    const project = await db.getProject(id)
+    if (!project || project.user_id !== userId) {
+      return res.status(404).json({ error: 'Project not found' })
+    }
+
+    if (slots !== null && slots !== undefined) {
+      const v = validateSlotOverrides(slots)
+      if (!v.valid) {
+        return res.status(400).json({ error: 'Invalid slots', details: v.errors })
+      }
+    }
+
+    const value = slots === null ? null : (slots ?? null)
+    await db.query(
+      'UPDATE projects SET cms_slots = $1, updated_at = NOW() WHERE id = $2',
+      [value === null ? null : JSON.stringify(value), id]
+    )
+
+    res.json({ success: true })
+  } catch (error) {
+    logger.error({ err: error }, '更新 cms-slots 失敗')
+    res.status(500).json({ error: 'Failed to update cms slots' })
   }
 })
 
@@ -1109,6 +1200,120 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
     if (!res.headersSent) {
       res.status(500).json({ error: `Failed to download project code: ${msg}` })
     }
+  }
+})
+
+/**
+ * POST /api/project/:id/import-design
+ * Phase I: 用戶上傳 DESIGN.md → 解析 → 更新 state.uiuxDesignSystem → 觸發 big-bang regen
+ *
+ * Body: { designMdContent: string }
+ *
+ * 流程：
+ *   1. 驗證 project 屬於該 user
+ *   2. parseTellcraftDesignMd(designMdContent) → 解析失敗回 400 + errors[]
+ *   3. 找該 project 最新的 conversation
+ *   4. getFlowState → patch uiuxDesignSystem + freeze + 設 phase='uiux_code_generation'
+ *   5. saveFlowState 到 DB
+ *   6. enqueue 'continue-flow' job 帶 sentinel message '__import_design_md__'
+ *   7. worker 收到 job → phase-router 看到 phase='uiux_code_generation' → executeFullCodePipeline
+ */
+router.post('/:id/import-design', requireAuth, requirePlan('creator', 'pro', 'business'), async (req, res) => {
+  try {
+    if (!getEnv().ENABLE_DESIGN_MD_IMPORT) {
+      return res.status(403).json({ error: 'DESIGN.md import 功能暫時關閉' })
+    }
+    if (!orchestratorQueue || !redisClient) {
+      return res.status(500).json({ error: 'Service not initialized' })
+    }
+
+    const { id: projectId } = req.params
+    const userId = req.user!.id
+    const { designMdContent } = req.body as { designMdContent?: string }
+
+    if (!designMdContent || typeof designMdContent !== 'string') {
+      return res.status(400).json({ error: 'designMdContent 必填且必須為字串' })
+    }
+    if (designMdContent.length > 200_000) {
+      return res.status(400).json({ error: 'designMdContent 超過 200KB 上限' })
+    }
+
+    // 1. 驗證 project ownership
+    const project = await db.queryOne<{ user_id: string; name: string }>(
+      'SELECT user_id, name FROM projects WHERE id = $1',
+      [projectId]
+    )
+    if (!project) return res.status(404).json({ error: 'Project not found' })
+    if (project.user_id !== userId) return res.status(403).json({ error: 'Access denied' })
+
+    // 2. parse DESIGN.md
+    const parseResult = parseTellcraftDesignMd(designMdContent)
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'DESIGN.md 解析失敗',
+        errors: parseResult.errors,
+      })
+    }
+
+    // 3. 找該 project 最新 conversation
+    const conv = await db.queryOne<{ id: string }>(
+      'SELECT id FROM conversations WHERE project_id = $1 ORDER BY updated_at DESC LIMIT 1',
+      [projectId]
+    )
+    if (!conv) {
+      return res.status(404).json({ error: '找不到此 project 的 conversation，請先在對話內建立內容' })
+    }
+    const conversationId = conv.id
+
+    // 4. 取得 + patch flowState
+    const { getFlowState, saveFlowState } = await import('../workers/orchestrator-utils')
+    const state = await getFlowState(redisClient, conversationId)
+    if (!state) {
+      return res.status(404).json({ error: '找不到此 conversation 的 flow state' })
+    }
+
+    state.uiuxDesignSystem = parseResult.designSystem
+    const freeze = freezeDesignSystem(parseResult.designSystem, 'imported_design_md', { conversationId, userId })
+    state.uiuxDesignSystemHash = freeze.hash
+    state.uiuxDesignSystemSource = freeze.source
+    state.phase = 'uiux_code_generation'
+    state.uiuxCodePhase = 'structure'
+    state.waitingForReply = false
+    state.uiuxCodeGenerationStartedAt = Date.now()
+    await saveFlowState(redisClient, conversationId, state)
+
+    // 5. enqueue regen job — worker 收到後走 phase-router → executeFullCodePipeline
+    const job = await orchestratorQueue.add('continue-flow', {
+      projectId,
+      conversationId,
+      userId,
+      message: '__import_design_md__',  // sentinel，phase-router 看 phase 就好不需依賴 message
+      locale: state.locale ?? 'zh',
+    }, {
+      jobId: `import-design:${conversationId}:${Date.now()}`,
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 2000 },
+    })
+
+    logger.info({
+      projectId,
+      conversationId,
+      userId,
+      primary: parseResult.designSystem.colorPalette.primary,
+      warningCount: parseResult.warnings.length,
+      jobId: job.id,
+    }, 'DESIGN.md import 觸發 big-bang regen')
+
+    res.json({
+      success: true,
+      warnings: parseResult.warnings,
+      jobId: job.id,
+      conversationId,
+    })
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    logger.error({ err: error }, `DESIGN.md import 失敗: ${msg}`)
+    res.status(500).json({ error: `Import failed: ${msg}` })
   }
 })
 

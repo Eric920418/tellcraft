@@ -189,6 +189,7 @@ export type DesignSystemSource =
   | 'vendored_designmd'    // 用戶輸入 stripe.com 直接命中
   | 'vendored_modified'    // vendored 後用戶迭代修改過
   | 'iteration_modified'   // Phase G: 迭代修改後從代碼反推同步（design-system-token / mixed tier）
+  | 'imported_design_md'   // Phase I: 用戶上傳 DESIGN.md 解析後套用
   | 'rolled_back'          // 從版本 snapshot 還原
 
 export interface FreezeResult {
