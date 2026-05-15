@@ -44,6 +44,8 @@ interface AssembledCode {
   components: GeneratedComponent[]
   styles: string
   tailwindConfig: string
+  /** Phase H: 額外文件（DESIGN.md 等），原樣放在專案 root */
+  docs: Array<{ path: string; content: string }>
   /** 從快照衍生時用來 fallback 推 tailwind config */
   designSystem: unknown | null
 }
@@ -149,6 +151,18 @@ export async function buildDownloadBundle(
     content: buildGitignore(),
   })
 
+  // 8. Phase H: 把 project_files 的 doc 類型（DESIGN.md 等）放進專案 root
+  //    用戶 git clone / unzip 後看得到，跨 AI 工具可攜
+  //    如果 path 衝突（理論上不會，因 wrapInNextJs 沒生 DESIGN.md），doc 覆蓋（用戶 DesignSystem 為真理）
+  for (const doc of assembled.docs) {
+    const existingIdx = out.findIndex((f) => f.path === doc.path)
+    if (existingIdx >= 0) {
+      out[existingIdx] = doc
+    } else {
+      out.push(doc)
+    }
+  }
+
   return { files: out }
 }
 
@@ -168,6 +182,7 @@ async function assembleFromProjectFiles(projectId: string): Promise<AssembledCod
   const pages: GeneratedComponent[] = []
   const components: GeneratedComponent[] = []
   const backendFiles: GeneratedComponent[] = []
+  const docs: Array<{ path: string; content: string }> = []
   let styles = ''
   let tailwindConfig = ''
 
@@ -182,6 +197,9 @@ async function assembleFromProjectFiles(projectId: string): Promise<AssembledCod
       tailwindConfig = f.content
     } else if (['service', 'api_route', 'config'].includes(f.file_type)) {
       backendFiles.push({ path: f.file_path, content: f.content, description: f.description || '' })
+    } else if (f.file_type === 'doc') {
+      // Phase H: DESIGN.md 等文件，原樣推進 docs（後續 bundle 組合處放進專案 root）
+      docs.push({ path: f.file_path, content: f.content })
     }
   }
 
@@ -206,6 +224,7 @@ async function assembleFromProjectFiles(projectId: string): Promise<AssembledCod
         components: session.generated_components || [],
         styles: session.generated_styles || '',
         tailwindConfig: '',
+        docs: [],  // 舊 session fallback 無 DESIGN.md（Phase H 前的專案）
         designSystem: session.final_design_system,
       }
     }
@@ -217,6 +236,7 @@ async function assembleFromProjectFiles(projectId: string): Promise<AssembledCod
     components: [...components, ...backendFiles],
     styles,
     tailwindConfig,
+    docs,
     designSystem: null,
   }
 }
@@ -247,7 +267,7 @@ function assembleFromSnapshot(snapshot: SnapshotFile[]): AssembledCode {
     }
   }
 
-  return { pages, components, styles, tailwindConfig, designSystem: null }
+  return { pages, components, styles, tailwindConfig, docs: [], designSystem: null }
 }
 
 function inferFileTypeFromPath(p: string): 'page' | 'style' | 'tailwind_config' | 'other' {
