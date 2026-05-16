@@ -2215,6 +2215,23 @@ export default function RootLayout({
     }
   }
 
+  // vercel.json — 自動注入 region 對齊 Neon DB（NEON_DEFAULT_REGION=aws-ap-southeast-1）
+  // 不設則 Vercel default 通常 iad1 美東 → 跨太平洋 200-300ms 延遲
+  // Hobby plan 收到 regions 設定會 silent ignore（不報錯），Pro/Enterprise 才生效 → 無副作用
+  // 客戶代碼若已含 vercel.json（透過 Coder 或 project_files 自訂）→ 保留客戶版本
+  if (!files.some(f => f.file === 'vercel.json')) {
+    files.push({
+      file: 'vercel.json',
+      data: JSON.stringify({
+        $schema: 'https://openapi.vercel.sh/vercel.json',
+        regions: ['sin1'],
+        functions: {
+          'app/**/*.ts': { maxDuration: 60 },
+        },
+      }, null, 2),
+    })
+  }
+
   // 若 components/ImageCredits.tsx 被注入 → 在 layout 的 </body> 前插入
   if (files.some(f => f.file === 'components/ImageCredits.tsx')) {
     injectImageCreditsIntoLayout(files)

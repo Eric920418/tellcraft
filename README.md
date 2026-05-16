@@ -1165,6 +1165,14 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 - **前端**：push `main` → Vercel 自動偵測 Next.js 並部署
 - **後端**：push `main` → GitHub Actions SSH 到 VPS → `pnpm install` → `pnpm build` → `pm2 restart`
 
+### 客戶 app Vercel region 對齊（zero-config）
+
+Deployer 部署 Coder 生成的客戶 app 時，`wrapInNextJs()` 自動注入 `vercel.json` 含 `regions: ["sin1"]`（對齊 `NEON_DEFAULT_REGION=aws-ap-southeast-1`），避免客戶 app 在 Vercel default region (iad1 美東) ↔ Neon DB 新加坡跨太平洋 200-300ms 延遲。
+
+- **Hobby plan**：Vercel silent ignore region 設定，不報錯
+- **Pro/Enterprise plan**：實際生效，亞洲客戶體驗 DB query ~30-50ms
+- **客戶自訂 vercel.json**：若 Coder 或 project_files 自帶 vercel.json，保留客戶版本不覆蓋（`!files.some` 防重）
+
 ### VPS 首次設定
 
 ```bash
