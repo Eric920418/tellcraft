@@ -8,7 +8,8 @@ import { createLogger } from '../lib/logger'
 
 import { sanitizeForPreview } from './code-verify'
 import { sanitizeCodeForDeployAsync } from './deployer'
-import { recordTelemetry, truncateFeedback } from './skill-telemetry'
+import { recordTelemetry, truncateFeedback, detectAestheticComplaint } from './skill-telemetry'
+import { generateDesignQualityReport } from './design-quality-report'
 import { updateDesignMemory } from './design-memory'
 import { runQualityGate } from './quality-gate'
 import { assessIteration, buildFailedToImproveMessage } from './iteration-feedback-loop'
@@ -379,6 +380,29 @@ export async function executeIteration(input: {
         },
       }).catch(() => {})
     }
+
+    // Phase 0 閉環：美感投訴偵測（零 LLM regex）— 命中即記錄，週報依 mood/dsSource 切片
+    // gate ENABLE_DESIGN_TELEMETRY_V2，fire-and-forget 不阻塞 pipeline
+    if (getEnv().ENABLE_DESIGN_TELEMETRY_V2 && detectAestheticComplaint(userFeedback)) {
+      recordTelemetry({
+        skillName: 'iteration',
+        eventType: 'iteration_aesthetic_complaint',
+        patternKey: state.uiuxDesignMood || 'no_mood',
+        severity: 'warning',
+        userId: state.userId || userId,
+        conversationId,
+        projectId: state.projectId,
+        payload: {
+          feedback: truncateFeedback(userFeedback),
+          mood: state.uiuxDesignMood ?? null,
+          tier: state.uiuxDesignTier ?? null,
+          dsHash: state.uiuxDesignSystemHash ?? null,
+          dsSource: state.uiuxDesignSystemSource ?? null,
+          variantConceptName: state.uiuxVariantConcept?.name ?? null,
+          iterationIndex: (state.iterationCount ?? 0) + 1,
+        },
+      }).catch(() => {})
+    }
     // master flag gate：USE_FROZEN_DESIGN_SYSTEM_PIPELINE=false 時不注入 hint（baseline 行為），telemetry 仍寫供觀察
     if (getEnv().USE_FROZEN_DESIGN_SYSTEM_PIPELINE) {
       if (iterationTier === 'design-system-token') {
@@ -742,6 +766,45 @@ ${enrichedFeedback}`
           consecutiveFailedCount: newFailedCount,
         },
       }).catch(() => {})
+
+      // Phase 0 閉環：iteration_score_delta — 用 4 維度 overallScore 量化「迭代真的有變好嗎」
+      // 不重跑 QG（用上方剛算的 newReport + state.lastIterationQualityReport），純計算開銷
+      // gate ENABLE_DESIGN_TELEMETRY_V2，fire-and-forget
+      if (getEnv().ENABLE_DESIGN_TELEMETRY_V2) {
+        try {
+          const prevQg = state.lastIterationQualityReport ?? state.uiuxQualityReport
+          const newDq = generateDesignQualityReport(newReport)
+          const prevDq = prevQg ? generateDesignQualityReport(prevQg) : null
+          const prevScore = prevDq?.overallScore ?? null
+          const newScore = newDq.overallScore
+          const delta = prevScore !== null ? newScore - prevScore : null
+          recordTelemetry({
+            skillName: 'iteration',
+            eventType: 'iteration_score_delta',
+            patternKey: state.uiuxDesignMood || 'no_mood',
+            severity: delta !== null && delta < -5 ? 'warning' : 'info',
+            userId: state.userId || userId,
+            conversationId,
+            projectId: pid,
+            payload: {
+              prevScore,
+              newScore,
+              delta,
+              tier: iterationTier,
+              scope,
+              mood: state.uiuxDesignMood ?? null,
+              dsHash: state.uiuxDesignSystemHash ?? null,
+              dsSource: state.uiuxDesignSystemSource ?? null,
+              variantConceptName: state.uiuxVariantConcept?.name ?? null,
+              iterationIndex: state.iterationCount ?? 1,
+              dimensionScores: newDq.dimensionScores,
+              prevDimensionScores: prevDq?.dimensionScores ?? null,
+            },
+          }).catch(() => {})
+        } catch (err) {
+          logger.warn({ err: String(err).slice(0, 200) }, 'iteration_score_delta 計算失敗（不阻塞）')
+        }
+      }
 
       // 連續 ≥ 2 輪沒改善 → 提供逃離選項，避免無限循環
       if (assessment.shouldEscalate) {

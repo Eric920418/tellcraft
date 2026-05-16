@@ -18,6 +18,9 @@
 import type { QualityReport, QualityIssue } from './quality-gate'
 import { isConsistencyIssue } from './css-consistency-audit'
 import { createLogger } from '../lib/logger'
+import { recordTelemetry, type TelemetryTrackingContext } from './skill-telemetry'
+import { getEnv } from '../lib/env'
+import type { FlowState } from '../types/flow-state'
 
 const logger = createLogger('design-quality-report')
 
@@ -219,4 +222,55 @@ export function logDesignQualityReport(report: DesignQualityReport, ctx: { conve
     dim: report.dimensionScores,
     fixPlanCount: report.fixPlan.length,
   }, '[design-quality] 設計品質報告')
+}
+
+// ============================================================
+// 設計審美閉環 v2（Phase 0）— Telemetry 寫入 helper
+// ============================================================
+
+/**
+ * 把 design quality snapshot 寫進 skill_telemetry，供週報「Design Knowledge Effectiveness」章節聚合。
+ *
+ * Fire-and-forget — 任何寫入失敗都不能影響 pipeline。雙路徑（BullMQ + LangGraph）共用此 helper，
+ * 避免 caller 端到處重複埋點。
+ *
+ * Phase 0 設計：
+ *  - 純寫入，零阻塞、零回灌
+ *  - Payload 帶 mood/tier/dsHash/dsSource → 後續可 GROUP BY 聚合
+ *  - flag ENABLE_DESIGN_TELEMETRY_V2=false 時整個 noop
+ */
+export function recordDesignQualitySnapshot(
+  report: DesignQualityReport,
+  state: Pick<FlowState, 'uiuxDesignMood' | 'uiuxDesignTier' | 'uiuxDesignSystemHash' | 'uiuxDesignSystemSource' | 'uiuxVariantConcept' | 'projectId' | 'userId'>,
+  ctx: TelemetryTrackingContext & { phase?: string },
+): void {
+  if (!getEnv().ENABLE_DESIGN_TELEMETRY_V2) return
+
+  recordTelemetry({
+    skillName: 'uiux',
+    eventType: 'design_quality_snapshot',
+    patternKey: state.uiuxDesignMood || 'no_mood',
+    severity: 'info',
+    userId: ctx.userId ?? state.userId ?? null,
+    conversationId: ctx.conversationId ?? null,
+    projectId: ctx.projectId ?? state.projectId ?? null,
+    phase: ctx.phase ?? null,
+    payload: {
+      overallScore: report.overallScore,
+      dimensionScores: report.dimensionScores,
+      fixPlanCount: report.fixPlan.length,
+      issueCount: {
+        consistency: report.issuesByDimension.consistency.length,
+        accessibility: report.issuesByDimension.accessibility.length,
+        taskExecution: report.issuesByDimension.taskExecution.length,
+        codeQuality: report.issuesByDimension.codeQuality.length,
+      },
+      mood: state.uiuxDesignMood ?? null,
+      tier: state.uiuxDesignTier ?? null,
+      dsHash: state.uiuxDesignSystemHash ?? null,
+      dsSource: state.uiuxDesignSystemSource ?? null,
+      variantConceptName: state.uiuxVariantConcept?.name ?? null,
+      variantSignature: state.uiuxVariantConcept?.signatureElement ?? null,
+    },
+  }).catch(() => {})
 }

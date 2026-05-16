@@ -20,6 +20,7 @@ import {
   aggregateWeeklyReportWithDelta,
   aggregateFailureOverview,
   aggregateCmsSkeletonStats,
+  aggregateDesignEffectiveness,
   measurePromptChangeEffects,
   getActivePromptChanges,
   findDirectionACandidates,
@@ -35,6 +36,7 @@ import {
   type RootCauseRow,
   type RecoveryRow,
   type CmsSkeletonStats,
+  type DesignEffectivenessReport,
 } from '../services/skill-telemetry'
 import { closePool } from '../db/client'
 
@@ -405,6 +407,66 @@ pnpm tsx src/scripts/register-prompt-change.ts \\
 `
 }
 
+function formatDesignEffectiveness(report: DesignEffectivenessReport): string {
+  if (report.totalSnapshots === 0 && report.totalAestheticComplaints === 0 && report.totalIterationDeltas === 0) {
+    return '_過去 ' + report.windowDays + ' 天無設計閉環事件 — 可能 ENABLE_DESIGN_TELEMETRY_V2=false、ENABLE_DESIGN_QUALITY_REPORT 未開、或無 UIUX 流量。_\n'
+  }
+
+  const sections: string[] = []
+
+  sections.push(`**總計（${report.windowDays} 天）**：snapshots=${report.totalSnapshots} / iteration deltas=${report.totalIterationDeltas} / aesthetic complaints=${report.totalAestheticComplaints}`)
+  sections.push('')
+
+  // By Mood
+  sections.push('### By Mood — 哪個 mood 最容易被改壞 / 被投訴？')
+  sections.push('')
+  if (report.byMood.length === 0) {
+    sections.push('_(無 mood 維度資料)_')
+  } else {
+    sections.push('| mood | snapshots | avgScore | avgΔ (iter) | complaints | 解讀 |')
+    sections.push('|---|---|---|---|---|---|')
+    for (const row of report.byMood) {
+      const mood = row.mood || '_(no_mood)_'
+      const avgScore = row.avgScore !== null ? `${row.avgScore.toFixed(1)}` : '—'
+      const avgDelta = row.avgScoreDelta !== null
+        ? (row.avgScoreDelta >= 0 ? `+${row.avgScoreDelta.toFixed(1)}` : `${row.avgScoreDelta.toFixed(1)}`)
+        : '—'
+      let interp = ''
+      if (row.avgScoreDelta !== null && row.avgScoreDelta < -5) interp = '⚠️ 用戶常改壞'
+      else if (row.complaintCount >= 3) interp = '⚠️ 美感投訴高'
+      else if (row.avgScore !== null && row.avgScore >= 85) interp = '✅ 高分穩定'
+      else if (row.sampleSize < 5) interp = '🔍 樣本不足'
+      else interp = '—'
+      sections.push(`| \`${mood}\` | ${row.sampleSize} | ${avgScore} | ${avgDelta} | ${row.complaintCount} | ${interp} |`)
+    }
+  }
+  sections.push('')
+
+  // By DS Source
+  sections.push('### By Design System Source — 哪個來源的設計分最高/最低？')
+  sections.push('')
+  if (report.bySource.length === 0) {
+    sections.push('_(無 dsSource 維度資料)_')
+  } else {
+    sections.push('| dsSource | snapshots | avgScore | complaints |')
+    sections.push('|---|---|---|---|')
+    for (const row of report.bySource) {
+      const src = row.dsSource || '_(null)_'
+      const avgScore = row.avgScore !== null ? `${row.avgScore.toFixed(1)}` : '—'
+      sections.push(`| \`${src}\` | ${row.snapshotCount} | ${avgScore} | ${row.complaintCount} |`)
+    }
+  }
+  sections.push('')
+
+  sections.push('**SOP（嚴禁自動回灌 prompt）**：')
+  sections.push('1. `avgΔ < -5` 或 `complaints ≥ 3` 的 mood → 人工 review 是否該調降 `design-moods.ts` 權重或淘汰')
+  sections.push('2. `bySource` 中 `vendored_designmd` 分數明顯低於 `user_designed` → 檢查 awesome-design-md 對應 brand 是否需更新')
+  sections.push('3. 樣本 < 5 不可信，等下週累積再評估')
+  sections.push('')
+
+  return sections.join('\n')
+}
+
 function formatCmsSkeletonStats(stats: CmsSkeletonStats): string {
   if (stats.injectedConversations === 0 && stats.shortCircuitEvents === 0 && stats.regenEvents === 0) {
     return '_過去 ' + stats.windowDays + ' 天無 CMS Skeleton 事件 — 可能尚未跑過 CMS 場景或埋點未生效。_\n'
@@ -438,6 +500,7 @@ function renderMarkdown(
   structuralCandidates: StructuralFailureCandidate[],
   unregistered: string[],
   cmsStats: CmsSkeletonStats,
+  designEffectiveness: DesignEffectivenessReport,
   failureData?: { byOutcome: FailureOverviewRow[]; byPhase: FailureByPhaseRow[]; topRootCauses: RootCauseRow[]; recoveryStats: RecoveryRow[] }
 ): string {
   const date = new Date().toISOString().slice(0, 10)
@@ -456,7 +519,17 @@ function renderMarkdown(
 
 ---
 
-${formatUnregisteredPatterns(unregistered)}## CMS Skeleton 採用度（Phase 1 Week 4）
+${formatUnregisteredPatterns(unregistered)}## Design Knowledge Effectiveness (Phase 0 閉環)
+
+> 量化每個 mood / Design System Source 的設計表現 — 「哪個 mood 用戶最常改壞？哪個 dsSource 分數低？」
+> 資料來源：\`design_quality_snapshot\` (QG 後) + \`iteration_score_delta\` (迭代後) + \`iteration_aesthetic_complaint\` (regex 偵測投訴詞)。
+> 需 \`ENABLE_DESIGN_TELEMETRY_V2=true\` + \`ENABLE_DESIGN_QUALITY_REPORT=true\`（或 rollout %）才有資料。
+
+${formatDesignEffectiveness(designEffectiveness)}
+
+---
+
+## CMS Skeleton 採用度（Phase 1 Week 4）
 
 > 量化 vendored skeleton 為 CMS 場景省下多少 LLM call、用戶調整 slot 的熱度。
 > 命中 CMS shape 後系統會自動補 5 個 canonical features 且 Coder 階段跳過 LLM render — 這層 0% LLM 失敗。
@@ -566,7 +639,7 @@ async function main() {
   const { days, json } = parseArgs()
 
   try {
-    const [report, effects, activeChanges, failureData, cmsStats] = await Promise.all([
+    const [report, effects, activeChanges, failureData, cmsStats, designEffectiveness] = await Promise.all([
       aggregateWeeklyReportWithDelta(days),
       measurePromptChangeEffects(),
       getActivePromptChanges(),
@@ -580,6 +653,14 @@ async function main() {
         regenUniqueProjects: 0,
         topInjectionScores: [],
       })),
+      aggregateDesignEffectiveness(days).catch(() => ({
+        windowDays: days,
+        byMood: [],
+        bySource: [],
+        totalSnapshots: 0,
+        totalIterationDeltas: 0,
+        totalAestheticComplaints: 0,
+      })),
     ])
 
     const directionA = findDirectionACandidates(report.topPatterns, activeChanges)
@@ -587,9 +668,9 @@ async function main() {
     const unregistered = findUnregisteredSanitizePatterns(activeChanges)
 
     if (json) {
-      process.stdout.write(JSON.stringify({ report, effects, directionA, structuralCandidates, unregistered, cmsStats, failureData }, null, 2) + '\n')
+      process.stdout.write(JSON.stringify({ report, effects, directionA, structuralCandidates, unregistered, cmsStats, designEffectiveness, failureData }, null, 2) + '\n')
     } else {
-      process.stdout.write(renderMarkdown(report, effects, directionA, structuralCandidates, unregistered, cmsStats, failureData))
+      process.stdout.write(renderMarkdown(report, effects, directionA, structuralCandidates, unregistered, cmsStats, designEffectiveness, failureData))
     }
   } catch (err) {
     console.error('週報生成失敗：', err)

@@ -19,7 +19,7 @@ import { translateBddToUISpec, buildUISpecSummary } from '../../services/bdd-to-
 import { runQualityGate, autoFixCriticalIssues, autoFixCriticalIssuesRuleBased } from '../../services/quality-gate'
 import { evaluateUi, type UiEvaluationIssue } from '../../services/ui-evaluator'
 import type { QualityIssue } from '../../services/quality-gate'
-import { generateDesignQualityReport, logDesignQualityReport } from '../../services/design-quality-report'
+import { generateDesignQualityReport, logDesignQualityReport, recordDesignQualitySnapshot } from '../../services/design-quality-report'
 import { getEnv } from '../../lib/env'
 import { isFeatureEnabledForUser } from '../../lib/feature-flag'
 import { getBddSession, updateBddSession } from '../../services/bdd-session'
@@ -1333,6 +1333,28 @@ export async function handleVariantSelection(
   state.uiuxCodeGenerationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
 
+  // Phase 0 閉環：固化此次設計選擇（mood/tier/dsHash/variantConcept）。fire-and-forget，gate ENABLE_DESIGN_TELEMETRY_V2
+  if (getEnv().ENABLE_DESIGN_TELEMETRY_V2) {
+    recordTelemetry({
+      skillName: 'uiux',
+      eventType: 'design_choice_recorded',
+      patternKey: state.uiuxDesignMood || 'no_mood',
+      severity: 'info',
+      userId: state.userId,
+      conversationId,
+      projectId: state.projectId,
+      payload: {
+        mood: state.uiuxDesignMood ?? null,
+        tier: state.uiuxDesignTier ?? null,
+        dsHash: state.uiuxDesignSystemHash ?? null,
+        dsSource: state.uiuxDesignSystemSource ?? null,
+        variantConceptName: variantConcept.name,
+        variantSignature: variantConcept.signatureElement ?? null,
+        selectedVariantIds: selectedIds,
+      },
+    }).catch(() => {})
+  }
+
   // 一氣呵成：Structure → Animation → RWD → Quality Gate
   await executeFullCodePipeline(conversationId, state, redis, io)
 }
@@ -1705,6 +1727,8 @@ export async function executeFullCodePipeline(
     if (isFeatureEnabledForUser('design_quality_report', state.userId)) {
       const dqReport = generateDesignQualityReport(report)
       logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate' })
+      // Phase 0 閉環：snapshot 寫 telemetry（fire-and-forget，gate ENABLE_DESIGN_TELEMETRY_V2）
+      recordDesignQualitySnapshot(dqReport, state, { userId: state.userId, conversationId, projectId: state.projectId, phase: 'uiux_quality_gate' })
     }
   } catch (err) {
     // fail-open：報告生成失敗絕不阻塞主流程
@@ -2280,6 +2304,7 @@ export async function executeQualityGate(
     if (isFeatureEnabledForUser('design_quality_report', state.userId)) {
       const dqReport = generateDesignQualityReport(report)
       logDesignQualityReport(dqReport, { conversationId, phase: 'uiux_quality_gate_redo' })
+      recordDesignQualitySnapshot(dqReport, state, { userId: state.userId, conversationId, projectId: state.projectId, phase: 'uiux_quality_gate_redo' })
     }
   } catch (err) {
     // fail-open

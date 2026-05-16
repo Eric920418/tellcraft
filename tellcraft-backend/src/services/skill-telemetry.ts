@@ -72,6 +72,11 @@ export type EventType =
   | 'cms_skeleton_injected'        // Phase 1 Week 4: formulation 命中 CMS shape 自動補 canonical features
   | 'cms_skeleton_actions_short_circuit'  // Phase 1 Week 4: coder skeleton actions 跳 LLM render
   | 'cms_skeleton_partial_regen'   // Phase 1 Week 4: user 觸發 /cms-slots/regen 端點
+  // 設計審美閉環 v2（Phase 0）— ENABLE_DESIGN_TELEMETRY_V2 gate
+  | 'design_quality_snapshot'      // QG 完成寫，payload: {overallScore, dimensionScores, mood, tier, dsHash, dsSource, variantConceptName, ...}
+  | 'iteration_score_delta'        // 迭代完成寫，payload: {prevScore, newScore, delta, tier, scope, ...}
+  | 'iteration_aesthetic_complaint'  // 用戶迭代輸入含美感投訴詞（regex 零 LLM）即記
+  | 'design_choice_recorded'       // variant 選定即寫，固化「這次用了哪些 mood/tier/variantConcept」
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
@@ -429,6 +434,157 @@ export async function aggregateCmsSkeletonStats(days = 7): Promise<CmsSkeletonSt
     regenEvents: main?.regen_events ?? 0,
     regenUniqueProjects: main?.regen_unique_projects ?? 0,
     topInjectionScores: scoreDist || [],
+  }
+}
+
+// ============================================================
+// 設計審美閉環 v2（Phase 0）
+// ============================================================
+
+/**
+ * 用戶迭代輸入是否含「美感投訴」訊號（零 LLM regex）。
+ * 命中即記 iteration_aesthetic_complaint 事件，讓週報能算每個 mood/dsSource 的投訴率。
+ * 故意保守 — 寧可漏不可錯殺（誤殺會污染數據）。
+ */
+export const AESTHETIC_COMPLAINT_REGEX =
+  /(醜|難看|不好看|很low|質感差|太陽春|沒設計感|很俗|土|配色爛|顏色難看|ugly|cheap|tacky|amateur|unprofessional)/i
+
+export function detectAestheticComplaint(feedback: string): boolean {
+  return AESTHETIC_COMPLAINT_REGEX.test(feedback)
+}
+
+export interface DesignEffectivenessRow {
+  /** mood id（如 minimalist / glassmorphism）— null = 該事件沒記 mood */
+  mood: string | null
+  /** sample size — 數量太少不可信 */
+  sampleSize: number
+  /** 平均 overallScore（snapshot 事件）— 100 滿分 */
+  avgScore: number | null
+  /** 平均 delta — 正值 = 用戶迭代後分數上升（好）；負值 = 改壞 */
+  avgScoreDelta: number | null
+  /** 美感投訴次數 */
+  complaintCount: number
+}
+
+export interface DesignEffectivenessReport {
+  windowDays: number
+  byMood: DesignEffectivenessRow[]
+  bySource: Array<{
+    dsSource: string | null
+    snapshotCount: number
+    avgScore: number | null
+    complaintCount: number
+  }>
+  totalSnapshots: number
+  totalIterationDeltas: number
+  totalAestheticComplaints: number
+}
+
+/**
+ * 聚合設計知識成效（Phase 0 MVP）：
+ *  - 每個 mood 的 avgScore / avgScoreDelta / complaintCount → 找出「常被改壞」或「常被投訴」的 mood
+ *  - 每個 dsSource（vendored / user_designed / iteration_modified 等）的成效
+ *
+ * 數據是「描述性」非「結論性」— 由 reviewer 看週報手動判斷該汰換哪個 mood/style。
+ * 嚴禁自動回灌 prompt（CLAUDE.md 紅線）。
+ */
+export async function aggregateDesignEffectiveness(days = 7): Promise<DesignEffectivenessReport> {
+  const byMood = await db.queryMany<{
+    mood: string | null
+    snapshot_count: number
+    avg_score: number | null
+    avg_delta: number | null
+    complaint_count: number
+  }>(
+    `WITH snap AS (
+       SELECT (payload->>'mood') AS mood,
+              (payload->>'overallScore')::float AS score
+       FROM skill_telemetry
+       WHERE created_at >= NOW() - ($1 || ' days')::interval
+         AND event_type = 'design_quality_snapshot'
+     ),
+     deltas AS (
+       SELECT (payload->>'mood') AS mood,
+              (payload->>'delta')::float AS delta
+       FROM skill_telemetry
+       WHERE created_at >= NOW() - ($1 || ' days')::interval
+         AND event_type = 'iteration_score_delta'
+     ),
+     complaints AS (
+       SELECT (payload->>'mood') AS mood, COUNT(*)::int AS cnt
+       FROM skill_telemetry
+       WHERE created_at >= NOW() - ($1 || ' days')::interval
+         AND event_type = 'iteration_aesthetic_complaint'
+       GROUP BY mood
+     ),
+     moods AS (
+       SELECT mood FROM snap
+       UNION SELECT mood FROM deltas
+       UNION SELECT mood FROM complaints
+     )
+     SELECT m.mood,
+            COUNT(s.score)::int AS snapshot_count,
+            ROUND(AVG(s.score)::numeric, 1)::float AS avg_score,
+            ROUND(AVG(d.delta)::numeric, 1)::float AS avg_delta,
+            COALESCE(MAX(c.cnt), 0)::int AS complaint_count
+     FROM moods m
+     LEFT JOIN snap s ON s.mood IS NOT DISTINCT FROM m.mood
+     LEFT JOIN deltas d ON d.mood IS NOT DISTINCT FROM m.mood
+     LEFT JOIN complaints c ON c.mood IS NOT DISTINCT FROM m.mood
+     GROUP BY m.mood
+     ORDER BY complaint_count DESC, snapshot_count DESC
+     LIMIT 20`,
+    [String(days)]
+  )
+
+  const bySource = await db.queryMany<{
+    ds_source: string | null
+    snapshot_count: number
+    avg_score: number | null
+    complaint_count: number
+  }>(
+    `SELECT (payload->>'dsSource') AS ds_source,
+            COUNT(*) FILTER (WHERE event_type='design_quality_snapshot')::int AS snapshot_count,
+            ROUND(AVG((payload->>'overallScore')::float) FILTER (WHERE event_type='design_quality_snapshot')::numeric, 1)::float AS avg_score,
+            COUNT(*) FILTER (WHERE event_type='iteration_aesthetic_complaint')::int AS complaint_count
+     FROM skill_telemetry
+     WHERE created_at >= NOW() - ($1 || ' days')::interval
+       AND event_type IN ('design_quality_snapshot', 'iteration_aesthetic_complaint')
+     GROUP BY ds_source
+     ORDER BY snapshot_count DESC
+     LIMIT 10`,
+    [String(days)]
+  )
+
+  const totals = await db.queryOne<{ snap: number; delta: number; complaint: number }>(
+    `SELECT
+       COUNT(*) FILTER (WHERE event_type='design_quality_snapshot')::int AS snap,
+       COUNT(*) FILTER (WHERE event_type='iteration_score_delta')::int AS delta,
+       COUNT(*) FILTER (WHERE event_type='iteration_aesthetic_complaint')::int AS complaint
+     FROM skill_telemetry
+     WHERE created_at >= NOW() - ($1 || ' days')::interval
+       AND event_type IN ('design_quality_snapshot','iteration_score_delta','iteration_aesthetic_complaint')`,
+    [String(days)]
+  )
+
+  return {
+    windowDays: days,
+    byMood: (byMood || []).map(r => ({
+      mood: r.mood,
+      sampleSize: r.snapshot_count,
+      avgScore: r.avg_score,
+      avgScoreDelta: r.avg_delta,
+      complaintCount: r.complaint_count,
+    })),
+    bySource: (bySource || []).map(r => ({
+      dsSource: r.ds_source,
+      snapshotCount: r.snapshot_count,
+      avgScore: r.avg_score,
+      complaintCount: r.complaint_count,
+    })),
+    totalSnapshots: totals?.snap ?? 0,
+    totalIterationDeltas: totals?.delta ?? 0,
+    totalAestheticComplaints: totals?.complaint ?? 0,
   }
 }
 
