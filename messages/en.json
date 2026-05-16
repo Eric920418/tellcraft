@@ -1204,5 +1204,28 @@
     "pageDescription": "Curated design templates — customize with one sentence and deploy instantly",
     "backToHome": "← Back to Home",
     "startUsing": "Start Using"
+  },
+  "pricing": {
+    "eyebrow": "Want it done in one shot?",
+    "heading": "Precision Delivery: AI builds your full site in one go",
+    "sub": "Replaces $2,000–5,000 freelance gigs. Tellcraft delivers a complete, deployable site for $299–999.",
+    "tier_starter_name": "Starter",
+    "tier_starter_tagline": "Single landing page, fastest to launch",
+    "tier_standard_name": "Standard",
+    "tier_standard_tagline": "3-5 page site for small businesses",
+    "tier_standard_badge": "Most popular",
+    "tier_pro_name": "Pro",
+    "tier_pro_tagline": "SaaS starter with admin + DB",
+    "bullet_responsive": "Responsive + animations",
+    "bullet_seo": "SEO structured data",
+    "bullet_refund": "14-day money-back",
+    "bullet_warranty": "90-day warranty",
+    "bullet_admin": "Admin dashboard",
+    "bullet_db": "Database integration",
+    "bullet_auth": "Member authentication",
+    "iterations": "iterations",
+    "cta_buy": "Select",
+    "cta_see_all": "Compare full plans →",
+    "nav_link": "Pricing"
   }
 }

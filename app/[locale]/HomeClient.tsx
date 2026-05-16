@@ -26,8 +26,10 @@ import {
   FAQSection,
   TestimonialSection,
   CTASection,
+  PrecisionPricingSection,
   Footer,
 } from '@/app/components/landing'
+import Link from 'next/link'
 
 import ChatSection from '@/app/components/chat/ChatSection'
 import SmoothScroll from '@/app/components/SmoothScroll'
@@ -261,6 +263,21 @@ function HomeContent() {
           >
             <AnimatedThemeToggler />
             <LocaleSwitcher />
+            <Link
+              href={`/${locale}/pricing`}
+              prefetch={false}
+              style={{
+                fontSize: 13,
+                color: 'var(--gray-700)',
+                textDecoration: 'none',
+                padding: '4px 10px',
+                borderLeft: '1px solid var(--gray-300)',
+                lineHeight: 1.4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {locale === 'zh' ? '方案' : 'Pricing'}
+            </Link>
           </motion.div>
         )}
       </AnimatePresence>
@@ -374,6 +391,7 @@ function HomeContent() {
       <ShowcaseSection />
       <FAQSection />
       <TestimonialSection />
+      <PrecisionPricingSection />
       <CTASection onStartChat={handleFocusInput} />
       <Footer />
     </>
