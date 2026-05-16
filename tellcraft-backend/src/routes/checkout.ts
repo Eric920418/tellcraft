@@ -20,7 +20,20 @@ import {
   ADDON_CONFIG,
   type PrecisionTier,
   type AddonType,
+  type Currency,
 } from '../services/stripe-service'
+
+/**
+ * 從 locale 推導 currency。
+ * zh → twd / 其他（en, ja, ...） → usd
+ */
+function localeToCurrency(locale: string | undefined): Currency {
+  return locale === 'zh' ? 'twd' : 'usd'
+}
+
+function isValidCurrency(value: unknown): value is Currency {
+  return value === 'usd' || value === 'twd'
+}
 
 const logger = createLogger('checkout')
 const router: Router = Router()
@@ -29,20 +42,28 @@ const router: Router = Router()
 // 公開：tier + addon 元資料（前端定價頁 / pay 頁 fetch）
 // ============================================================
 
-router.get('/catalog', (_req: Request, res: Response) => {
+router.get('/catalog', (req: Request, res: Response) => {
+  // currency 來源優先序：query ?currency=xxx > locale ?locale=xxx > 預設 usd
+  const queryCurrency = req.query.currency as string | undefined
+  const queryLocale = req.query.locale as string | undefined
+  const currency: Currency = isValidCurrency(queryCurrency)
+    ? queryCurrency
+    : localeToCurrency(queryLocale)
+
   res.json({
     success: true,
     data: {
+      currency,
       tiers: Object.values(TIER_CONFIG).map((t) => ({
         tier: t.tier,
-        basePriceCents: t.basePriceCents,
+        basePriceCents: t.basePrice[currency],
         iterationsTotal: t.iterationsTotal,
-        buyoutPriceCents: t.buyoutPriceCents,
+        buyoutPriceCents: t.buyoutPrice[currency],
       })),
       addons: Object.entries(ADDON_CONFIG).map(([type, cfg]) => ({
         type,
-        label: cfg.label,
-        priceCents: cfg.priceCents,
+        label: currency === 'twd' ? cfg.labelZh : cfg.labelEn,
+        priceCents: cfg.price[currency],
         recurring: cfg.recurring ?? null,
       })),
     },
@@ -56,10 +77,11 @@ router.get('/catalog', (_req: Request, res: Response) => {
 
 router.post('/precision', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { tier, addons, locale } = req.body as {
+    const { tier, addons, locale, currency: rawCurrency } = req.body as {
       tier?: string
       addons?: { type: string }[]
       locale?: string
+      currency?: string
     }
 
     if (!tier || !(tier in TIER_CONFIG)) {
@@ -69,6 +91,9 @@ router.post('/precision', requireAuth, async (req: Request, res: Response) => {
       })
       return
     }
+
+    // currency 來源：body.currency > locale 推導 > 預設 usd
+    const currency: Currency = isValidCurrency(rawCurrency) ? rawCurrency : localeToCurrency(locale)
 
     const validatedAddons: { type: AddonType }[] = []
     for (const a of addons ?? []) {
@@ -94,13 +119,14 @@ router.post('/precision', requireAuth, async (req: Request, res: Response) => {
       userId: req.user!.id,
       userEmail: req.user!.email ?? null,
       tier: tier as PrecisionTier,
+      currency,
       addons: validatedAddons,
       successUrl,
       cancelUrl,
     })
 
     logger.info(
-      { userId: req.user!.id, tier, addons: validatedAddons.length, orderId: result.orderId, isMock: result.isMock },
+      { userId: req.user!.id, tier, currency, addons: validatedAddons.length, orderId: result.orderId, isMock: result.isMock },
       '建立精細模式 checkout session'
     )
 
@@ -111,6 +137,7 @@ router.post('/precision', requireAuth, async (req: Request, res: Response) => {
         sessionId: result.sessionId,
         checkoutUrl: result.checkoutUrl,
         amountCents: result.amountCents,
+        currency: result.currency,
         isMock: result.isMock,
       },
     })

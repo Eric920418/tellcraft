@@ -9,6 +9,7 @@ import {
   getCheckoutCatalog,
   type CheckoutAddonType,
   type CheckoutCatalog,
+  type CheckoutCurrency,
   type PrecisionTier,
 } from '@/app/lib/vps-api'
 
@@ -37,6 +38,7 @@ const ADDON_LABELS: Record<CheckoutAddonType, { zh: string; en: string; hint?: {
 
 export default function PayClient({ locale, tier }: { locale: string; tier: PrecisionTier }) {
   const isZh = locale === 'zh'
+  const currency: CheckoutCurrency = isZh ? 'twd' : 'usd'
   const { token, isAuthenticated, isLoading: authLoading } = useAuth()
 
   const [catalog, setCatalog] = useState<CheckoutCatalog | null>(null)
@@ -47,7 +49,7 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
 
   // 載入 catalog（取得 backend 真實價格，避免前後端不同步）
   useEffect(() => {
-    getCheckoutCatalog()
+    getCheckoutCatalog({ currency, locale })
       .then((res) => {
         if (res.success && res.data) {
           setCatalog(res.data)
@@ -58,7 +60,7 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
       .catch((err: unknown) => {
         setCatalogError(err instanceof Error ? err.message : String(err))
       })
-  }, [isZh])
+  }, [isZh, currency, locale])
 
   const tierInfo = catalog?.tiers.find((t) => t.tier === tier) ?? null
 
@@ -97,6 +99,7 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
         tier,
         addons: Array.from(selectedAddons).map((type) => ({ type })),
         locale,
+        currency,
         token,
       })
       if (!res.success || !res.data) {
@@ -112,12 +115,21 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
     }
   }
 
-  const fmt = (cents: number) =>
-    new Intl.NumberFormat(isZh ? 'zh-TW' : 'en-US', {
+  // 格式化金額：USD 是 two-decimal（cents/100），TWD 是 zero-decimal（直接用 dollars）
+  const fmt = (amount: number) => {
+    if (currency === 'twd') {
+      return new Intl.NumberFormat('zh-TW', {
+        style: 'currency',
+        currency: 'TWD',
+        minimumFractionDigits: 0,
+      }).format(amount)
+    }
+    return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       minimumFractionDigits: 0,
-    }).format(cents / 100)
+    }).format(amount / 100)
+  }
 
   const tierMeta = TIER_META[tier]
 

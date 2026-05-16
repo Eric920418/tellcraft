@@ -132,14 +132,19 @@ const envSchema = z.object({
   SPEC_CONSISTENCY_LLM_CHECK: z.stringbool().default(false),
 
   // 精細模式 Stripe 整合（plan: strip-golden-seal）
-  // 三個 key 都缺 → checkout endpoint 走 mock 模式（前端可 dogfood，但點付款只會回到本地 success 頁，
+  // 缺 STRIPE_SECRET_KEY → checkout endpoint 走 mock 模式（前端可 dogfood，但點付款只會回到本地 success 頁，
   // 不會真的扣款）。設 STRIPE_SECRET_KEY 即啟用真實 Stripe Checkout
+  // 雙幣別計價：每檔需要兩個 Price ID（USD + TWD），對應 Stripe Dashboard 建的兩套 Product
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  // 三檔商品的 Stripe Price ID（在 Stripe Dashboard 創建 product 後填入）
-  STRIPE_PRICE_STARTER_299: z.string().optional(),
-  STRIPE_PRICE_STANDARD_599: z.string().optional(),
-  STRIPE_PRICE_PRO_999: z.string().optional(),
+  // 三檔商品的 Stripe Price ID — USD（英文界面實扣）
+  STRIPE_PRICE_STARTER_USD: z.string().optional(),
+  STRIPE_PRICE_STANDARD_USD: z.string().optional(),
+  STRIPE_PRICE_PRO_USD: z.string().optional(),
+  // 三檔商品的 Stripe Price ID — TWD（中文界面實扣，Stripe TWD 是 zero-decimal）
+  STRIPE_PRICE_STARTER_TWD: z.string().optional(),
+  STRIPE_PRICE_STANDARD_TWD: z.string().optional(),
+  STRIPE_PRICE_PRO_TWD: z.string().optional(),
 })
 
 // ============================================================

@@ -8,7 +8,8 @@ import { HEAVY } from '@/app/lib/chat-utils'
 
 type TierMeta = {
   id: 'starter_299' | 'standard_599' | 'pro_999'
-  price: number
+  priceUSD: number
+  priceTWD: number
   nameKey: string
   taglineKey: string
   iterations: number
@@ -19,7 +20,8 @@ type TierMeta = {
 const TIERS: TierMeta[] = [
   {
     id: 'starter_299',
-    price: 299,
+    priceUSD: 99,
+    priceTWD: 3000,
     nameKey: 'tier_starter_name',
     taglineKey: 'tier_starter_tagline',
     iterations: 3,
@@ -27,7 +29,8 @@ const TIERS: TierMeta[] = [
   },
   {
     id: 'standard_599',
-    price: 599,
+    priceUSD: 199,
+    priceTWD: 6000,
     nameKey: 'tier_standard_name',
     taglineKey: 'tier_standard_tagline',
     iterations: 8,
@@ -36,7 +39,8 @@ const TIERS: TierMeta[] = [
   },
   {
     id: 'pro_999',
-    price: 999,
+    priceUSD: 399,
+    priceTWD: 12000,
     nameKey: 'tier_pro_name',
     taglineKey: 'tier_pro_tagline',
     iterations: 15,
@@ -47,6 +51,7 @@ const TIERS: TierMeta[] = [
 function PrecisionPricingSection() {
   const t = useTranslations('pricing')
   const locale = useLocale()
+  const isZh = locale === 'zh'
   const ref = useRef<HTMLElement>(null)
   const isInView = useInView(ref, { once: true, margin: HEAVY.viewMargin })
 
@@ -159,9 +164,9 @@ function PrecisionPricingSection() {
 
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
                 <span style={{ fontSize: 36, fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--gray-800)' }}>
-                  ${tier.price}
+                  {isZh ? `NT$${tier.priceTWD.toLocaleString()}` : `$${tier.priceUSD}`}
                 </span>
-                <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>USD</span>
+                <span style={{ fontSize: 12, color: 'var(--gray-500)' }}>{isZh ? 'TWD' : 'USD'}</span>
               </div>
 
               <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>

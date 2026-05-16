@@ -2530,6 +2530,7 @@ export async function removeDomainBinding(input: {
 // ============================================================
 
 export type PrecisionTier = 'starter_299' | 'standard_599' | 'pro_999'
+export type CheckoutCurrency = 'usd' | 'twd'
 export type CheckoutAddonType =
   | 'hosting'
   | 'maintenance'
@@ -2539,9 +2540,10 @@ export type CheckoutAddonType =
   | 'module_forms'
 
 export interface CheckoutCatalog {
+  currency: CheckoutCurrency
   tiers: Array<{
     tier: PrecisionTier
-    basePriceCents: number
+    basePriceCents: number  // USD=cents, TWD=dollars (zero-decimal)
     iterationsTotal: number
     buyoutPriceCents: number
   }>
@@ -2553,20 +2555,29 @@ export interface CheckoutCatalog {
   }>
 }
 
-export async function getCheckoutCatalog(): Promise<ApiResponse<CheckoutCatalog>> {
-  return apiRequest('/api/checkout/catalog')
+export async function getCheckoutCatalog(input?: {
+  currency?: CheckoutCurrency
+  locale?: string
+}): Promise<ApiResponse<CheckoutCatalog>> {
+  const qs = new URLSearchParams()
+  if (input?.currency) qs.set('currency', input.currency)
+  if (input?.locale) qs.set('locale', input.locale)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return apiRequest(`/api/checkout/catalog${suffix}`)
 }
 
 export async function createCheckoutSession(input: {
   tier: PrecisionTier
   addons: { type: CheckoutAddonType }[]
   locale: string
+  currency: CheckoutCurrency
   token: string
 }): Promise<ApiResponse<{
   orderId: string
   sessionId: string
   checkoutUrl: string
   amountCents: number
+  currency: CheckoutCurrency
   isMock: boolean
 }>> {
   return apiRequest('/api/checkout/precision', {
@@ -2576,6 +2587,7 @@ export async function createCheckoutSession(input: {
       tier: input.tier,
       addons: input.addons,
       locale: input.locale,
+      currency: input.currency,
     }),
   })
 }

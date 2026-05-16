@@ -6,7 +6,8 @@ import { useMemo } from 'react'
 
 type Tier = {
   id: 'starter_299' | 'standard_599' | 'pro_999'
-  priceUSD: number
+  priceUSD: number      // 美金顯示值（整數）
+  priceTWD: number      // 台幣顯示值（整數）
   name: { zh: string; en: string }
   tagline: { zh: string; en: string }
   iterations: number
@@ -17,7 +18,8 @@ type Tier = {
 const TIERS: Tier[] = [
   {
     id: 'starter_299',
-    priceUSD: 299,
+    priceUSD: 99,
+    priceTWD: 3000,
     name: { zh: '入門', en: 'Starter' },
     tagline: { zh: 'Landing 單頁，最快上線', en: 'Single-page landing site' },
     iterations: 3,
@@ -40,7 +42,8 @@ const TIERS: Tier[] = [
   },
   {
     id: 'standard_599',
-    priceUSD: 599,
+    priceUSD: 199,
+    priceTWD: 6000,
     name: { zh: '標準', en: 'Standard' },
     tagline: { zh: '3-5 頁中型網站，小商業首選', en: '3-5 page mid-size site' },
     iterations: 8,
@@ -66,7 +69,8 @@ const TIERS: Tier[] = [
   },
   {
     id: 'pro_999',
-    priceUSD: 999,
+    priceUSD: 399,
+    priceTWD: 12000,
     name: { zh: '專業', en: 'Pro' },
     tagline: { zh: '含後台 + 資料庫的 SaaS 起步包', en: 'SaaS with admin + DB' },
     iterations: 15,
@@ -91,10 +95,11 @@ const TIERS: Tier[] = [
   },
 ]
 
+// 訂閱方案：zh 用真實 TWD 月費 / en 顯示換算 USD（暫無真實 USD 訂閱計價）
 const SUBSCRIPTION_PLANS = [
-  { id: 'creator', label: { zh: 'Creator', en: 'Creator' }, priceTWD: 699, credits: 90 },
-  { id: 'pro', label: { zh: 'Pro', en: 'Pro' }, priceTWD: 1990, credits: 300 },
-  { id: 'business', label: { zh: 'Business', en: 'Business' }, priceTWD: 4990, credits: 900 },
+  { id: 'creator', label: { zh: 'Creator', en: 'Creator' }, priceTWD: 699, priceUSD: 25, credits: 90 },
+  { id: 'pro', label: { zh: 'Pro', en: 'Pro' }, priceTWD: 1990, priceUSD: 65, credits: 300 },
+  { id: 'business', label: { zh: 'Business', en: 'Business' }, priceTWD: 4990, priceUSD: 160, credits: 900 },
 ]
 
 export default function PricingClient({ locale }: { locale: string }) {
@@ -109,7 +114,7 @@ export default function PricingClient({ locale }: { locale: string }) {
       precisionEyebrow: isZh ? '主打方案' : 'Featured',
       precisionTitle: isZh ? '精細模式 — 一次交付完整網站' : 'Precision Mode — End-to-end delivery',
       precisionSub: isZh
-        ? '對標自由工程師 $2,000-$5,000 接案費，Tellcraft 一次性 $299-999 直接交付。'
+        ? '對標自由工程師 NT$60,000-150,000 接案費，Tellcraft 一次性 NT$3,000-12,000 直接交付。'
         : 'Replaces $2,000-$5,000 freelance gigs. One payment, complete deliverable.',
       subEyebrow: isZh ? '次要選項' : 'Alternative',
       subTitle: isZh ? '訂閱方案 — 想自己慢慢試' : 'Subscription — Build at your own pace',
@@ -248,8 +253,10 @@ export default function PricingClient({ locale }: { locale: string }) {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                <span style={{ fontSize: 48, fontWeight: 300, letterSpacing: '-0.02em' }}>${tier.priceUSD}</span>
-                <span style={{ fontSize: 13, color: 'var(--gray-500)' }}>USD</span>
+                <span style={{ fontSize: 48, fontWeight: 300, letterSpacing: '-0.02em' }}>
+                  {isZh ? `NT$${tier.priceTWD.toLocaleString()}` : `$${tier.priceUSD}`}
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--gray-500)' }}>{isZh ? 'TWD' : 'USD'}</span>
               </div>
 
               <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
@@ -358,7 +365,7 @@ export default function PricingClient({ locale }: { locale: string }) {
                   {isZh ? plan.label.zh : plan.label.en}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 16 }}>
-                  NT${plan.priceTWD.toLocaleString()}
+                  {isZh ? `NT$${plan.priceTWD.toLocaleString()}` : `$${plan.priceUSD}`}
                   {t.perMonth}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--gray-600)' }}>

@@ -90,9 +90,11 @@ cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire 
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_UPLOAD_BASE_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID` `NEXT_PUBLIC_SENTRY_DSN` `SENTRY_ORG` `SENTRY_PROJECT` `SENTRY_AUTH_TOKEN`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `NEON_API_KEY` `NEON_DEFAULT_REGION` `UNSPLASH_ACCESS_KEY` `STRIPE_SECRET_KEY` `STRIPE_WEBHOOK_SECRET` `STRIPE_PRICE_STARTER_299` `STRIPE_PRICE_STANDARD_599` `STRIPE_PRICE_PRO_999`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `NEON_API_KEY` `NEON_DEFAULT_REGION` `UNSPLASH_ACCESS_KEY` `STRIPE_SECRET_KEY` `STRIPE_WEBHOOK_SECRET` `STRIPE_PRICE_STARTER_USD` `STRIPE_PRICE_STANDARD_USD` `STRIPE_PRICE_PRO_USD` `STRIPE_PRICE_STARTER_TWD` `STRIPE_PRICE_STANDARD_TWD` `STRIPE_PRICE_PRO_TWD`
 
-> **精細模式 Stripe**：三個 `STRIPE_PRICE_*` 是 Stripe Dashboard 創建 Product 後拿到的 price ID（`price_xxx`）。**全部不設** → checkout 走 mock 模式（前端可 dogfood 整條 funnel，但點付款不會真扣款，直接跳成功頁），方便上線前測試 UX。設了 `STRIPE_SECRET_KEY` 後請先執行 `pnpm add stripe`（在 `tellcraft-backend/`）。
+> **精細模式 Stripe 雙幣別**：六個 `STRIPE_PRICE_*` 對應 Stripe Dashboard 建的兩套 Product（USD 三檔 + TWD 三檔）。**全部不設** → checkout 走 mock 模式（前端可 dogfood，但點付款只回本地 success 頁不真扣款）。設了 `STRIPE_SECRET_KEY` 後請先 `pnpm add stripe`（在 `tellcraft-backend/`）。
+>
+> **幣別決定規則**：locale=`zh` → TWD（NT$3,000/6,000/12,000）；其他 → USD（$99/199/399）。⚠️ Stripe TWD 是 [zero-decimal currency](https://stripe.com/docs/currencies#zero-decimal)，`unit_amount: 3000` = NT$3,000（不是 NT$30）；USD 是 two-decimal，`unit_amount: 9900` = $99.00。`stripe-service.ts` 已正確處理，自己加新 currency 要遵守同樣規則。
 
 **Determinism over Prompt flags**（預設全 false，穩定後逐一開啟）：
 `CODER_TEMPLATE_V2`（啟用 coder-templates/ registry + 4 個新 template：count / exists_check / search / soft-delete 子模組）、`CODER_AST_SANITIZE`（啟用 ts-morph AST 替代 next15-async-params / search-params-suspense / missing-hooks 三類 regex）、`DETERMINISTIC_FIX_V1`（fixFailingAction 對 missing_column / wrong_status / field_naming 三類 rootCause 先跑零 LLM 機械修復，失敗才 fallback LLM）、`SPEC_CONSISTENCY_LLM_CHECK`（Feature Alignment Gate Check 7 的 Haiku fallback，覆蓋 regex 抓不到的中英文 null-intent 變體）

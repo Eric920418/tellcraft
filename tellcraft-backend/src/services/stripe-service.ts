@@ -19,54 +19,102 @@ const logger = createLogger('stripe-service')
 // 商品定價表（與 plan 的 strip-golden-seal.md 對齊）
 // ============================================================
 
+/**
+ * Tier ID 保留歷史命名（`starter_299` 等含原 USD 價）— 改 id 牽涉 DB CHECK constraint + Stripe
+ * metadata 同步太大，id 是技術 key，UI 顯示用實際價即可。
+ *
+ * 雙幣別計價（plan: 2026-05-16 用戶定價會議）：
+ *   USD: $99 / $199 / $399（英文界面實扣）
+ *   TWD: NT$3,000 / NT$6,000 / NT$12,000（中文界面實扣）
+ *
+ * ⚠️ Stripe TWD 是 zero-decimal currency：`unit_amount: 3000` = NT$3,000（不是 3,000,000）
+ *    USD 是 two-decimal currency：`unit_amount: 9900` = $99.00
+ */
 export type PrecisionTier = 'starter_299' | 'standard_599' | 'pro_999'
+export type Currency = 'usd' | 'twd'
+
+export interface CurrencyAmount {
+  usd: number  // cents（two-decimal currency）
+  twd: number  // dollars（zero-decimal currency）
+}
 
 export interface TierConfig {
   tier: PrecisionTier
-  basePriceCents: number
+  basePrice: CurrencyAmount
   iterationsTotal: number
-  llmCostCapUsd: number
-  buyoutPriceCents: number  // 原價 1.5x
-  stripePriceIdEnvKey: 'STRIPE_PRICE_STARTER_299' | 'STRIPE_PRICE_STANDARD_599' | 'STRIPE_PRICE_PRO_999'
+  llmCostCapUsd: number          // 內部成本控制統一用 USD（與 llm_usage 表一致）
+  buyoutPrice: CurrencyAmount    // 買斷費 = 原價 1.5x
+  stripePriceIdUsdEnvKey: 'STRIPE_PRICE_STARTER_USD' | 'STRIPE_PRICE_STANDARD_USD' | 'STRIPE_PRICE_PRO_USD'
+  stripePriceIdTwdEnvKey: 'STRIPE_PRICE_STARTER_TWD' | 'STRIPE_PRICE_STANDARD_TWD' | 'STRIPE_PRICE_PRO_TWD'
 }
 
 export const TIER_CONFIG: Record<PrecisionTier, TierConfig> = {
   starter_299: {
     tier: 'starter_299',
-    basePriceCents: 29900,
+    basePrice: { usd: 9900, twd: 3000 },        // $99 / NT$3,000
     iterationsTotal: 3,
-    llmCostCapUsd: 50,
-    buyoutPriceCents: 49900,
-    stripePriceIdEnvKey: 'STRIPE_PRICE_STARTER_299',
+    llmCostCapUsd: 30,                          // 訂單降價後相應下調（原 $50）
+    buyoutPrice: { usd: 14900, twd: 4500 },     // $149 / NT$4,500（1.5x）
+    stripePriceIdUsdEnvKey: 'STRIPE_PRICE_STARTER_USD',
+    stripePriceIdTwdEnvKey: 'STRIPE_PRICE_STARTER_TWD',
   },
   standard_599: {
     tier: 'standard_599',
-    basePriceCents: 59900,
+    basePrice: { usd: 19900, twd: 6000 },       // $199 / NT$6,000
     iterationsTotal: 8,
-    llmCostCapUsd: 120,
-    buyoutPriceCents: 99900,
-    stripePriceIdEnvKey: 'STRIPE_PRICE_STANDARD_599',
+    llmCostCapUsd: 70,                          // 原 $120
+    buyoutPrice: { usd: 29900, twd: 9000 },     // $299 / NT$9,000
+    stripePriceIdUsdEnvKey: 'STRIPE_PRICE_STANDARD_USD',
+    stripePriceIdTwdEnvKey: 'STRIPE_PRICE_STANDARD_TWD',
   },
   pro_999: {
     tier: 'pro_999',
-    basePriceCents: 99900,
+    basePrice: { usd: 39900, twd: 12000 },      // $399 / NT$12,000
     iterationsTotal: 15,
-    llmCostCapUsd: 200,
-    buyoutPriceCents: 149900,
-    stripePriceIdEnvKey: 'STRIPE_PRICE_PRO_999',
+    llmCostCapUsd: 150,                         // 原 $200
+    buyoutPrice: { usd: 59900, twd: 18000 },    // $599 / NT$18,000
+    stripePriceIdUsdEnvKey: 'STRIPE_PRICE_PRO_USD',
+    stripePriceIdTwdEnvKey: 'STRIPE_PRICE_PRO_TWD',
   },
 }
 
 // 加購菜單（與 migration 040 對齊；本 PR 先在前端勾選並列入訂單總價，後續真實 module 生成留 W3）
+// 加購價同步等比下調，避免 $99 訂單搭 $149 模塊比例失衡
 export type AddonType = 'hosting' | 'maintenance' | 'module_blog' | 'module_auth' | 'module_ecommerce' | 'module_forms'
 
-export const ADDON_CONFIG: Record<AddonType, { label: string; priceCents: number; recurring?: 'month' }> = {
-  hosting: { label: '託管月費（hosting + 域名 + uptime）', priceCents: 1900, recurring: 'month' },
-  maintenance: { label: '維護訂閱（無限迭代 + bugfix）', priceCents: 4900, recurring: 'month' },
-  module_blog: { label: '部落格 / CMS 模塊', priceCents: 14900 },
-  module_auth: { label: '會員系統 / Auth 模塊', priceCents: 24900 },
-  module_ecommerce: { label: '電商 + Stripe 付款模塊', priceCents: 39900 },
-  module_forms: { label: '表單 / Newsletter 模塊', priceCents: 6900 },
+export const ADDON_CONFIG: Record<AddonType, { labelZh: string; labelEn: string; price: CurrencyAmount; recurring?: 'month' }> = {
+  hosting: {
+    labelZh: '託管月費（hosting + 域名 + uptime）',
+    labelEn: 'Hosting (hosting + domain + uptime)',
+    price: { usd: 900, twd: 300 },          // $9/月 / NT$300/月
+    recurring: 'month',
+  },
+  maintenance: {
+    labelZh: '維護訂閱（無限迭代 + bugfix）',
+    labelEn: 'Maintenance (unlimited iterations + bugfix)',
+    price: { usd: 1900, twd: 600 },         // $19/月 / NT$600/月
+    recurring: 'month',
+  },
+  module_blog: {
+    labelZh: '部落格 / CMS 模塊',
+    labelEn: 'Blog / CMS module',
+    price: { usd: 4900, twd: 1500 },        // $49 / NT$1,500
+  },
+  module_auth: {
+    labelZh: '會員系統 / Auth 模塊',
+    labelEn: 'Member / Auth module',
+    price: { usd: 7900, twd: 2500 },        // $79 / NT$2,500
+  },
+  module_ecommerce: {
+    labelZh: '電商 + Stripe 付款模塊',
+    labelEn: 'E-commerce + Stripe module',
+    price: { usd: 12900, twd: 3900 },       // $129 / NT$3,900
+  },
+  module_forms: {
+    labelZh: '表單 / Newsletter 模塊',
+    labelEn: 'Forms / Newsletter module',
+    price: { usd: 1900, twd: 600 },         // $19 / NT$600
+  },
 }
 
 // ============================================================
@@ -129,8 +177,9 @@ export interface CreateCheckoutInput {
   userId: string
   userEmail: string | null
   tier: PrecisionTier
+  currency: Currency           // 'usd' (英文) / 'twd' (中文)
   addons: { type: AddonType; quantity?: number }[]
-  successUrl: string  // 含 {CHECKOUT_SESSION_ID} placeholder
+  successUrl: string           // 含 {CHECKOUT_SESSION_ID} placeholder
   cancelUrl: string
 }
 
@@ -138,31 +187,37 @@ export interface CreateCheckoutResult {
   orderId: string
   sessionId: string
   checkoutUrl: string
-  amountCents: number
+  amountCents: number          // 對應幣別的 unit_amount（USD=cents, TWD=dollars）
+  currency: Currency
   isMock: boolean
 }
 
 export async function createPrecisionCheckoutSession(input: CreateCheckoutInput): Promise<CreateCheckoutResult> {
   const config = TIER_CONFIG[input.tier]
   if (!config) throw new Error(`Unknown tier: ${input.tier}`)
+  const currency = input.currency
 
   // 計算總額（base + 加購）
   const addonRows = input.addons
     .map((a) => {
       const cfg = ADDON_CONFIG[a.type]
       if (!cfg) return null
-      return { type: a.type, label: cfg.label, priceCents: cfg.priceCents, recurring: cfg.recurring ?? null, quantity: a.quantity ?? 1 }
+      const label = currency === 'twd' ? cfg.labelZh : cfg.labelEn
+      const amount = cfg.price[currency]
+      return { type: a.type, label, amount, recurring: cfg.recurring ?? null, quantity: a.quantity ?? 1 }
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)
 
   // 一次性付款：base + 非 recurring 加購（recurring 走獨立 subscription 流程，本 PR 不接）
-  const oneTimeAddonCents = addonRows
+  const baseAmount = config.basePrice[currency]
+  const oneTimeAddonAmount = addonRows
     .filter((a) => !a.recurring)
-    .reduce((sum, a) => sum + a.priceCents * a.quantity, 0)
-
-  const totalCents = config.basePriceCents + oneTimeAddonCents
+    .reduce((sum, a) => sum + a.amount * a.quantity, 0)
+  const totalAmount = baseAmount + oneTimeAddonAmount
 
   // 寫入 precision_orders（status=pending）
+  // ⚠️ amount_cents 欄位語意已變：USD=cents（× 100）/ TWD=dollars（zero-decimal）
+  //    後續分析訂單金額時要 join currency 欄位才能正確還原
   const orderId = randomUUID()
   await query(
     `INSERT INTO precision_orders (
@@ -173,9 +228,9 @@ export async function createPrecisionCheckoutSession(input: CreateCheckoutInput)
       orderId,
       input.userId,
       input.tier,
-      totalCents,
-      config.basePriceCents,
-      'usd',
+      totalAmount,
+      baseAmount,
+      currency,
       JSON.stringify(addonRows),
       config.iterationsTotal,
       config.llmCostCapUsd,
@@ -197,22 +252,25 @@ export async function createPrecisionCheckoutSession(input: CreateCheckoutInput)
       orderId,
       sessionId: mockSessionId,
       checkoutUrl: mockCheckoutUrl,
-      amountCents: totalCents,
+      amountCents: totalAmount,
+      currency,
       isMock: true,
     }
   }
 
   // ── 真實 Stripe Checkout ──
-  const priceId = (getEnv() as unknown as Record<string, string | undefined>)[config.stripePriceIdEnvKey]
+  const env = getEnv() as unknown as Record<string, string | undefined>
+  const priceIdEnvKey = currency === 'twd' ? config.stripePriceIdTwdEnvKey : config.stripePriceIdUsdEnvKey
+  const priceId = env[priceIdEnvKey]
 
   // 如果 Stripe 上沒配 price，用 price_data 動態建立（建議生產還是配 price ID 比較可控）
   const lineItem = priceId
     ? { price: priceId, quantity: 1 }
     : {
         price_data: {
-          currency: 'usd',
+          currency,
           product_data: { name: `Tellcraft Precision Mode - ${input.tier}` },
-          unit_amount: config.basePriceCents,
+          unit_amount: baseAmount,
         },
         quantity: 1,
       }
@@ -221,9 +279,9 @@ export async function createPrecisionCheckoutSession(input: CreateCheckoutInput)
     .filter((a) => !a.recurring)
     .map((a) => ({
       price_data: {
-        currency: 'usd',
+        currency,
         product_data: { name: a.label },
-        unit_amount: a.priceCents,
+        unit_amount: a.amount,
       },
       quantity: a.quantity,
     }))
@@ -239,6 +297,7 @@ export async function createPrecisionCheckoutSession(input: CreateCheckoutInput)
       orderId,
       userId: input.userId,
       tier: input.tier,
+      currency,
     },
   })
 
@@ -255,7 +314,8 @@ export async function createPrecisionCheckoutSession(input: CreateCheckoutInput)
     orderId,
     sessionId: session.id,
     checkoutUrl: session.url,
-    amountCents: totalCents,
+    amountCents: totalAmount,
+    currency,
     isMock: false,
   }
 }
