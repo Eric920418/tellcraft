@@ -32,6 +32,8 @@ import bddRoutes from './routes/bdd'
 import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
 import domainRoutes from './routes/domain'
+import checkoutRoutes from './routes/checkout'
+import stripeWebhookRoutes from './routes/stripe-webhook'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
 import telegramBotRoutes from './routes/telegram-bot'
@@ -117,6 +119,10 @@ app.use('/api/line/webhook', lineBotRoutes)
 // Telegram Webhook 路由（JSON 格式，使用 header secret 驗證）
 app.use('/api/telegram/webhook', express.json())
 app.use('/api/telegram/webhook', telegramBotRoutes)
+
+// Stripe Webhook 路由必須在 express.json() 之前註冊（簽名驗證需要 raw body）
+app.use('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }))
+app.use('/api/stripe/webhook', stripeWebhookRoutes)
 
 app.use(express.json({ limit: '50mb' }))
 
@@ -449,6 +455,7 @@ app.use('/api/bdd', bddRoutes)
 app.use('/api/operations', operationsRoutes)
 app.use('/api/upload', uploadRoutes)
 app.use('/api/domain', domainRoutes)
+app.use('/api/checkout', checkoutRoutes)
 app.use('/uploads/tellcraft', (req, res, next) => {
   if (!/\.(jpe?g|png|webp|gif|svg)$/i.test(req.path)) {
     res.status(403).json({ error: 'Forbidden file type' })

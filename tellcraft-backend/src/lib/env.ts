@@ -105,6 +105,8 @@ const envSchema = z.object({
   DESIGN_TOKEN_SEVERITY: z.enum(['critical', 'warning']).default('warning'), // Phase D 違反 design-token-compliance 的 severity。預設 warning 不阻塞部署，先收集 telemetry。違反率 < 10% 後切 critical
   ENABLE_AXE_CORE: z.stringbool().default(true),                 // axe-core a11y 工業標準工具整合到 ui-evaluator（90+ WCAG 規則）。在 evaluator desktop-light viewport 跑，違反 critical/serious 等級會 fail evaluator
   ENABLE_READABILITY_CHECK: z.stringbool().default(true),        // Flesch-Kincaid 英文 + 中文長度規則（hero >30 字 / CTA >12 字）。在 evaluator desktop-light 跑，FKGL ≥14 critical，11-14 warning
+  // 設計審美閉環 telemetry v2（Phase 0）— 寫 design_quality_snapshot / iteration_score_delta / iteration_aesthetic_complaint / design_choice_recorded 給週報「Design Knowledge Effectiveness」章節用。fire-and-forget 純寫入無副作用
+  ENABLE_DESIGN_TELEMETRY_V2: z.stringbool().default(true),      // kill switch：失控時設 false 立即停止寫新事件，不影響 pipeline
   // T9: 金絲雀放量百分比（0-100，default 0；> 0 時優先於 ENABLE_*=true 的硬開關）
   ENABLE_UI_EVALUATOR_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
   ENABLE_DESIGN_QUALITY_REPORT_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
@@ -125,6 +127,16 @@ const envSchema = z.object({
   // regex 對 scenario null intent 覆蓋不完（中英文變體多），啟用後對「規則判斷無 issue 但
   // 名稱含可疑 null 意圖信號」的 scenario 追加 Haiku 二次檢查。失敗降級不阻塞
   SPEC_CONSISTENCY_LLM_CHECK: z.stringbool().default(false),
+
+  // 精細模式 Stripe 整合（plan: strip-golden-seal）
+  // 三個 key 都缺 → checkout endpoint 走 mock 模式（前端可 dogfood，但點付款只會回到本地 success 頁，
+  // 不會真的扣款）。設 STRIPE_SECRET_KEY 即啟用真實 Stripe Checkout
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // 三檔商品的 Stripe Price ID（在 Stripe Dashboard 創建 product 後填入）
+  STRIPE_PRICE_STARTER_299: z.string().optional(),
+  STRIPE_PRICE_STANDARD_599: z.string().optional(),
+  STRIPE_PRICE_PRO_999: z.string().optional(),
 })
 
 // ============================================================

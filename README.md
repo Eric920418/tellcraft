@@ -90,7 +90,9 @@ cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire 
 `VPS_API_URL` `NEXT_PUBLIC_VPS_API_URL` `NEXT_PUBLIC_VPS_WS_URL` `NEXT_PUBLIC_UPLOAD_BASE_URL` `NEXT_PUBLIC_SUPABASE_URL` `NEXT_PUBLIC_SUPABASE_ANON_KEY` `NEXT_PUBLIC_LIFF_ID` `NEXT_PUBLIC_SENTRY_DSN` `SENTRY_ORG` `SENTRY_PROJECT` `SENTRY_AUTH_TOKEN`
 
 **後端**（`tellcraft-backend/.env`）：
-`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `NEON_API_KEY` `NEON_DEFAULT_REGION` `UNSPLASH_ACCESS_KEY`
+`DATABASE_URL` `REDIS_URL` `JWT_SECRET` `ANTHROPIC_API_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` `LINE_CHANNEL_ID` `LINE_CHANNEL_SECRET` `LINE_BOT_CHANNEL_SECRET` `LINE_MESSAGING_CHANNEL_ACCESS_TOKEN` `LIFF_ID` `UPLOAD_DIR` `UPLOAD_BASE_URL` `SOCKET_VERBOSE_LOG` `NEON_API_KEY` `NEON_DEFAULT_REGION` `UNSPLASH_ACCESS_KEY` `STRIPE_SECRET_KEY` `STRIPE_WEBHOOK_SECRET` `STRIPE_PRICE_STARTER_299` `STRIPE_PRICE_STANDARD_599` `STRIPE_PRICE_PRO_999`
+
+> **精細模式 Stripe**：三個 `STRIPE_PRICE_*` 是 Stripe Dashboard 創建 Product 後拿到的 price ID（`price_xxx`）。**全部不設** → checkout 走 mock 模式（前端可 dogfood 整條 funnel，但點付款不會真扣款，直接跳成功頁），方便上線前測試 UX。設了 `STRIPE_SECRET_KEY` 後請先執行 `pnpm add stripe`（在 `tellcraft-backend/`）。
 
 **Determinism over Prompt flags**（預設全 false，穩定後逐一開啟）：
 `CODER_TEMPLATE_V2`（啟用 coder-templates/ registry + 4 個新 template：count / exists_check / search / soft-delete 子模組）、`CODER_AST_SANITIZE`（啟用 ts-morph AST 替代 next15-async-params / search-params-suspense / missing-hooks 三類 regex）、`DETERMINISTIC_FIX_V1`（fixFailingAction 對 missing_column / wrong_status / field_naming 三類 rootCause 先跑零 LLM 機械修復，失敗才 fallback LLM）、`SPEC_CONSISTENCY_LLM_CHECK`（Feature Alignment Gate Check 7 的 Haiku fallback，覆蓋 regex 抓不到的中英文 null-intent 變體）
@@ -145,6 +147,56 @@ cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts [--type=<prod
 - **為什麼用 VPS**：Vercel Serverless 超時 10-60s，無法處理長時間 LLM 任務
 - 前端路徑別名 `@/*` 映射到 `./*`，後端無路徑別名
 - 前後端 TypeScript 完全隔離（tsconfig 互相 exclude）
+
+### 精細模式（Precision Mode）商業 Funnel
+
+訂閱制（creator/pro/business 月費）之外的第二條收入支線。一次性高價交付完整網站，對標自由接案。完整設計見 `/.claude/plans/strip-golden-seal.md`。
+
+| 階段 | 路徑 | 說明 |
+|------|------|------|
+| 定價 | `/[locale]/pricing` | 雙 section：精細模式（主打）+ 訂閱方案（次要） |
+| 結帳 | `/[locale]/pay/[tier]` | 左欄訂單+加購（hosting/maintenance/4 模塊），右欄總額+信任元素+Stripe CTA |
+| 成功 | `/[locale]/pay/success?session_id=xxx` | Polling DB（1.5s 一次，30s 上限）確認 `precision_orders.status='paid'` 才放行進 BDD |
+| 取消 | `/[locale]/pay/cancel?session_id=xxx` | 5 個 radio reason 寫 `cancellation_reason`（分析定價/轉換問題用） |
+
+**後端**：
+- `POST /api/checkout/precision` — 創 Checkout session + `precision_orders` row（status=pending）
+- `GET /api/checkout/catalog` — tier + addon 價格元資料（前端避免 hardcode）
+- `GET /api/checkout/precision/status?session_id=...` — success 頁 polling
+- `POST /api/checkout/precision/cancel` — 寫 cancellation_reason
+- `POST /api/stripe/webhook` — 接收 Stripe 事件（**raw body**，簽名驗證 + idempotency PK）
+
+**資料庫**：
+- `migrations/039_create_precision_orders.sql` — orders 主表 + `users.stripe_customer_id`
+- `migrations/040_create_stripe_webhook_events.sql` — webhook event idempotency log
+
+**Stripe 整合 mock 模式**：缺 `STRIPE_SECRET_KEY` 時 checkout endpoint 直接回 mock session URL，前端 success 頁第一次 polling 會自動把 pending→paid。讓你上線前能 dogfood 整條 UX，等 Stripe Dashboard 配 Product price ID + `pnpm add stripe`（在 `tellcraft-backend/`）後即可切真實 Checkout。
+
+#### Stripe Webhook 設定
+
+正式啟用 webhook 必須在 `tellcraft-backend/` 安裝 SDK 並配置 secret：
+
+```bash
+cd tellcraft-backend && pnpm add stripe
+```
+
+1. **Stripe Dashboard** → Developers → Webhooks → Add endpoint
+2. Endpoint URL：`https://api.tellcraft.com/api/stripe/webhook`（用你的後端域名）
+3. 訂閱事件（最少這 4 個）：
+   - `checkout.session.completed` — 付款成功（主路徑）
+   - `checkout.session.async_payment_succeeded` — 銀行轉帳延遲付款
+   - `charge.refunded` — 退款（全額才會改狀態為 refunded）
+   - `payment_intent.payment_failed` — 信用卡被拒等
+4. 拿到 `whsec_xxx` → 設為後端 env `STRIPE_WEBHOOK_SECRET`
+5. **本地測試**用 `stripe listen --forward-to localhost:3100/api/stripe/webhook`（會印一個臨時 whsec，貼到 `.env` 重啟 backend）
+
+Webhook 設計重點：
+- **必須在 `express.json()` 之前掛 `express.raw()`** — 簽名驗算需要原始 bytes（已在 `src/index.ts` 處理）
+- **Idempotency** — `stripe_webhook_events` 表 PK 是 `event_id`，重複事件 `ON CONFLICT DO NOTHING` 跳過
+- **失敗監控** — `SELECT * FROM stripe_webhook_events WHERE status='failed' AND received_at > NOW() - INTERVAL '1 day'` 抓最近失敗 event，人工介入處理
+- **退款保資料** — `charge.refunded` 只把 order 標 `refunded`，project_id 仍然存在（不覆寫不刪除既有資料）
+
+**未完事項**（plan W3-W5）：iteration 計次卡點 / export 買斷費 / 加裝模塊增量生成 / 訂單 dashboard — 都已在 `/.claude/plans/strip-golden-seal.md` 規劃。
 
 > 詳細架構文檔見 [CLAUDE.md](./CLAUDE.md)（核心模組、Phase 狀態機、Pipeline 流程、API 路由、防雷清單）
 
@@ -1249,7 +1301,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-04-20）
+### 近期更新（2026-03-13 ~ 2026-05-16）
+
+- **設計審美閉環 v2 Phase 0（MVP 埋點層）**（05-16）：用戶反饋「生成的網站不夠好看」並提出引入 `nexu-io/open-design` 補強。診斷後拒絕直接整合（架構是競品而非元件、設計知識已過剩 71+30+20+8 會「選擇爆炸」），改鎖定真正瓶頸：**閉環反饋缺失** — `state.uiuxDesignMood/Tier/VariantConcept` 雖記 FlowState 但從未進 telemetry payload，無法事後問「mood=glassmorphism 平均迭代次數多少」；`iteration-skill.ts` 雖記 telemetry 但沒記迭代前後分數差。**Phase 0 改動**：(1) `skill-telemetry.ts` 加 4 個 EventType（`design_quality_snapshot` / `iteration_score_delta` / `iteration_aesthetic_complaint` / `design_choice_recorded`）+ `detectAestheticComplaint()` 零 LLM regex（中英文美感投訴詞，故意保守不誤殺）+ `aggregateDesignEffectiveness()` GROUP BY mood/dsSource 聚合 SQL；(2) `design-quality-report.ts` 加 `recordDesignQualitySnapshot()` fire-and-forget helper，雙路徑（BullMQ + LangGraph 共用 `executeFullCodePipeline`，故只改一處）由 `uiux-phases.ts:1707/2281` 既有 advisory block 呼叫；(3) `iteration-skill.ts:368` 加美感投訴 regex 偵測 + `:730` 區拿 `state.lastIterationQualityReport`（FlowState 既有欄位）做 prev 計算 `iteration_score_delta`，不重跑 QG；(4) `uiux-phases.ts:1336` variant 選定後寫 `design_choice_recorded` 固化此次 mood/tier/dsHash/variantConcept；(5) `telemetry-weekly-report.ts` 加「Design Knowledge Effectiveness」章節（By Mood / By DS Source 表格 + 解讀 SOP）；(6) migration `040_add_design_telemetry_indexes.sql`（純 JSONB partial index 不加欄位避免 schema 漂移）；(7) env flag `ENABLE_DESIGN_TELEMETRY_V2`（預設 true，kill switch）。**24 個新單元測試**（2393→2417）含 regex 邊界 case + SQL 形狀驗證 + windowDays 注入安全。**反模式守住**：零自動回灌 prompt / 零 QG 阻塞變更 / fire-and-forget / payload < 4KB / 美感詞 regex 保守不誤殺。**Phase 1（open-design 資產抽取 8-15 範本）刻意 defer 到 Phase 0 累積 ≥1 週 baseline 後才啟動**，順序顛倒會浪費時間（無數據無法驗證抽取效果）。**核心洞察**：設計品質瓶頸不是知識儲量是「審美選擇 → 用戶反應 → 設計校準」的閉環反饋缺失。先建觀測再談優化
 
 - **UIUX Variant 失敗的 silent fallback 修復**（04-20）：用戶選 Path A「我有想法要討論」生成 5 變體時 LLM 失敗，前端只看到通用文案「生成設計方案時發生錯誤。讓我們改用模板開始。」並被**強制切到 Path B（模板選擇）**。雙重違規：(1) 真實錯誤 `variantsResult.error` 進 `logger.error` 沒進前端，違反 CLAUDE.md「所有錯誤完整顯示在前端」；(2) Path A→Path B 跨產品路徑降級違反用戶明確選擇。修復 `uiux-phases.ts:3141-3158`：呼叫既有 `humanizeError()`（同檔 L113，原 file-local，本次改 export）把 raw error 轉成可讀訊息並附完整 detail；不再呼叫 `showTemplatePicker`；phase 回退到 `uiux_variant_selection`（保留 PHASE_BACKTRACK_MAP 路徑），清空 `uiuxVariants` / `uiuxVariantConcept` 但保留 `uiuxPreparedTemplate` / `uiuxDesignBrief` / `sessionId` 給重試用；發 quickReplies `[重試變體生成 / 返回設計方向 / 開始新專案]`（Path A 把第二顆改為「換其他模板」走 `__go_back__`）。新增 `__retry_variants__` 全域路由在 `orchestrator.ts:855` 旁邊，缺 `uiuxPreparedTemplate` 或 `sessionId` 時 fail-loud 而非 fail-silent；同步加入 `graph/nodes/classify.ts` 的 `SPECIAL_TOKENS` 維持 LangGraph 路徑符號一致。**核心洞察**：silent fallback 製造「薛丁格的 bug」——使用者以為是功能、工程師以為是 edge case，沒人有動機修。`callStructured` 已內建 RETRY_MAX=3 指數退避，外層不再加 retry 避免疊乘成本；用戶層的「重試」是 explicit consent 不是自動化。同類問題（`uiux-phases.ts:1899` Animation / `:2002` RWD / `coder-phases.ts:185` RED Phase advisory）留待獨立 ticket，不在此 PR 擴大範圍
 

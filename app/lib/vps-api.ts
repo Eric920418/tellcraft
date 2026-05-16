@@ -2525,5 +2525,88 @@ export async function removeDomainBinding(input: {
   })
 }
 
+// ============================================================
+// 精細模式 Checkout（plan: strip-golden-seal）
+// ============================================================
+
+export type PrecisionTier = 'starter_299' | 'standard_599' | 'pro_999'
+export type CheckoutAddonType =
+  | 'hosting'
+  | 'maintenance'
+  | 'module_blog'
+  | 'module_auth'
+  | 'module_ecommerce'
+  | 'module_forms'
+
+export interface CheckoutCatalog {
+  tiers: Array<{
+    tier: PrecisionTier
+    basePriceCents: number
+    iterationsTotal: number
+    buyoutPriceCents: number
+  }>
+  addons: Array<{
+    type: CheckoutAddonType
+    label: string
+    priceCents: number
+    recurring: 'month' | null
+  }>
+}
+
+export async function getCheckoutCatalog(): Promise<ApiResponse<CheckoutCatalog>> {
+  return apiRequest('/api/checkout/catalog')
+}
+
+export async function createCheckoutSession(input: {
+  tier: PrecisionTier
+  addons: { type: CheckoutAddonType }[]
+  locale: string
+  token: string
+}): Promise<ApiResponse<{
+  orderId: string
+  sessionId: string
+  checkoutUrl: string
+  amountCents: number
+  isMock: boolean
+}>> {
+  return apiRequest('/api/checkout/precision', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      tier: input.tier,
+      addons: input.addons,
+      locale: input.locale,
+    }),
+  })
+}
+
+export async function getCheckoutStatus(input: {
+  sessionId: string
+  token: string
+}): Promise<ApiResponse<{
+  orderId: string | null
+  status: 'pending' | 'paid' | 'in_progress' | 'delivered' | 'refunded' | 'cancelled' | 'failed'
+  isMock: boolean
+}>> {
+  return apiRequest(`/api/checkout/precision/status?session_id=${encodeURIComponent(input.sessionId)}`, {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+export async function cancelCheckout(input: {
+  sessionId: string
+  reason: string | null
+  token: string
+}): Promise<ApiResponse<{ success: boolean }>> {
+  return apiRequest('/api/checkout/precision/cancel', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      session_id: input.sessionId,
+      reason: input.reason,
+    }),
+  })
+}
+
 // 導出類型
 export type { ClarifyItem, BddSession }
