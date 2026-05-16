@@ -3318,9 +3318,12 @@ export function parseGeneratedFiles(content: string, designSystem: DesignSystem)
     }
   }
 
-  // 如果還是沒有，生成一個基礎的 globals.css
+  // 如果還是沒有，生成一個基礎的 globals.css（Tailwind v3 directives — deployer/webcontainer 都 pin v3.4）
+  // 防雷：不要寫 v4 `@import "tailwindcss"` — 客戶 app 跑 v3 會把它當 CSS @import URL，resolve 失敗 → 整套 Tailwind 死
   if (!styles) {
-    styles = `@import "tailwindcss";
+    styles = `@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 ${designSystem.cssVariables}
 
@@ -5634,9 +5637,65 @@ function inferPrimaryPersona(category: string): string {
 }
 
 /**
+ * Tailwind 預設值（當 designSystem 對應欄位 undefined 時 fallback，避免渲染 'undefined' 字串污染 config）
+ */
+const TAILWIND_BORDER_RADIUS_DEFAULTS = {
+  none: '0',
+  sm: '0.125rem',
+  md: '0.375rem',
+  lg: '0.5rem',
+  full: '9999px',
+} as const
+
+const TAILWIND_COLOR_DEFAULTS = {
+  primary: '#2563eb',
+  secondary: '#4f46e5',
+  accent: '#06b6d4',
+  background: '#ffffff',
+  foreground: '#0f172a',
+  muted: '#64748b',
+  border: '#e2e8f0',
+} as const
+
+/**
+ * 安全取值：欄位是 string 且不是 'undefined' 才用，否則 fallback。
+ * 防 generateTailwindConfig 把 undefined 渲染成字串 'undefined' 污染 tailwind.config.ts。
+ */
+function safeStr(val: unknown, fallback: string): string {
+  if (typeof val === 'string' && val.length > 0 && val !== 'undefined') return val
+  return fallback
+}
+
+/**
  * 生成 Tailwind 配置
+ *
+ * 防雷：designSystem 任一欄位若為 undefined，**必須 fallback 到合理預設值**，不能 string-interpolation
+ * 直接渲染 'undefined' 字串到 config（會 override Tailwind 內建預設讓所有 utility 失效）。
  */
 export function generateTailwindConfig(designSystem: DesignSystem): string {
+  // 安全取出所有欄位（任一 undefined fallback）
+  const cp = designSystem.colorPalette || {} as DesignSystem['colorPalette']
+  const br = designSystem.borderRadius || {} as DesignSystem['borderRadius']
+  const spacing = designSystem.spacing?.scale || {}
+  const fontFamily = designSystem.typography?.fontFamily || 'Inter'
+
+  const colors = {
+    primary: safeStr(cp.primary, TAILWIND_COLOR_DEFAULTS.primary),
+    secondary: safeStr(cp.secondary, TAILWIND_COLOR_DEFAULTS.secondary),
+    accent: safeStr(cp.accent, TAILWIND_COLOR_DEFAULTS.accent),
+    background: safeStr(cp.background, TAILWIND_COLOR_DEFAULTS.background),
+    foreground: safeStr(cp.foreground, TAILWIND_COLOR_DEFAULTS.foreground),
+    muted: safeStr(cp.muted, TAILWIND_COLOR_DEFAULTS.muted),
+    border: safeStr(cp.border, TAILWIND_COLOR_DEFAULTS.border),
+  }
+  const borderRadius = {
+    none: safeStr(br.none, TAILWIND_BORDER_RADIUS_DEFAULTS.none),
+    sm: safeStr(br.sm, TAILWIND_BORDER_RADIUS_DEFAULTS.sm),
+    md: safeStr(br.md, TAILWIND_BORDER_RADIUS_DEFAULTS.md),
+    lg: safeStr(br.lg, TAILWIND_BORDER_RADIUS_DEFAULTS.lg),
+    full: safeStr(br.full, TAILWIND_BORDER_RADIUS_DEFAULTS.full),
+  }
+
   return `import type { Config } from 'tailwindcss'
 
 const config: Config = {
@@ -5655,33 +5714,33 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        primary: '${designSystem.colorPalette.primary}',
-        secondary: '${designSystem.colorPalette.secondary}',
-        accent: '${designSystem.colorPalette.accent}',
-        background: '${designSystem.colorPalette.background}',
-        foreground: '${designSystem.colorPalette.foreground}',
-        muted: '${designSystem.colorPalette.muted}',
-        border: '${designSystem.colorPalette.border}',
-        ${designSystem.colorPalette.destructive ? `destructive: '${designSystem.colorPalette.destructive}',` : ''}
-        ${designSystem.colorPalette.success ? `success: '${designSystem.colorPalette.success}',` : ''}
+        primary: '${colors.primary}',
+        secondary: '${colors.secondary}',
+        accent: '${colors.accent}',
+        background: '${colors.background}',
+        foreground: '${colors.foreground}',
+        muted: '${colors.muted}',
+        border: '${colors.border}',
+        ${cp.destructive ? `destructive: '${cp.destructive}',` : ''}
+        ${cp.success ? `success: '${cp.success}',` : ''}
       },
       fontFamily: {
-        ${(designSystem.tailwindExtend.fontFamily && Object.keys(designSystem.tailwindExtend.fontFamily).length > 0)
+        ${(designSystem.tailwindExtend?.fontFamily && Object.keys(designSystem.tailwindExtend.fontFamily).length > 0)
           ? Object.entries(designSystem.tailwindExtend.fontFamily).map(
               ([key, fonts]) => `${key}: [${(fonts as string[]).map(f => `'${f.replace(/['"]/g, '')}'`).join(', ')}]`
             ).join(',\n        ')
-          : `sans: ['${designSystem.typography.fontFamily.split(',')[0].trim().replace(/['"]/g, '')}', 'system-ui', 'sans-serif']`
+          : `sans: ['${fontFamily.split(',')[0].trim().replace(/['"]/g, '')}', 'system-ui', 'sans-serif']`
         },
       },
       borderRadius: {
-        none: '${designSystem.borderRadius.none}',
-        sm: '${designSystem.borderRadius.sm}',
-        md: '${designSystem.borderRadius.md}',
-        lg: '${designSystem.borderRadius.lg}',
-        full: '${designSystem.borderRadius.full}',
+        none: '${borderRadius.none}',
+        sm: '${borderRadius.sm}',
+        md: '${borderRadius.md}',
+        lg: '${borderRadius.lg}',
+        full: '${borderRadius.full}',
       },
       spacing: {
-        ${Object.entries(designSystem.spacing.scale).map(([k, v]) => `'${k}': '${v}'`).join(',\n        ')}
+        ${Object.entries(spacing).map(([k, v]) => `'${k}': '${v}'`).join(',\n        ')}
       },
     },
   },

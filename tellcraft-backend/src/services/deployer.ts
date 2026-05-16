@@ -2862,10 +2862,23 @@ function parseBuildErrors(output: string): BuildError[] {
 }
 
 /**
- * 清理 CSS 中的 Tailwind v4 語法（統一為 v3）
+ * 規範化 globals.css 為 Tailwind v3 — 砍 v4 語法 + 保證 v3 directives 存在。
+ *
+ * **這個函數必須自包含**：所有 caller（sanitizeCodeForDeploy / assembleDeployFiles /
+ * fixBuildErrors 後的 cleanup / 未來新加的路徑）拿到的回傳值都必須是「可直接給 Tailwind v3
+ * 跑的 globals.css」。不能讓下游補 directives — 因為非 deploy 路徑（iteration / UIUX
+ * 完成寫 DB / WebContainer preview）沒有 assembleDeployFiles 那層補丁，直接寫 DB 就 dead。
+ *
+ * 為什麼用 v3：deployer.ts:250 + app/lib/webcontainer-utils.ts:43 都 pin `tailwindcss: '^3.4.0'`。
+ * 生成的客戶 app 用 v3。Tellcraft 前端開發本身用 v4（CLAUDE.md 寫的 v4 是指 chat UI app，
+ * 不是這條 generation pipeline）。
+ *
+ * Idempotent：多次呼叫結果一致。已含 v3 directives 不重複 prepend。
  */
-function cleanTailwindV4Syntax(styles: string): string {
+export function cleanTailwindV4Syntax(styles: string): string {
   let result = styles
+
+  // === 1. 砍 v4 語法 ===
   // @import "tailwindcss" 及子路徑
   result = result.replace(/@import\s*["']tailwindcss(?:\/[^"']*)?["']\s*;?\s*/g, '')
   // @config 指令
@@ -2883,6 +2896,18 @@ function cleanTailwindV4Syntax(styles: string): string {
     if (standardFonts.has(fontName)) return match
     return `font-family: var(--font-${fontName}, inherit);`
   })
+
+  // === 2. 保證 v3 directives 存在（自包含 — 不靠下游補）===
+  // 檢查三條 directive 是否完整；任一缺失即 prepend 標準三行（idempotent — 既有就不重複）
+  const hasBase = /@tailwind\s+base\s*;/.test(result)
+  const hasComponents = /@tailwind\s+components\s*;/.test(result)
+  const hasUtilities = /@tailwind\s+utilities\s*;/.test(result)
+  if (!hasBase || !hasComponents || !hasUtilities) {
+    // 先砍掉零散的 @tailwind 指令（避免重複），統一用標準三行 prepend
+    result = result.replace(/^\s*@tailwind\s+\w+\s*;\s*$/gm, '')
+    result = `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n${result.trimStart()}`
+  }
+
   return result
 }
 

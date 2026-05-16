@@ -223,7 +223,10 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 - `[CI]` 一律用 `claude-sonnet-4-6`（不加日期），用 `semantic-gateway.ts` 常數
 - `[CI]` 字體只能用 `next/font`，禁 `<link>`/`@import` Google Fonts
-- `[CI]` Tailwind v4：`@import "tailwindcss"`（非 v3 `@tailwind`）
+- `[CI]` Tailwind v4：`@import "tailwindcss"`（非 v3 `@tailwind`）— **僅指 Tellcraft 前端開發 app（chat UI）**
+- `[TEST]` **生成的客戶 app pin Tailwind v3.4**（`deployer.ts:250` + `app/lib/webcontainer-utils.ts:43`）→ `globals.css` 必須有 `@tailwind base/components/utilities;` 三行。**LLM 偏寫 v4 `@import "tailwindcss"` 時 sanitize 砍掉但不能不補 v3 directives** — `cleanTailwindV4Syntax` 必須**自包含**（砍 v4 + 補 v3 同一函數內完成）。Incident 2026-05-17：原版只在 `assembleDeployFiles` L1979-82 補 v3，但 `sanitizeCodeForDeploy` 在 iteration / UIUX 完成寫 DB 也呼叫，那條路徑沒補 → DB 內 globals.css 缺 directives → WebContainer preview 讀 LKG 直接整個專案大爆版（zero Tailwind utility 生效）。守護：`__tests__/tailwind-v4-cleanup.test.ts` 10 個 case 驗 idempotent + 自包含
+- `[TEST]` **`generateTailwindConfig` 任何欄位 undefined 必須 fallback 預設值**（不能 string-interpolation `'${val}'` 渲染成字串 `'undefined'`）— 同 incident 觸發點：`borderRadius` undefined 渲染 `'undefined'` override Tailwind 內建預設，`rounded-md` 全部失效。`safeStr()` helper + `TAILWIND_BORDER_RADIUS_DEFAULTS` / `TAILWIND_COLOR_DEFAULTS` 防護
+- `[ARCH]` **Sanitize/normalize 函數自包含原則（反模式檢查）**：任何 `cleanX` / `sanitizeX` / `normalizeX` 函數**砍掉某語法後必須在同函數內保證輸出可用**，不能假設下游會補。理由：函數會被多處 caller import 共用（sanitize 寫 DB / iteration 寫 DB / build fix / assemble deploy），任一漏接路徑都會把壞代碼寫進 DB → LKG → preview。新增此類函數時必須加 idempotent test + 多 caller 測試
 - `[CI]` Skill Telemetry 必須 fire-and-forget（接 `.catch(() => {})`）
 - `[TEST]` Tailwind config 禁 CSS 變數引用（用硬編碼值，避免 var 遺失樣式失效）
 - `[TEST]` next/font `axes:` 只能用於 variable font（黑名單在 `sanitizeCodeForDeploy` Fix 4.5）
