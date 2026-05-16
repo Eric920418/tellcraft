@@ -1,0 +1,271 @@
+{
+  "styleKey": "cisco",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/cisco/DESIGN.md",
+    "sha256OfMd": "6bda99efa005b8db1074e387e059b21ca91a98d6e58c8c8cf6b9985b46559037",
+    "parsedAt": "2026-05-16T14:17:31.488Z"
+  },
+  "atmosphereKeywords": [
+    "cisco",
+    "current",
+    "public",
+    "presence",
+    "enterprise",
+    "infrastructu",
+    "rendered",
+    "with",
+    "cinematic",
+    "restraint",
+    "canvas",
+    "dark"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "cisco",
+      "generatedAt": 1778941051473
+    },
+    "visualTheme": {
+      "atmosphere": "Cisco's current public web presence is enterprise infrastructure rendered with cinematic restraint. The canvas is dark but not pure black: layered navy-charcoal surfaces create depth without resorting to glossy startup gradients. Bright Cisco Blue is used as a precise signal color rather than a wash across the page. The overall impression is \"serious global platform\" rather than \"friendly SaaS app\" — large high-confidence headlines, quiet chrome, and product imagery that emphasizes scale, networking, observability, and resilience.\n\nTypography is disciplined and corporate. Cisco's internal and presentation ecosystem points to `CiscoSansTT` as the preferred brand face, while the web experience remains compatible with modern grotesk fallbacks. Headings should feel concise and engineered. Body copy should read clearly and directly, not editorially. Geometrically, the system prefers soft pills for calls to action, rounded-but-not-playful cards, and glass-dark navigation shells floating over large atmospheric sections.\n\nWhat makes Cisco distinct is the combination of **deep infrastructure darkness** with a **single electric trust signal**. Use blue for the moment that matters: primary action, focus, active tab, chart highlight, or key data edge. Let the rest of the interface stay disciplined."
+    },
+    "colorPalette": {
+      "primary": [
+        {
+          "name": "Cisco Blue",
+          "value": "#049fd9",
+          "role": "High-signal accent, outline CTA, active state, key link."
+        },
+        {
+          "name": "Status Blue",
+          "value": "#64bbe3",
+          "role": "Focus halo, secondary emphasis, lightweight chart signal."
+        },
+        {
+          "name": "Cisco Indigo",
+          "value": "#005073",
+          "role": "Filled primary CTA, dense accent, deeper data emphasis."
+        },
+        {
+          "name": "Dark Blue",
+          "value": "#2b5592",
+          "role": "Secondary brand accent for graphics, charts, and layered blue compositions."
+        }
+      ],
+      "neutral": [
+        {
+          "name": "Dark Gray 1",
+          "value": "#39393b",
+          "role": "Mid-dark container surface, panel base, dense modules."
+        },
+        {
+          "name": "Dark Gray 2",
+          "value": "#58585b",
+          "role": "Borders, separators, secondary shells."
+        },
+        {
+          "name": "Medium Gray 2",
+          "value": "#9e9ea2",
+          "role": "Muted labels and low-emphasis metadata."
+        },
+        {
+          "name": "Pale Gray 1",
+          "value": "#e8ebf1",
+          "role": "Light text support, cool technical background tint, separators on dark."
+        },
+        {
+          "name": "Core White",
+          "value": "#ffffff",
+          "role": "Primary inverse text, bright UI foreground, light surface content."
+        }
+      ],
+      "other": [
+        {
+          "name": "Sage Green",
+          "value": "#abc233",
+          "role": "Positive outcome or infrastructure-health accent."
+        },
+        {
+          "name": "Status Green",
+          "value": "#6cc04a",
+          "role": "Success state."
+        },
+        {
+          "name": "Status Yellow",
+          "value": "#ffcc00",
+          "role": "Warning or caution state."
+        },
+        {
+          "name": "Status Orange",
+          "value": "#ff7300",
+          "role": "Alert or escalation state."
+        },
+        {
+          "name": "Status Red",
+          "value": "#cf2030",
+          "role": "Error or critical state."
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "CiscoSansTT",
+      "monoFont": "Mono / Technical",
+      "hierarchy": [
+        {
+          "role": "Hero Display",
+          "font": "CiscoSansTT",
+          "size": "72px",
+          "weight": "500",
+          "lineHeight": "1.05",
+          "letterSpacing": "-1.6px",
+          "notes": "Large launch/positioning headline"
+        },
+        {
+          "role": "Section Display",
+          "font": "CiscoSansTT",
+          "size": "56px",
+          "weight": "500",
+          "lineHeight": "1.08",
+          "letterSpacing": "-1.1px",
+          "notes": "Major section statement"
+        },
+        {
+          "role": "Heading",
+          "font": "CiscoSansTT",
+          "size": "32px",
+          "weight": "500",
+          "lineHeight": "1.20",
+          "letterSpacing": "-0.4px",
+          "notes": "Feature title, card header"
+        },
+        {
+          "role": "Subheading",
+          "font": "CiscoSansTT",
+          "size": "24px",
+          "weight": "500",
+          "lineHeight": "1.30",
+          "letterSpacing": "-0.2px",
+          "notes": "Supporting header"
+        },
+        {
+          "role": "Body",
+          "font": "CiscoSansTT",
+          "size": "16px",
+          "weight": "400",
+          "lineHeight": "1.55",
+          "letterSpacing": "normal",
+          "notes": "Default body copy"
+        },
+        {
+          "role": "Body Small",
+          "font": "CiscoSansTT",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "1.50",
+          "letterSpacing": "normal",
+          "notes": "Metadata, nav, helper text"
+        },
+        {
+          "role": "Label / Eyebrow",
+          "font": "CiscoSansTT",
+          "size": "12px",
+          "weight": "700",
+          "lineHeight": "1.30",
+          "letterSpacing": "0.24px",
+          "notes": "Tags, overlines, section labels"
+        },
+        {
+          "role": "Button",
+          "font": "CiscoSansTT",
+          "size": "16px",
+          "weight": "500",
+          "lineHeight": "1.20",
+          "letterSpacing": "normal",
+          "notes": "CTA labels"
+        }
+      ],
+      "principles": [
+        "Keep display typography decisive and compressed, but not ultra-light or editorial.",
+        "Body copy should be practical and highly legible, with no clever type effects.",
+        "Use bold weight mainly for short labels, status tags, and compact emphasis.",
+        "Favor one-family coherence over showy font mixing."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary Action Pill",
+          "properties": {
+            "background": "Cisco Indigo (`#005073`)",
+            "text": "White (`#ffffff`)",
+            "radius": "full pill",
+            "padding": "generous horizontal padding, medium vertical height",
+            "hover": "Dark Blue (`#2b5592`)",
+            "active": "a darker indigo tone around `#00364d`",
+            "focus ring": "2px outer halo in Status Blue (`#64bbe3`) with a 1px white inner keyline on dark surfaces",
+            "use case": "high-priority submit, deploy, or \"learn more\" action on dark Cisco surfaces"
+          }
+        },
+        {
+          "name": "Signal Outline Pill",
+          "properties": {
+            "background": "transparent",
+            "text": "Cisco Blue (`#049fd9`) on dark surfaces, Cisco Indigo (`#005073`) on light surfaces",
+            "border": "1.5px Cisco Blue (`#049fd9`)",
+            "radius": "full pill",
+            "hover": "blue-tinted surface fill with the text color preserved",
+            "focus ring": "same visible halo pairing as the primary button",
+            "use case": "brand-forward secondary action that keeps Cisco Blue prominent without sacrificing contrast"
+          }
+        },
+        {
+          "name": "Secondary Dark Pill",
+          "properties": {
+            "background": "transparent or dark surface",
+            "text": "White or Pale Gray 1",
+            "border": "Dark Gray 2 (`#58585b`)",
+            "radius": "full pill",
+            "purpose": "low-noise secondary CTA"
+          }
+        }
+      ],
+      "other": [
+        {
+          "name": "Network Telemetry Card",
+          "properties": {
+            "anatomy": "eyebrow label, large metric, delta chip, 12-24h sparkline, quiet footer metadata",
+            "density": "compact but not cramped; 16px-24px padding with clear alignment to chart axes",
+            "states": "normal, selected, degraded, critical, loading skeleton",
+            "brand behavior": "use Cisco Blue for the selected edge or sparkline, and semantic colors only for health state"
+          }
+        },
+        {
+          "name": "Topology / Product Diagram Module",
+          "properties": {
+            "anatomy": "title, system canvas, node chips, connection lines, side legend",
+            "visual rule": "dark field first, blue path highlight second, all other nodes muted until active",
+            "states": "idle overview, hovered path, selected node, degraded route"
+          }
+        },
+        {
+          "name": "Dense Control Panel",
+          "properties": {
+            "anatomy": "left nav rail, filter bar, split metric region, log/event table, contextual right rail",
+            "control sizing": "compact 36px inputs are acceptable on desktop, but action buttons remain 44px minimum height",
+            "states": "quiet default, blue active filter, clear warning/error escalation"
+          }
+        }
+      ]
+    },
+    "spacing": {
+      "scale": [
+        "8px",
+        "8px",
+        "767px"
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by Cisco\n\n> Category: Backend & Data\n> Enterprise infrastructure brand. Dark trust surfaces, Cisco Blue signal, technical clarity.\n\n## 1. Visual Theme & Atmosphere\n\nCisco's current public web presence is enterprise infrastructure rendered with cinematic restraint. The canvas is dark but not pure black: layered navy-charcoal surfaces create depth without resorting to glossy startup gradients. Bright Cisco Blue is used as a precise signal color rather than a wash across the page. The overall impression is \"serious global platform\" rather than \"friendly SaaS app\" — large high-confidence headlines, quiet chrome, and product imagery that emphasizes scale, networking, observability, and resilience.\n\nTypography is disciplined and corporate. Cisco's internal and presentation ecosystem points to `CiscoSansTT` as the preferred brand face, while the web experience remains compatible with modern grotesk fallbacks. Headings should feel concise and engineered. Body copy should read clearly and directly, not editorially. Geometrically, the system prefers soft pills for calls to action, rounded-but-not-playful cards, and glass-dark navigation shells floating over large atmospheric sections.\n\nWhat makes Cisco distinct is the combination of **deep infrastructure darkness** with a **single electric trust signal**. Use blue for the moment that matters: primary action, focus, active tab, chart highlight, or key data edge. Let the rest of the interface stay disciplined.\n\n**Key Characteristics:**\n- Dark navy-charcoal surfaces instead of flat black\n- Cisco Blue (`#049fd9`) as the primary signal color\n- Restrained neutral system built from grays and pale technical whites\n- Enterprise-scale headlines with compact, factual body copy\n- Pill CTAs and rounded control shells, but never toy-like UI\n- Product and platform imagery should suggest networks, telemetry, and systems at scale\n- Motion should feel controlled and infrastructural, not playful\n\n## 2. Color Palette & Roles\n\n### Primary\n- **Cisco Blue** (`#049fd9`): High-signal accent, outline CTA, active state, key link.\n- **Status Blue** (`#64bbe3`): Focus halo, secondary emphasis, lightweight chart signal.\n- **Cisco Indigo** (`#005073`): Filled primary CTA, dense accent, deeper data emphasis.\n- **Dark Blue** (`#2b5592`): Secondary brand accent for graphics, charts, and layered blue compositions.\n\n### Neutral / Surface\n- **Dark Gray 1** (`#39393b`): Mid-dark container surface, panel base, dense modules.\n- **Dark Gray 2** (`#58585b`): Borders, separators, secondary shells.\n- **Medium Gray 2** (`#9e9ea2`): Muted labels and low-emphasis metadata.\n- **Pale Gray 1** (`#e8ebf1`): Light text support, cool technical background tint, separators on dark.\n- **Core White** (`#ffffff`): Primary inverse text, bright UI foreground, light surface content.\n\n### Support\n- **Sage Green** (`#abc233`): Positive outcome or infrastructure-health accent.\n- **Status Green** (`#6cc04a`): Success state.\n- **Status Yellow** (`#ffcc00`): Warning or caution state.\n- **Status Orange** (`#ff7300`): Alert or escalation state.\n- **Status Red** (`#cf2030`): Error or critical state.\n\n### Recommended Surface Roles\n- **Primary canvas**: a blue-black or charcoal blend built around `#0f1720` to `#1b2530` using the Cisco palette as anchor.\n- **Elevated card**: Dark Gray 1 (`#39393b`) or a slightly bluer variant.\n- **Border / outline**: Dark Gray 2 (`#58585b`) with subtle transparency when needed.\n- **Primary text on dark**: Core White (`#ffffff`) or Pale Gray 1 (`#e8ebf1`).\n\n## 3. Typography Rules\n\n### Font Family\n- **Primary**: `CiscoSansTT`, fallbacks: `Inter, Arial, Helvetica Neue, Helvetica, sans-serif`\n- **Mono / Technical**: `IBM Plex Mono`, `SF Mono`, or `ui-monospace` if a code-supporting mono face is needed for metrics and IDs\n\n### Hierarchy\n\n| Role | Font | Size | Weight | Line Height | Letter Spacing | Notes |\n|------|------|------|--------|-------------|----------------|-------|\n| Hero Display | CiscoSansTT | 72px | 500 | 1.05 | -1.6px | Large launch/positioning headline |\n| Section Display | CiscoSansTT | 56px | 500 | 1.08 | -1.1px | Major section statement |\n| Heading | CiscoSansTT | 32px | 500 | 1.20 | -0.4px | Feature title, card header |\n| Subheading | CiscoSansTT | 24px | 500 | 1.30 | -0.2px | Supporting header |\n| Body | CiscoSansTT | 16px | 400 | 1.55 | normal | Default body copy |\n| Body Small | CiscoSansTT | 14px | 400 | 1.50 | normal | Metadata, nav, helper text |\n| Label / Eyebrow | CiscoSansTT | 12px | 700 | 1.30 | 0.24px | Tags, overlines, section labels |\n| Button | CiscoSansTT | 16px | 500 | 1.20 | normal | CTA labels |\n\n### Principles\n- Keep display typography decisive and compressed, but not ultra-light or editorial.\n- Body copy should be practical and highly legible, with no clever type effects.\n- Use bold weight mainly for short labels, status tags, and compact emphasis.\n- Favor one-family coherence over showy font mixing.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary Action Pill**\n- Background: Cisco Indigo (`#005073`)\n- Text: White (`#ffffff`)\n- Radius: full pill\n- Padding: generous horizontal padding, medium vertical height\n- Hover: Dark Blue (`#2b5592`)\n- Active: a darker indigo tone around `#00364d`\n- Focus ring: 2px outer halo in Status Blue (`#64bbe3`) with a 1px white inner keyline on dark surfaces\n- Use case: high-priority submit, deploy, or \"learn more\" action on dark Cisco surfaces\n\n**Signal Outline Pill**\n- Background: transparent\n- Text: Cisco Blue (`#049fd9`) on dark surfaces, Cisco Indigo (`#005073`) on light surfaces\n- Border: 1.5px Cisco Blue (`#049fd9`)\n- Radius: full pill\n- Hover: blue-tinted surface fill with the text color preserved\n- Focus ring: same visible halo pairing as the primary button\n- Use case: brand-forward secondary action that keeps Cisco Blue prominent without sacrificing contrast\n\n**Secondary Dark Pill**\n- Background: transparent or dark surface\n- Text: White or Pale Gray 1\n- Border: Dark Gray 2 (`#58585b`)\n- Radius: full pill\n- Purpose: low-noise secondary CTA\n\n### Cards & Containers\n- Background: layered dark surface based on `#39393b` or a cooler navy-charcoal adaptation\n- Border: 1px subtle border using `#58585b`\n- Radius: 16px to 20px\n- Shadow: minimal; depth should come mostly from surface contrast and spacing\n\n### Navigation\n- Dark glass-like masthead or shell over a dark hero\n- Text: White / Pale Gray 1\n- Active state: Cisco Blue underline, chip, or glow\n- Navigation should feel like product chrome, not marketing candy\n\n### Data / Product Modules\n- Charts and diagrams should use Cisco Blue as primary highlight and keep supporting colors minimal\n- Use green/yellow/red only for actual operational meaning\n- Dense technical blocks should still preserve breathing room and hierarchy\n\n### Brand-Specific Recipes\n\n**Network Telemetry Card**\n- Anatomy: eyebrow label, large metric, delta chip, 12-24h sparkline, quiet footer metadata\n- Density: compact but not cramped; 16px-24px padding with clear alignment to chart axes\n- States: normal, selected, degraded, critical, loading skeleton\n- Brand behavior: use Cisco Blue for the selected edge or sparkline, and semantic colors only for health state\n\n**Topology / Product Diagram Module**\n- Anatomy: title, system canvas, node chips, connection lines, side legend\n- Visual rule: dark field first, blue path highlight second, all other nodes muted until active\n- States: idle overview, hovered path, selected node, degraded route\n\n**Dense Control Panel**\n- Anatomy: left nav rail, filter bar, split metric region, log/event table, contextual right rail\n- Control sizing: compact 36px inputs are acceptable on desktop, but action buttons remain 44px minimum height\n- States: quiet default, blue active filter, clear warning/error escalation\n\n## 5. Layout Principles\n\n### Spacing & Grid\n- Base rhythm: 8px\n- Common scale: 8px, 12px, 16px, 24px, 32px, 48px, 64px, 96px\n- Prefer wide desktop containers and large sectional spacing\n- 12-column desktop layout with generous gutters works well for the brand\n- Breakpoints: mobile up to 767px, tablet 768px-1199px, desktop 1200px and above\n\n### Composition\n- Alternate expansive hero/outcome sections with denser information bands\n- Use asymmetry where it serves product imagery or system diagrams\n- Large dark fields with one blue focal point are more on-brand than many small colorful fragments\n- On tablet, reduce wide split layouts to 2-column modules and keep telemetry cards in pairs\n- On mobile, collapse hero side-by-sides to a single column, stack data panels vertically, and convert dense control rows into progressive disclosure panels\n- Navigation should collapse from a full masthead to a compact menu button plus one primary CTA on tablet/mobile\n\n### Accessibility & Responsiveness\n- Minimum touch target: 44px by 44px for any tappable control\n- Keyboard focus must remain visible on every interactive element via the blue outer halo plus white inner keyline pairing\n- Do not rely on hover-only disclosure; show essential state and actions on focus and touch\n- Preserve readable line lengths on desktop and avoid more than 3 cards per row on tablet or 1 card per row on small phones\n\n## 6. Motion & Interaction\n\n- Motion should be controlled, smooth, and systems-like\n- Use fade, rise, subtle slide, and restrained glow\n- Interaction timing: roughly 160ms–260ms for control response, 320ms–500ms for larger section reveals\n- Avoid bouncy springs, elastic easing, or playful overshoot\n- Respect `prefers-reduced-motion`: remove parallax and staged reveals, keep only instant state swaps or short opacity transitions under 120ms\n\n## 7. Voice & Brand\n\n- Voice is confident, technical, and outcome-oriented\n- Headlines should sound like platform positioning or systems value, not consumer lifestyle copy\n- Use language that suggests trust, resilience, infrastructure, AI readiness, and operational scale\n- The brand should feel global, mission-critical, and composed under pressure\n\n## 8. Anti-patterns\n\n- Do not turn Cisco into a generic gradient startup site\n- Do not flood the page with many equally loud accent colors\n- Do not use pastel palettes or lifestyle-illustration aesthetics\n- Do not use overly rounded, bubbly controls\n- Do not rely on pure black alone; use layered charcoals and deep blue-blacks instead\n- Do not make body copy feel whimsical, editorial, or ironic\n\n## 9. Agent Prompt Guide\n\n### Quick Color Reference\n- Primary signal: Cisco Blue (`#049fd9`)\n- Hover / secondary signal: Status Blue (`#64bbe3`)\n- Deep accent: Cisco Indigo (`#005073`)\n- Mid-dark surface: Dark Gray 1 (`#39393b`)\n- Border: Dark Gray 2 (`#58585b`)\n- Inverse text: White (`#ffffff`) or Pale Gray 1 (`#e8ebf1`)\n\n### Example Component Prompts\n- \"Create a Cisco-style dark enterprise landing page with layered navy-charcoal surfaces, a bright Cisco Blue primary CTA, and a 72px high-confidence hero headline.\"\n- \"Design a technical dashboard card on a dark surface with a subtle gray border, white text, and Cisco Blue chart highlights.\"\n- \"Build a dark glass navigation bar with restrained white labels and one Cisco Blue active indicator.\"\n"
+  }
+}

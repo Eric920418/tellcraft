@@ -1,0 +1,319 @@
+{
+  "styleKey": "github",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/github/DESIGN.md",
+    "sha256OfMd": "80ea326a67e80bc613a68b45c290bad3e3ddd4fd170a75393b6bf793bc5e7cc3",
+    "parsedAt": "2026-05-16T14:17:31.489Z"
+  },
+  "atmosphereKeywords": [
+    "github",
+    "surface",
+    "engineered",
+    "decorated",
+    "every",
+    "pixel",
+    "announces",
+    "stance",
+    "this",
+    "tool",
+    "people",
+    "care"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "github",
+      "generatedAt": 1778941051475
+    },
+    "visualTheme": {
+      "atmosphere": "GitHub's surface is engineered, not decorated. Every pixel announces a stance: this is a tool for people who care about diffs, builds, and pull requests. The page background is a clean `#ffffff` (light) or `#0d1117` (dark), with content arranged on dense rectangular panes separated by hairline borders rather than negative space. Information density is the brand — list rows, code lines, repository headers, and notification cards are all packed close together so a power user can scan a hundred items without scrolling.\n\nThe signature accents are the **Primer blue** (`#0969da`) for links and primary actions, and **GitHub green** (`#1a7f37`) for merged states, success, and the merge button itself. Both feel slightly muted compared to consumer-product blues and greens — saturated enough to read against the dense gray text, restrained enough to disappear into the background when several appear in one viewport.\n\nTypography uses the **system-ui** stack across the entire product so text renders crisply on every OS, paired with **SFMono / Menlo / Consolas** for code. There is no editorial display font; GitHub's voice is the voice of the system you're already on."
+    },
+    "colorPalette": {
+      "primary": [
+        {
+          "name": "Canvas Default",
+          "value": "#ffffff",
+          "role": "Primary page background, light theme."
+        },
+        {
+          "name": "Canvas Subtle",
+          "value": "#f6f8fa",
+          "role": "Secondary surface, sidebar, input background, header strip."
+        },
+        {
+          "name": "Canvas Inset",
+          "value": "#eaeef2",
+          "role": "Code block background, deep-inset surface."
+        },
+        {
+          "name": "Fg Default",
+          "value": "#1f2328",
+          "role": "Primary text, headlines, ink."
+        },
+        {
+          "name": "Fg Muted",
+          "value": "#656d76",
+          "role": "Secondary text, captions, file paths."
+        }
+      ],
+      "brand": [
+        {
+          "name": "Primer Blue",
+          "value": "#0969da",
+          "role": "Links, primary CTAs, focus ring base — the universal interactive color."
+        },
+        {
+          "name": "Primer Blue Hover",
+          "value": "#0550ae",
+          "role": "Hover/pressed for primary blue."
+        },
+        {
+          "name": "Accent Subtle",
+          "value": "#ddf4ff",
+          "role": "Soft blue surface for callouts, info banners."
+        }
+      ],
+      "accent": [
+        {
+          "name": "Success / Merge Green",
+          "value": "#1a7f37",
+          "role": "Merged PRs, success badges, merge button."
+        },
+        {
+          "name": "Success Subtle",
+          "value": "#dafbe1",
+          "role": "Success surface tint."
+        },
+        {
+          "name": "Open Green",
+          "value": "#1a7f37",
+          "role": "\"Open\" issue/PR state."
+        },
+        {
+          "name": "Closed / Danger Red",
+          "value": "#cf222e",
+          "role": "Closed PRs, destructive action, validation error."
+        },
+        {
+          "name": "Danger Subtle",
+          "value": "#ffebe9",
+          "role": "Error banner surface."
+        },
+        {
+          "name": "Attention / Warning Yellow",
+          "value": "#9a6700",
+          "role": "Warning text on amber surface."
+        },
+        {
+          "name": "Attention Subtle",
+          "value": "#fff8c5",
+          "role": "Warning banner surface."
+        },
+        {
+          "name": "Done Purple",
+          "value": "#8250df",
+          "role": "Merged-and-archived, \"done\" state, premium badge."
+        },
+        {
+          "name": "Sponsor Pink",
+          "value": "#bf3989",
+          "role": "Sponsors heart, GitHub sponsors brand."
+        }
+      ],
+      "border": [
+        {
+          "name": "Border Default",
+          "value": "#d0d7de",
+          "role": "Standard hairline border, panel outline."
+        },
+        {
+          "name": "Border Muted",
+          "value": "#d8dee4",
+          "role": "Inner dividers within a panel."
+        },
+        {
+          "name": "Border Subtle",
+          "value": "#eaeef2",
+          "role": "Faint table row dividers."
+        }
+      ],
+      "other": [
+        {
+          "name": "Dark Canvas",
+          "value": "#0d1117",
+          "role": "Dark page background."
+        },
+        {
+          "name": "Dark Surface",
+          "value": "#161b22",
+          "role": "Sidebar, header, secondary surface."
+        },
+        {
+          "name": "Dark Border",
+          "value": "#30363d",
+          "role": "Standard dark-mode border."
+        },
+        {
+          "name": "Dark Fg",
+          "value": "#e6edf3",
+          "role": "Primary text on dark."
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Body / UI",
+      "monoFont": "Code / Mono",
+      "hierarchy": [
+        {
+          "role": "Display",
+          "font": "system-ui",
+          "size": "32px (2rem)",
+          "weight": "600",
+          "lineHeight": "1.25",
+          "letterSpacing": "-0.01em",
+          "notes": "Repo header, marketing hero"
+        },
+        {
+          "role": "H1",
+          "font": "system-ui",
+          "size": "24px (1.5rem)",
+          "weight": "600",
+          "lineHeight": "1.25",
+          "letterSpacing": "normal",
+          "notes": "Page heading"
+        },
+        {
+          "role": "H2",
+          "font": "system-ui",
+          "size": "20px (1.25rem)",
+          "weight": "600",
+          "lineHeight": "1.25",
+          "letterSpacing": "normal",
+          "notes": "Section heading"
+        },
+        {
+          "role": "H3",
+          "font": "system-ui",
+          "size": "16px (1rem)",
+          "weight": "600",
+          "lineHeight": "1.25",
+          "letterSpacing": "normal",
+          "notes": "Sub-section, panel header"
+        },
+        {
+          "role": "Body",
+          "font": "system-ui",
+          "size": "14px (0.875rem)",
+          "weight": "400",
+          "lineHeight": "1.5",
+          "letterSpacing": "normal",
+          "notes": "Default text size — not 16px"
+        },
+        {
+          "role": "Body Small",
+          "font": "system-ui",
+          "size": "12px (0.75rem)",
+          "weight": "400",
+          "lineHeight": "1.4",
+          "letterSpacing": "normal",
+          "notes": "Captions, file metadata"
+        },
+        {
+          "role": "Code",
+          "font": "SFMono",
+          "size": "12px (0.75rem)",
+          "weight": "400",
+          "lineHeight": "1.45",
+          "letterSpacing": "normal",
+          "notes": "Code blocks, diff"
+        },
+        {
+          "role": "Code Inline",
+          "font": "SFMono",
+          "size": "0.85em",
+          "weight": "400",
+          "lineHeight": "inherit",
+          "letterSpacing": "normal",
+          "notes": "Inline `code` spans"
+        }
+      ],
+      "principles": [
+        "GitHub's prose density is its identity. The product reads at 14px to fit more rows in a viewport.",
+        "400 for everything by default; 600 for headlines and emphasis. No 500, no 700.",
+        "never load a webfont for chrome — text must render instantly on slow connections."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary (Green)",
+          "properties": {
+            "background": "`#1f883d`",
+            "text": "`#ffffff`",
+            "border": "1px solid `rgba(31, 35, 40, 0.15)`",
+            "padding": "5px 16px",
+            "radius": "6px",
+            "shadow": "`0 1px 0 rgba(31,35,40,0.1)`",
+            "hover": "background `#1a7f37`",
+            "use": "\"Create repository\", \"Merge pull request\""
+          }
+        },
+        {
+          "name": "Default",
+          "properties": {
+            "background": "`#f6f8fa`",
+            "text": "`#1f2328`",
+            "border": "1px solid `#d0d7de`",
+            "padding": "5px 16px",
+            "radius": "6px",
+            "hover": "background `#f3f4f6`, border `#d0d7de`"
+          }
+        },
+        {
+          "name": "Outline (Blue Link Style)",
+          "properties": {
+            "background": "`#ffffff`",
+            "text": "`#0969da`",
+            "border": "1px solid `#d0d7de`",
+            "hover": "background `#0969da`, text `#ffffff`"
+          }
+        },
+        {
+          "name": "Danger",
+          "properties": {
+            "background": "`#ffffff`",
+            "text": "`#cf222e`",
+            "border": "1px solid `#d0d7de`",
+            "hover": "background `#a40e26`, text `#ffffff`, border `#a40e26`"
+          }
+        }
+      ],
+      "badges": [
+        {
+          "name": "Open",
+          "description": "background `#1a7f37`, text white, padding 4px 10px, radius 9999px.",
+          "properties": {}
+        },
+        {
+          "name": "Closed",
+          "description": "background `#cf222e`, text white.",
+          "properties": {}
+        },
+        {
+          "name": "Merged",
+          "description": "background `#8250df`, text white.",
+          "properties": {}
+        },
+        {
+          "name": "Draft",
+          "description": "background `#6e7781`, text white.",
+          "properties": {}
+        }
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by GitHub\n\n> Category: Developer Tools\n> Code-forward platform. Functional density, blue-on-white precision, Primer foundations.\n\n## 1. Visual Theme & Atmosphere\n\nGitHub's surface is engineered, not decorated. Every pixel announces a stance: this is a tool for people who care about diffs, builds, and pull requests. The page background is a clean `#ffffff` (light) or `#0d1117` (dark), with content arranged on dense rectangular panes separated by hairline borders rather than negative space. Information density is the brand — list rows, code lines, repository headers, and notification cards are all packed close together so a power user can scan a hundred items without scrolling.\n\nThe signature accents are the **Primer blue** (`#0969da`) for links and primary actions, and **GitHub green** (`#1a7f37`) for merged states, success, and the merge button itself. Both feel slightly muted compared to consumer-product blues and greens — saturated enough to read against the dense gray text, restrained enough to disappear into the background when several appear in one viewport.\n\nTypography uses the **system-ui** stack across the entire product so text renders crisply on every OS, paired with **SFMono / Menlo / Consolas** for code. There is no editorial display font; GitHub's voice is the voice of the system you're already on.\n\n**Key Characteristics:**\n- True white canvas (`#ffffff`) or deep navy-black (`#0d1117`) — no warmth, no tint\n- Hairline gray borders (`#d0d7de`) define every pane and panel\n- Primer blue (`#0969da`) for links/primary; GitHub green (`#1a7f37`) for success/merge\n- system-ui for prose; SFMono for code — no custom typeface\n- Dense list rows with minimal padding; whitespace is rare\n- Octicon iconography at 16px / 24px — single-stroke, geometric, consistent\n- Pill-shaped status badges with strong color semantics\n\n## 2. Color Palette & Roles\n\n### Primary\n- **Canvas Default** (`#ffffff`): Primary page background, light theme.\n- **Canvas Subtle** (`#f6f8fa`): Secondary surface, sidebar, input background, header strip.\n- **Canvas Inset** (`#eaeef2`): Code block background, deep-inset surface.\n- **Fg Default** (`#1f2328`): Primary text, headlines, ink.\n- **Fg Muted** (`#656d76`): Secondary text, captions, file paths.\n\n### Brand Accent\n- **Primer Blue** (`#0969da`): Links, primary CTAs, focus ring base — the universal interactive color.\n- **Primer Blue Hover** (`#0550ae`): Hover/pressed for primary blue.\n- **Accent Subtle** (`#ddf4ff`): Soft blue surface for callouts, info banners.\n\n### Semantic\n- **Success / Merge Green** (`#1a7f37`): Merged PRs, success badges, merge button.\n- **Success Subtle** (`#dafbe1`): Success surface tint.\n- **Open Green** (`#1a7f37`): \"Open\" issue/PR state.\n- **Closed / Danger Red** (`#cf222e`): Closed PRs, destructive action, validation error.\n- **Danger Subtle** (`#ffebe9`): Error banner surface.\n- **Attention / Warning Yellow** (`#9a6700`): Warning text on amber surface.\n- **Attention Subtle** (`#fff8c5`): Warning banner surface.\n- **Done Purple** (`#8250df`): Merged-and-archived, \"done\" state, premium badge.\n- **Sponsor Pink** (`#bf3989`): Sponsors heart, GitHub sponsors brand.\n\n### Border & Divider\n- **Border Default** (`#d0d7de`): Standard hairline border, panel outline.\n- **Border Muted** (`#d8dee4`): Inner dividers within a panel.\n- **Border Subtle** (`#eaeef2`): Faint table row dividers.\n\n### Dark Theme\n- **Dark Canvas** (`#0d1117`): Dark page background.\n- **Dark Surface** (`#161b22`): Sidebar, header, secondary surface.\n- **Dark Border** (`#30363d`): Standard dark-mode border.\n- **Dark Fg** (`#e6edf3`): Primary text on dark.\n\n## 3. Typography Rules\n\n### Font Family\n- **Body / UI**: `-apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans\", Helvetica, Arial, sans-serif`\n- **Code / Mono**: `ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace`\n- **Emoji**: `\"Apple Color Emoji\", \"Segoe UI Emoji\"`\n\n### Hierarchy\n\n| Role | Font | Size | Weight | Line Height | Letter Spacing | Notes |\n|------|------|------|--------|-------------|----------------|-------|\n| Display | system-ui | 32px (2rem) | 600 | 1.25 | -0.01em | Repo header, marketing hero |\n| H1 | system-ui | 24px (1.5rem) | 600 | 1.25 | normal | Page heading |\n| H2 | system-ui | 20px (1.25rem) | 600 | 1.25 | normal | Section heading |\n| H3 | system-ui | 16px (1rem) | 600 | 1.25 | normal | Sub-section, panel header |\n| Body | system-ui | 14px (0.875rem) | 400 | 1.5 | normal | Default text size — not 16px |\n| Body Small | system-ui | 12px (0.75rem) | 400 | 1.4 | normal | Captions, file metadata |\n| Code | SFMono | 12px (0.75rem) | 400 | 1.45 | normal | Code blocks, diff |\n| Code Inline | SFMono | 0.85em | 400 | inherit | normal | Inline `code` spans |\n\n### Principles\n- **14px body, not 16px**: GitHub's prose density is its identity. The product reads at 14px to fit more rows in a viewport.\n- **Weight binary**: 400 for everything by default; 600 for headlines and emphasis. No 500, no 700.\n- **System fonts always**: never load a webfont for chrome — text must render instantly on slow connections.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary (Green)**\n- Background: `#1f883d`\n- Text: `#ffffff`\n- Border: 1px solid `rgba(31, 35, 40, 0.15)`\n- Padding: 5px 16px\n- Radius: 6px\n- Shadow: `0 1px 0 rgba(31,35,40,0.1)`\n- Hover: background `#1a7f37`\n- Use: \"Create repository\", \"Merge pull request\"\n\n**Default**\n- Background: `#f6f8fa`\n- Text: `#1f2328`\n- Border: 1px solid `#d0d7de`\n- Padding: 5px 16px\n- Radius: 6px\n- Hover: background `#f3f4f6`, border `#d0d7de`\n\n**Outline (Blue Link Style)**\n- Background: `#ffffff`\n- Text: `#0969da`\n- Border: 1px solid `#d0d7de`\n- Hover: background `#0969da`, text `#ffffff`\n\n**Danger**\n- Background: `#ffffff`\n- Text: `#cf222e`\n- Border: 1px solid `#d0d7de`\n- Hover: background `#a40e26`, text `#ffffff`, border `#a40e26`\n\n### Cards / Boxes\n- Background: `#ffffff`\n- Border: 1px solid `#d0d7de`\n- Radius: 6px\n- Padding: 16px (header) + 16px (body)\n- Header has a `#f6f8fa` strip with bottom border.\n\n### Inputs\n- Background: `#ffffff`\n- Border: 1px solid `#d0d7de`\n- Radius: 6px\n- Padding: 5px 12px\n- Focus: border `#0969da`, ring `0 0 0 3px rgba(9,105,218,0.3)`\n\n### Status Pills (Issue / PR)\n- **Open**: background `#1a7f37`, text white, padding 4px 10px, radius 9999px.\n- **Closed**: background `#cf222e`, text white.\n- **Merged**: background `#8250df`, text white.\n- **Draft**: background `#6e7781`, text white.\n\n### Labels (Tags on Issues/PRs)\n- Padding: 0 7px\n- Radius: 9999px\n- Font: 12px / 500\n- Background and text are programmatic (label color → text computed for contrast).\n\n## 5. Spacing & Layout\n\n- **Base unit**: 4px. Spacing scale: 4, 8, 12, 16, 24, 32, 40, 48.\n- **Page max-width**: 1280px (`Container-xl`).\n- **Sidebar**: 296px on desktop, collapses below 1012px.\n- **Row padding**: 16px horizontal, 12px vertical (lists are dense by design).\n\n## 6. Motion\n\n- **Duration**: 80ms for hover; 200ms for menu/popover open.\n- **Easing**: `ease-out` for opens, `ease-in` for closes.\n- **Avoided**: page-load animation, parallax, persistent micro-interactions. Things appear; they do not perform.\n"
+  }
+}

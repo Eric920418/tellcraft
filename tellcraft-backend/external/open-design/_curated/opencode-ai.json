@@ -1,0 +1,294 @@
+{
+  "styleKey": "opencode-ai",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/opencode-ai/DESIGN.md",
+    "sha256OfMd": "beaa5092524e38e89825f4f59818e2b2dfdf86b6344c734c1fba3295d2d7bc90",
+    "parsedAt": "2026-05-16T14:17:31.490Z"
+  },
+  "atmosphereKeywords": [
+    "opencode",
+    "website",
+    "embodies",
+    "terminal",
+    "native",
+    "monospace",
+    "first",
+    "aesthetic",
+    "that",
+    "reflects",
+    "identity",
+    "open"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "opencode-ai",
+      "generatedAt": 1778941051481
+    },
+    "visualTheme": {
+      "atmosphere": "OpenCode's website embodies a terminal-native, monospace-first aesthetic that reflects its identity as an open source AI coding agent. The entire visual system is built on a stark dark-on-light contrast using a near-black background (`#201d1d`) with warm off-white text (`#fdfcfc`). This isn't a generic dark theme -- it's a warm, slightly reddish-brown dark that feels like a sophisticated terminal emulator rather than a cold IDE. The warm undertone in both the darks and lights (notice the subtle red channel in `#201d1d` -- rgb(32, 29, 29)) creates a cohesive, lived-in quality.\n\nBerkeley Mono is the sole typeface, establishing an unapologetic monospace identity. Every element -- headings, body text, buttons, navigation -- shares this single font family, creating a unified \"everything is code\" philosophy. The heading at 38px bold with 1.50 line-height is generous and readable, while body text at 16px with weight 500 provides a slightly heavier-than-normal reading weight that enhances legibility on screen. The monospace grid naturally enforces alignment and rhythm across the layout.\n\nThe color system is deliberately minimal. The primary palette consists of just three functional tones: the warm near-black (`#201d1d`), a medium warm gray (`#9a9898`), and a bright off-white (`#fdfcfc`). Semantic colors borrow from the Apple HIG palette -- blue accent (`#007aff`), red danger (`#ff3b30`), green success (`#30d158`), orange warning (`#ff9f0a`) -- giving the interface familiar, trustworthy signal colors without adding brand complexity. Borders use a subtle warm transparency (`rgba(15, 0, 0, 0.12)`) that ties into the warm undertone of the entire system."
+    },
+    "colorPalette": {
+      "primary": [
+        {
+          "name": "OpenCode Dark",
+          "value": "#201d1d",
+          "role": "Primary background, button fills, link text. A warm near-black with subtle reddish-brown warmth -- rgb(32, 29, 29)."
+        },
+        {
+          "name": "OpenCode Light",
+          "value": "#fdfcfc",
+          "role": "Primary text on dark surfaces, button text. A barely-warm off-white that avoids clinical pure white."
+        },
+        {
+          "name": "Mid Gray",
+          "value": "#9a9898",
+          "role": "Secondary text, muted links. A neutral warm gray that bridges dark and light."
+        }
+      ],
+      "accent": [
+        {
+          "name": "Accent Blue",
+          "value": "#007aff",
+          "role": "Primary accent, links, interactive highlights. Apple system blue."
+        },
+        {
+          "name": "Accent Blue Hover",
+          "value": "#0056b3",
+          "role": "Darker blue for hover states."
+        },
+        {
+          "name": "Accent Blue Active",
+          "value": "#004085",
+          "role": "Deepest blue for pressed/active states."
+        },
+        {
+          "name": "Danger Red",
+          "value": "#ff3b30",
+          "role": "Error states, destructive actions. Apple system red."
+        },
+        {
+          "name": "Danger Hover",
+          "value": "#d70015",
+          "role": "Darker red for hover on danger elements."
+        },
+        {
+          "name": "Danger Active",
+          "value": "#a50011",
+          "role": "Deepest red for pressed danger states."
+        },
+        {
+          "name": "Success Green",
+          "value": "#30d158",
+          "role": "Success states, positive feedback. Apple system green."
+        },
+        {
+          "name": "Warning Orange",
+          "value": "#ff9f0a",
+          "role": "Warning states, caution signals. Apple system orange."
+        },
+        {
+          "name": "Warning Hover",
+          "value": "#cc7f08",
+          "role": "Darker orange for hover on warning elements."
+        },
+        {
+          "name": "Warning Active",
+          "value": "#995f06",
+          "role": "Deepest orange for pressed warning states."
+        }
+      ],
+      "neutral": [
+        {
+          "name": "Text Muted",
+          "value": "#6e6e73",
+          "role": "Muted labels, disabled text, placeholder content."
+        },
+        {
+          "name": "Text Secondary",
+          "value": "#424245",
+          "role": "Secondary text on light backgrounds, captions."
+        }
+      ],
+      "border": [
+        {
+          "name": "Border Tab",
+          "value": "#9a9898",
+          "role": "Tab underline border, 2px solid bottom."
+        },
+        {
+          "name": "Border Outline",
+          "value": "#646262",
+          "role": "1px solid outline border for containers."
+        }
+      ],
+      "other": [
+        {
+          "name": "Dark Surface",
+          "value": "#302c2c",
+          "role": "Slightly lighter than primary dark, used for elevated surfaces and subtle differentiation."
+        },
+        {
+          "name": "Border Gray",
+          "value": "#646262",
+          "role": "Stronger borders, outline rings on interactive elements."
+        },
+        {
+          "name": "Light Surface",
+          "value": "#f1eeee",
+          "role": "Light mode surface, subtle background variation."
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Universal",
+      "hierarchy": [
+        {
+          "role": "Heading 1",
+          "size": "38px (2.38rem)",
+          "weight": "700",
+          "lineHeight": "1.50",
+          "notes": "Hero headlines, page titles"
+        },
+        {
+          "role": "Heading 2",
+          "size": "16px (1.00rem)",
+          "weight": "700",
+          "lineHeight": "1.50",
+          "notes": "Section titles, bold emphasis"
+        },
+        {
+          "role": "Body",
+          "size": "16px (1.00rem)",
+          "weight": "400",
+          "lineHeight": "1.50",
+          "notes": "Standard body text, paragraphs"
+        },
+        {
+          "role": "Body Medium",
+          "size": "16px (1.00rem)",
+          "weight": "500",
+          "lineHeight": "1.50",
+          "notes": "Links, button text, nav items"
+        },
+        {
+          "role": "Body Tight",
+          "size": "16px (1.00rem)",
+          "weight": "500",
+          "lineHeight": "1.00 (tight)",
+          "notes": "Compact labels, tab items"
+        },
+        {
+          "role": "Caption",
+          "size": "14px (0.88rem)",
+          "weight": "400",
+          "lineHeight": "2.00 (relaxed)",
+          "notes": "Footnotes, metadata, small labels"
+        }
+      ],
+      "principles": [
+        "Berkeley Mono is used exclusively. There is no typographic variation between display, body, and code -- everything speaks in the same monospace register. Hierarchy is achieved through size and weight alone.",
+        "700 for headings, 500 for interactive/medium emphasis, 400 for body text. Three weight levels create the entire hierarchy.",
+        "1.50 as the standard line-height gives text room to breathe within the monospace grid. The relaxed 2.00 line-height on captions creates clear visual separation.",
+        "Interactive elements (tabs, compact labels) use 1.00 line-height for dense, clickable targets."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary (Dark Fill)",
+          "properties": {
+            "background": "`#201d1d` (OpenCode Dark)",
+            "text": "`#fdfcfc` (OpenCode Light)",
+            "padding": "4px 20px",
+            "radius": "4px",
+            "font": "16px Berkeley Mono, weight 500, line-height 2.00 (relaxed)",
+            "outline": "`rgb(253, 252, 252) none 0px`",
+            "use": "Primary CTAs, main actions"
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "name": "Email Input",
+          "properties": {
+            "background": "`#f8f7f7` (light neutral)",
+            "text": "`#201d1d`",
+            "border": "`1px solid rgba(15, 0, 0, 0.12)`",
+            "padding": "20px",
+            "radius": "6px",
+            "font": "Berkeley Mono, standard size",
+            "use": "Form fields, email capture"
+          }
+        }
+      ],
+      "other": [
+        {
+          "name": "Default Link",
+          "properties": {
+            "color": "`#201d1d`",
+            "decoration": "underline 1px",
+            "font-weight": "500",
+            "use": "Primary text links in body content"
+          }
+        },
+        {
+          "name": "Light Link",
+          "properties": {
+            "color": "`#fdfcfc`",
+            "decoration": "none",
+            "use": "Links on dark backgrounds, navigation"
+          }
+        },
+        {
+          "name": "Muted Link",
+          "properties": {
+            "color": "`#9a9898`",
+            "decoration": "none",
+            "use": "Footer links, secondary navigation"
+          }
+        },
+        {
+          "name": "Tab Navigation",
+          "properties": {
+            "border-bottom": "`2px solid #9a9898` (active tab indicator)",
+            "font": "16px, weight 500, line-height 1.00",
+            "use": "Section switching, content filtering"
+          }
+        },
+        {
+          "name": "Terminal Hero",
+          "description": "Full-width dark terminal window as hero element; ASCII art / stylized logo within terminal frame; Monospace command examples with syntax highlighting; Reinforces the CLI-first identity of the product",
+          "properties": {}
+        },
+        {
+          "name": "Feature List",
+          "description": "Bulleted feature items with Berkeley Mono text; Weight 500 for feature names, 400 for descriptions; Tight vertical spacing between items; No cards or borders -- pure text layout",
+          "properties": {}
+        },
+        {
+          "name": "Email Capture",
+          "description": "Light background input (`#f8f7f7`) contrasting dark page; Generous 20px padding for comfortable typing; 6px radius -- the roundest element in the system; Newsletter/waitlist pattern",
+          "properties": {}
+        }
+      ]
+    },
+    "spacing": {
+      "scale": [
+        "8px",
+        "1px",
+        "8px",
+        "32px",
+        "8px"
+      ],
+      "borderRadius": [
+        "4px",
+        "6px"
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by OpenCode\n\n> Category: AI & LLM\n> AI coding platform. Developer-centric dark theme.\n\n## 1. Visual Theme & Atmosphere\n\nOpenCode's website embodies a terminal-native, monospace-first aesthetic that reflects its identity as an open source AI coding agent. The entire visual system is built on a stark dark-on-light contrast using a near-black background (`#201d1d`) with warm off-white text (`#fdfcfc`). This isn't a generic dark theme -- it's a warm, slightly reddish-brown dark that feels like a sophisticated terminal emulator rather than a cold IDE. The warm undertone in both the darks and lights (notice the subtle red channel in `#201d1d` -- rgb(32, 29, 29)) creates a cohesive, lived-in quality.\n\nBerkeley Mono is the sole typeface, establishing an unapologetic monospace identity. Every element -- headings, body text, buttons, navigation -- shares this single font family, creating a unified \"everything is code\" philosophy. The heading at 38px bold with 1.50 line-height is generous and readable, while body text at 16px with weight 500 provides a slightly heavier-than-normal reading weight that enhances legibility on screen. The monospace grid naturally enforces alignment and rhythm across the layout.\n\nThe color system is deliberately minimal. The primary palette consists of just three functional tones: the warm near-black (`#201d1d`), a medium warm gray (`#9a9898`), and a bright off-white (`#fdfcfc`). Semantic colors borrow from the Apple HIG palette -- blue accent (`#007aff`), red danger (`#ff3b30`), green success (`#30d158`), orange warning (`#ff9f0a`) -- giving the interface familiar, trustworthy signal colors without adding brand complexity. Borders use a subtle warm transparency (`rgba(15, 0, 0, 0.12)`) that ties into the warm undertone of the entire system.\n\n**Key Characteristics:**\n- Berkeley Mono as the sole typeface -- monospace everywhere, no sans-serif or serif voices\n- Warm near-black primary (`#201d1d`) with reddish-brown undertone, not pure black\n- Off-white text (`#fdfcfc`) with warm tint, not pure white\n- Minimal 4px border radius throughout -- sharp, utilitarian corners\n- 8px base spacing system scaling up to 96px\n- Apple HIG-inspired semantic colors (blue, red, green, orange)\n- Transparent warm borders using `rgba(15, 0, 0, 0.12)`\n- Email input with generous 20px padding and 6px radius -- the most generous component radius\n- Single button variant: dark background, light text, tight vertical padding (4px 20px)\n- Underlined links as default link style, reinforcing the text-centric identity\n\n## 2. Color Palette & Roles\n\n### Primary\n- **OpenCode Dark** (`#201d1d`): Primary background, button fills, link text. A warm near-black with subtle reddish-brown warmth -- rgb(32, 29, 29).\n- **OpenCode Light** (`#fdfcfc`): Primary text on dark surfaces, button text. A barely-warm off-white that avoids clinical pure white.\n- **Mid Gray** (`#9a9898`): Secondary text, muted links. A neutral warm gray that bridges dark and light.\n\n### Secondary\n- **Dark Surface** (`#302c2c`): Slightly lighter than primary dark, used for elevated surfaces and subtle differentiation.\n- **Border Gray** (`#646262`): Stronger borders, outline rings on interactive elements.\n- **Light Surface** (`#f1eeee`): Light mode surface, subtle background variation.\n\n### Accent\n- **Accent Blue** (`#007aff`): Primary accent, links, interactive highlights. Apple system blue.\n- **Accent Blue Hover** (`#0056b3`): Darker blue for hover states.\n- **Accent Blue Active** (`#004085`): Deepest blue for pressed/active states.\n\n### Semantic\n- **Danger Red** (`#ff3b30`): Error states, destructive actions. Apple system red.\n- **Danger Hover** (`#d70015`): Darker red for hover on danger elements.\n- **Danger Active** (`#a50011`): Deepest red for pressed danger states.\n- **Success Green** (`#30d158`): Success states, positive feedback. Apple system green.\n- **Warning Orange** (`#ff9f0a`): Warning states, caution signals. Apple system orange.\n- **Warning Hover** (`#cc7f08`): Darker orange for hover on warning elements.\n- **Warning Active** (`#995f06`): Deepest orange for pressed warning states.\n\n### Text Scale\n- **Text Muted** (`#6e6e73`): Muted labels, disabled text, placeholder content.\n- **Text Secondary** (`#424245`): Secondary text on light backgrounds, captions.\n\n### Border\n- **Border Warm** (`rgba(15, 0, 0, 0.12)`): Primary border color, warm transparent black with red tint.\n- **Border Tab** (`#9a9898`): Tab underline border, 2px solid bottom.\n- **Border Outline** (`#646262`): 1px solid outline border for containers.\n\n## 3. Typography Rules\n\n### Font Family\n- **Universal**: `Berkeley Mono`, with fallbacks: `IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace`\n\n### Hierarchy\n\n| Role | Size | Weight | Line Height | Notes |\n|------|------|--------|-------------|-------|\n| Heading 1 | 38px (2.38rem) | 700 | 1.50 | Hero headlines, page titles |\n| Heading 2 | 16px (1.00rem) | 700 | 1.50 | Section titles, bold emphasis |\n| Body | 16px (1.00rem) | 400 | 1.50 | Standard body text, paragraphs |\n| Body Medium | 16px (1.00rem) | 500 | 1.50 | Links, button text, nav items |\n| Body Tight | 16px (1.00rem) | 500 | 1.00 (tight) | Compact labels, tab items |\n| Caption | 14px (0.88rem) | 400 | 2.00 (relaxed) | Footnotes, metadata, small labels |\n\n### Principles\n- **One font, one voice**: Berkeley Mono is used exclusively. There is no typographic variation between display, body, and code -- everything speaks in the same monospace register. Hierarchy is achieved through size and weight alone.\n- **Weight as hierarchy**: 700 for headings, 500 for interactive/medium emphasis, 400 for body text. Three weight levels create the entire hierarchy.\n- **Generous line-height**: 1.50 as the standard line-height gives text room to breathe within the monospace grid. The relaxed 2.00 line-height on captions creates clear visual separation.\n- **Tight for interaction**: Interactive elements (tabs, compact labels) use 1.00 line-height for dense, clickable targets.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary (Dark Fill)**\n- Background: `#201d1d` (OpenCode Dark)\n- Text: `#fdfcfc` (OpenCode Light)\n- Padding: 4px 20px\n- Radius: 4px\n- Font: 16px Berkeley Mono, weight 500, line-height 2.00 (relaxed)\n- Outline: `rgb(253, 252, 252) none 0px`\n- Use: Primary CTAs, main actions\n\n### Inputs\n\n**Email Input**\n- Background: `#f8f7f7` (light neutral)\n- Text: `#201d1d`\n- Border: `1px solid rgba(15, 0, 0, 0.12)`\n- Padding: 20px\n- Radius: 6px\n- Font: Berkeley Mono, standard size\n- Use: Form fields, email capture\n\n### Links\n\n**Default Link**\n- Color: `#201d1d`\n- Decoration: underline 1px\n- Font-weight: 500\n- Use: Primary text links in body content\n\n**Light Link**\n- Color: `#fdfcfc`\n- Decoration: none\n- Use: Links on dark backgrounds, navigation\n\n**Muted Link**\n- Color: `#9a9898`\n- Decoration: none\n- Use: Footer links, secondary navigation\n\n### Tabs\n\n**Tab Navigation**\n- Border-bottom: `2px solid #9a9898` (active tab indicator)\n- Font: 16px, weight 500, line-height 1.00\n- Use: Section switching, content filtering\n\n### Navigation\n- Clean horizontal layout with Berkeley Mono throughout\n- Brand logotype left-aligned in monospace\n- Links at 16px weight 500 with underline decoration\n- Dark background matching page background\n- No backdrop blur or transparency -- solid surfaces only\n\n### Image Treatment\n- Terminal/code screenshots as hero imagery\n- Dark terminal aesthetic with monospace type\n- Minimal borders, content speaks for itself\n\n### Distinctive Components\n\n**Terminal Hero**\n- Full-width dark terminal window as hero element\n- ASCII art / stylized logo within terminal frame\n- Monospace command examples with syntax highlighting\n- Reinforces the CLI-first identity of the product\n\n**Feature List**\n- Bulleted feature items with Berkeley Mono text\n- Weight 500 for feature names, 400 for descriptions\n- Tight vertical spacing between items\n- No cards or borders -- pure text layout\n\n**Email Capture**\n- Light background input (`#f8f7f7`) contrasting dark page\n- Generous 20px padding for comfortable typing\n- 6px radius -- the roundest element in the system\n- Newsletter/waitlist pattern\n\n## 5. Layout Principles\n\n### Spacing System\n- Base unit: 8px\n- Fine scale: 1px, 2px, 4px (sub-8px for borders and micro-adjustments)\n- Standard scale: 8px, 12px, 16px, 20px, 24px\n- Extended scale: 32px, 40px, 48px, 64px, 80px, 96px\n- The system follows a clean 4/8px grid with consistent doubling\n\n### Grid & Container\n- Max content width: approximately 800-900px (narrow, reading-optimized)\n- Single-column layout as the primary pattern\n- Centered content with generous horizontal margins\n- Hero section: full-width dark terminal element\n- Feature sections: single-column text blocks\n- Footer: multi-column link grid\n\n### Whitespace Philosophy\n- **Monospace rhythm**: The fixed-width nature of Berkeley Mono creates a natural vertical grid. Line-heights of 1.50 and 2.00 maintain consistent rhythm.\n- **Narrow and focused**: Content is constrained to a narrow column, creating generous side margins that focus attention on the text.\n- **Sections through spacing**: No decorative dividers. Sections are separated by generous vertical spacing (48-96px) rather than borders or background changes.\n\n### Border Radius Scale\n- Micro (4px): Default for all elements -- buttons, containers, badges\n- Input (6px): Form inputs get slightly more roundness\n- The entire system uses just two radius values, reinforcing the utilitarian aesthetic\n\n## 6. Depth & Elevation\n\n| Level | Treatment | Use |\n|-------|-----------|-----|\n| Flat (Level 0) | No shadow, no border | Default state for most elements |\n| Border Subtle (Level 1) | `1px solid rgba(15, 0, 0, 0.12)` | Section dividers, input borders, horizontal rules |\n| Border Tab (Level 2) | `2px solid #9a9898` bottom only | Active tab indicator |\n| Border Outline (Level 3) | `1px solid #646262` | Container outlines, elevated elements |\n\n**Shadow Philosophy**: OpenCode's depth system is intentionally flat. There are no box-shadows in the extracted tokens -- zero shadow values were detected. Depth is communicated exclusively through border treatments and background color shifts. This flatness is consistent with the terminal aesthetic: terminals don't have shadows, and neither does OpenCode. The three border levels (transparent warm, tab indicator, solid outline) create sufficient visual hierarchy without any elevation illusion.\n\n### Decorative Depth\n- Background color shifts between `#201d1d` and `#302c2c` create subtle surface differentiation\n- Transparent borders at 12% opacity provide barely-visible structure\n- The warm reddish tint in border colors (`rgba(15, 0, 0, 0.12)`) ties borders to the overall warm dark palette\n- No gradients, no blurs, no ambient effects -- pure flat terminal aesthetic\n\n## 7. Interaction & Motion\n\n### Hover States\n- Links: color shift from default to accent blue (`#007aff`) or underline style change\n- Buttons: subtle background lightening or border emphasis\n- Accent blue provides a three-stage hover sequence: `#007aff` → `#0056b3` → `#004085` (default → hover → active)\n- Danger red: `#ff3b30` → `#d70015` → `#a50011`\n- Warning orange: `#ff9f0a` → `#cc7f08` → `#995f06`\n\n### Focus States\n- Border-based focus: increased border opacity or solid border color\n- No shadow-based focus rings -- consistent with the flat, no-shadow aesthetic\n- Keyboard focus likely uses outline or border color shift to accent blue\n\n### Transitions\n- Minimal transitions expected -- terminal-inspired interfaces favor instant state changes\n- Color transitions: 100-150ms for subtle state feedback\n- No scale, rotate, or complex transform animations\n\n## 8. Responsive Behavior\n\n### Breakpoints\n| Name | Width | Key Changes |\n|------|-------|-------------|\n| Mobile | <640px | Single column, reduced padding, heading scales down |\n| Tablet | 640-1024px | Content width expands, slight padding increase |\n| Desktop | >1024px | Full content width (~800-900px centered), maximum whitespace |\n\n### Touch Targets\n- Buttons with 4px 20px padding provide adequate horizontal touch area\n- Input fields with 20px padding ensure comfortable mobile typing\n- Tab items at 16px with tight line-height may need mobile adaptation\n\n### Collapsing Strategy\n- Hero heading: 38px → 28px → 24px on smaller screens\n- Navigation: horizontal links → hamburger/drawer on mobile\n- Feature lists: maintain single-column, reduce horizontal padding\n- Terminal hero: maintain full-width, reduce internal padding\n- Footer columns: multi-column → stacked single column\n- Section spacing: 96px → 64px → 48px on mobile\n\n### Image Behavior\n- Terminal screenshots maintain aspect ratio and border treatment\n- Full-width elements scale proportionally\n- Monospace type maintains readability at all sizes due to fixed-width nature\n\n## 9. Agent Prompt Guide\n\n### Quick Color Reference\n- Page background: `#201d1d` (warm near-black)\n- Primary text: `#fdfcfc` (warm off-white)\n- Secondary text: `#9a9898` (warm gray)\n- Muted text: `#6e6e73`\n- Accent: `#007aff` (blue)\n- Danger: `#ff3b30` (red)\n- Success: `#30d158` (green)\n- Warning: `#ff9f0a` (orange)\n- Button bg: `#201d1d`, button text: `#fdfcfc`\n- Border: `rgba(15, 0, 0, 0.12)` (warm transparent)\n- Input bg: `#f8f7f7`, input border: `rgba(15, 0, 0, 0.12)`\n\n### Example Component Prompts\n- \"Create a hero section on `#201d1d` warm dark background. Headline at 38px Berkeley Mono weight 700, line-height 1.50, color `#fdfcfc`. Subtitle at 16px weight 400, color `#9a9898`. Primary CTA button (`#201d1d` bg with `1px solid #646262` border, 4px radius, 4px 20px padding, `#fdfcfc` text at weight 500).\"\n- \"Design a feature list: single-column on `#201d1d` background. Feature name at 16px Berkeley Mono weight 700, color `#fdfcfc`. Description at 16px weight 400, color `#9a9898`. No cards, no borders -- pure text with 16px vertical gap between items.\"\n- \"Build an email capture form: `#f8f7f7` background input, `1px solid rgba(15, 0, 0, 0.12)` border, 6px radius, 20px padding. Adjacent dark button (`#201d1d` bg, `#fdfcfc` text, 4px radius, 4px 20px padding). Berkeley Mono throughout.\"\n- \"Create navigation: sticky `#201d1d` background. 16px Berkeley Mono weight 500 for links, `#fdfcfc` text. Brand name left-aligned in monospace. Links with underline decoration. No blur, no transparency -- solid dark surface.\"\n- \"Design a footer: `#201d1d` background, multi-column link grid. Links at 16px Berkeley Mono weight 400, color `#9a9898`. Section headers at weight 700. Border-top `1px solid rgba(15, 0, 0, 0.12)` separator.\"\n\n### Iteration Guide\n1. Berkeley Mono is the only font -- never introduce a second typeface. Size and weight create all hierarchy.\n2. Keep surfaces flat: no shadows, no gradients, no blur effects. Use borders and background shifts only.\n3. The warm undertone matters: use `#201d1d` not `#000000`, use `#fdfcfc` not `#ffffff`. The reddish warmth is subtle but essential.\n4. Border radius is 4px everywhere except inputs (6px). Never use rounded pills or large radii.\n5. Semantic colors follow Apple HIG: `#007aff` blue, `#ff3b30` red, `#30d158` green, `#ff9f0a` orange. Each has hover and active darkened variants.\n6. Three-stage interaction: default → hover (darkened) → active (deeply darkened) for all semantic colors.\n7. Borders use `rgba(15, 0, 0, 0.12)` -- a warm transparent dark, not neutral gray. This ties borders to the warm palette.\n8. Spacing follows an 8px grid: 8, 16, 24, 32, 40, 48, 64, 80, 96px. Use 4px for fine adjustments only.\n"
+  }
+}

@@ -1,0 +1,289 @@
+{
+  "styleKey": "huggingface",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/huggingface/DESIGN.md",
+    "sha256OfMd": "05c7db306e32965ec1407f886808b17c2ef38e537186df825d3373481ab5f240",
+    "parsedAt": "2026-05-16T14:17:31.489Z"
+  },
+  "atmosphereKeywords": [
+    "hugging",
+    "face",
+    "rare",
+    "brand",
+    "that",
+    "refuses",
+    "look",
+    "serious",
+    "leans",
+    "into",
+    "sunshine",
+    "yellow"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "huggingface",
+      "generatedAt": 1778941051476
+    },
+    "visualTheme": {
+      "atmosphere": "Hugging Face is the rare ML brand that refuses to look serious. The hub leans into a sunshine-yellow accent (`#ffd21e`), a cartoon hugging-face emoji as the logo, and a confident **IBM Plex Mono** voice that reads more like a community zine than a research lab. The page background is a clean off-white (`#fafafa`) with text in a deep slate (`#0d1117`), and the yellow appears in pull quotes, tags, \"new\" badges, and the model-card header strip — never as an entire surface, always as punctuation.\n\nThe typographic system is monospace-forward in a way few product brands attempt: **IBM Plex Mono** for headings and tags, **Source Sans Pro** (or Inter) for body. The mix gives every page a \"config file is the README\" vibe — fitting for a platform built around `.gitattributes` and `model-card.md`.\n\nShapes are crisp, not soft: 4–6px radii, 1px solid borders that announce themselves rather than hide. Tables are dense, with row hover in a faint gray (`#f3f4f6`). The brand emoji punctuates everything — chips, headings, even error states wear a 🤗 — so the system feels human even when displaying technical data."
+    },
+    "colorPalette": {
+      "primary": [
+        {
+          "name": "HF Yellow",
+          "value": "#ffd21e",
+          "role": "Brand primary, badges, \"new\" pill, model-card header bar."
+        },
+        {
+          "name": "HF Yellow Deep",
+          "value": "#f59e0b",
+          "role": "Hover/active for yellow."
+        },
+        {
+          "name": "HF Yellow Soft",
+          "value": "#fff4cc",
+          "role": "Surface tint, callout background."
+        }
+      ],
+      "accent": [
+        {
+          "name": "Success",
+          "value": "#16a34a",
+          "role": "Build succeeded, deploy live."
+        },
+        {
+          "name": "Warning",
+          "value": "#f59e0b",
+          "role": "Slow inference, rate limit."
+        },
+        {
+          "name": "Error",
+          "value": "#dc2626",
+          "role": "Failed build, broken model."
+        },
+        {
+          "name": "Info",
+          "value": "#2563eb",
+          "role": "Notice banner."
+        }
+      ],
+      "surface": [
+        {
+          "name": "Canvas",
+          "value": "#ffffff",
+          "role": "Primary page background."
+        },
+        {
+          "name": "Canvas Subtle",
+          "value": "#fafafa",
+          "role": "Alternate section background, footer."
+        },
+        {
+          "name": "Canvas Inset",
+          "value": "#f3f4f6",
+          "role": "Code block background, hover row."
+        },
+        {
+          "name": "Canvas Dark",
+          "value": "#0d1117",
+          "role": "Dark theme background."
+        }
+      ],
+      "border": [
+        {
+          "name": "Border Default",
+          "value": "#e5e7eb",
+          "role": "Standard 1px hairline."
+        },
+        {
+          "name": "Border Strong",
+          "value": "#d1d5db",
+          "role": "Emphasized border on hover."
+        },
+        {
+          "name": "Border Subtle",
+          "value": "#f3f4f6",
+          "role": "Inner divider."
+        }
+      ],
+      "other": [
+        {
+          "name": "Ink Primary",
+          "value": "#0d1117",
+          "role": "Primary text, headings."
+        },
+        {
+          "name": "Ink Secondary",
+          "value": "#374151",
+          "role": "Body prose."
+        },
+        {
+          "name": "Ink Muted",
+          "value": "#6b7280",
+          "role": "Captions, file paths, model authors."
+        },
+        {
+          "name": "Ink Inverse",
+          "value": "#f9fafb",
+          "role": "Text on dark surface."
+        },
+        {
+          "name": "NLP Blue",
+          "value": "#2563eb",
+          "role": "Text/NLP task badges."
+        },
+        {
+          "name": "Vision Green",
+          "value": "#16a34a",
+          "role": "Computer-vision task badges."
+        },
+        {
+          "name": "Audio Purple",
+          "value": "#9333ea",
+          "role": "Audio/speech task badges."
+        },
+        {
+          "name": "Multimodal Pink",
+          "value": "#db2777",
+          "role": "Multimodal/diffusion task badges."
+        },
+        {
+          "name": "Tabular Orange",
+          "value": "#ea580c",
+          "role": "Tabular/structured task badges."
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Display / UI / Headings / Tags",
+      "hierarchy": [
+        {
+          "role": "Display",
+          "font": "IBM Plex Mono",
+          "size": "48px (3rem)",
+          "weight": "600",
+          "lineHeight": "1.1",
+          "letterSpacing": "-0.01em",
+          "notes": "Marketing hero"
+        },
+        {
+          "role": "H1",
+          "font": "IBM Plex Mono",
+          "size": "32px (2rem)",
+          "weight": "600",
+          "lineHeight": "1.2",
+          "letterSpacing": "normal",
+          "notes": "Page heading, model name"
+        },
+        {
+          "role": "H2",
+          "font": "IBM Plex Mono",
+          "size": "24px (1.5rem)",
+          "weight": "600",
+          "lineHeight": "1.25",
+          "letterSpacing": "normal",
+          "notes": "Section heading"
+        },
+        {
+          "role": "H3",
+          "font": "IBM Plex Mono",
+          "size": "18px (1.125rem)",
+          "weight": "600",
+          "lineHeight": "1.3",
+          "letterSpacing": "normal",
+          "notes": "Sub-section"
+        },
+        {
+          "role": "Body Large",
+          "font": "Source Sans Pro",
+          "size": "18px (1.125rem)",
+          "weight": "400",
+          "lineHeight": "1.6",
+          "letterSpacing": "normal",
+          "notes": "Lede, blog intro"
+        },
+        {
+          "role": "Body",
+          "font": "Source Sans Pro",
+          "size": "15px (0.9375rem)",
+          "weight": "400",
+          "lineHeight": "1.55",
+          "letterSpacing": "normal",
+          "notes": "Standard prose, model card"
+        },
+        {
+          "role": "Caption",
+          "font": "Source Sans Pro",
+          "size": "13px (0.8125rem)",
+          "weight": "500",
+          "lineHeight": "1.4",
+          "letterSpacing": "0.01em",
+          "notes": "Author byline, timestamp"
+        },
+        {
+          "role": "Tag / Badge",
+          "font": "IBM Plex Mono",
+          "size": "12px (0.75rem)",
+          "weight": "500",
+          "lineHeight": "1.2",
+          "letterSpacing": "0.02em",
+          "notes": "Task tags, framework chips"
+        },
+        {
+          "role": "Code",
+          "font": "IBM Plex Mono",
+          "size": "14px (0.875rem)",
+          "weight": "400",
+          "lineHeight": "1.55",
+          "letterSpacing": "normal",
+          "notes": "Code blocks, inline `model_id`"
+        }
+      ],
+      "principles": [
+        "nav links, headings, tags, and metadata are all monospaced. Sans is reserved for paragraphs of prose.",
+        "600 is the cap; 700 is too loud against yellow. Hierarchy is size and color.",
+        "model tags use mono so they look like the strings developers will paste into Python."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary",
+          "properties": {
+            "background": "`#0d1117`",
+            "text": "`#ffffff`",
+            "padding": "8px 16px",
+            "radius": "6px",
+            "hover": "`#374151`",
+            "use": "\"Use this model\", primary forms."
+          }
+        },
+        {
+          "name": "Yellow CTA",
+          "properties": {
+            "background": "`#ffd21e`",
+            "text": "`#0d1117`",
+            "padding": "8px 16px",
+            "radius": "6px",
+            "hover": "`#f59e0b`",
+            "use": "\"Pro upgrade\", \"Sponsor\"."
+          }
+        },
+        {
+          "name": "Outline",
+          "properties": {
+            "background": "`#ffffff`",
+            "text": "`#0d1117`",
+            "border": "1px solid `#e5e7eb`",
+            "hover": "background `#f3f4f6`"
+          }
+        }
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by Hugging Face\n\n> Category: AI & LLM\n> ML community hub. Sunny yellow accent, monospace identity, cheerful and dense.\n\n## 1. Visual Theme & Atmosphere\n\nHugging Face is the rare ML brand that refuses to look serious. The hub leans into a sunshine-yellow accent (`#ffd21e`), a cartoon hugging-face emoji as the logo, and a confident **IBM Plex Mono** voice that reads more like a community zine than a research lab. The page background is a clean off-white (`#fafafa`) with text in a deep slate (`#0d1117`), and the yellow appears in pull quotes, tags, \"new\" badges, and the model-card header strip — never as an entire surface, always as punctuation.\n\nThe typographic system is monospace-forward in a way few product brands attempt: **IBM Plex Mono** for headings and tags, **Source Sans Pro** (or Inter) for body. The mix gives every page a \"config file is the README\" vibe — fitting for a platform built around `.gitattributes` and `model-card.md`.\n\nShapes are crisp, not soft: 4–6px radii, 1px solid borders that announce themselves rather than hide. Tables are dense, with row hover in a faint gray (`#f3f4f6`). The brand emoji punctuates everything — chips, headings, even error states wear a 🤗 — so the system feels human even when displaying technical data.\n\n**Key Characteristics:**\n- Sunshine yellow `#ffd21e` as the lone saturated accent\n- IBM Plex Mono for headings and tags; Source Sans Pro for body\n- Off-white canvas (`#fafafa`) with crisp 1px borders (`#e5e7eb`)\n- 4–6px radii — closer to brutalist than rounded\n- Hugging-face emoji 🤗 used unironically as a system glyph\n- Dense tables, minimal padding — a community hub for power users\n- Color-coded model categories (NLP blue, vision green, audio purple)\n\n## 2. Color Palette & Roles\n\n### Primary\n- **HF Yellow** (`#ffd21e`): Brand primary, badges, \"new\" pill, model-card header bar.\n- **HF Yellow Deep** (`#f59e0b`): Hover/active for yellow.\n- **HF Yellow Soft** (`#fff4cc`): Surface tint, callout background.\n\n### Surface & Background\n- **Canvas** (`#ffffff`): Primary page background.\n- **Canvas Subtle** (`#fafafa`): Alternate section background, footer.\n- **Canvas Inset** (`#f3f4f6`): Code block background, hover row.\n- **Canvas Dark** (`#0d1117`): Dark theme background.\n\n### Ink & Text\n- **Ink Primary** (`#0d1117`): Primary text, headings.\n- **Ink Secondary** (`#374151`): Body prose.\n- **Ink Muted** (`#6b7280`): Captions, file paths, model authors.\n- **Ink Inverse** (`#f9fafb`): Text on dark surface.\n\n### Category Accents (Model Tasks)\n- **NLP Blue** (`#2563eb`): Text/NLP task badges.\n- **Vision Green** (`#16a34a`): Computer-vision task badges.\n- **Audio Purple** (`#9333ea`): Audio/speech task badges.\n- **Multimodal Pink** (`#db2777`): Multimodal/diffusion task badges.\n- **Tabular Orange** (`#ea580c`): Tabular/structured task badges.\n\n### Semantic\n- **Success** (`#16a34a`): Build succeeded, deploy live.\n- **Warning** (`#f59e0b`): Slow inference, rate limit.\n- **Error** (`#dc2626`): Failed build, broken model.\n- **Info** (`#2563eb`): Notice banner.\n\n### Border\n- **Border Default** (`#e5e7eb`): Standard 1px hairline.\n- **Border Strong** (`#d1d5db`): Emphasized border on hover.\n- **Border Subtle** (`#f3f4f6`): Inner divider.\n\n## 3. Typography Rules\n\n### Font Family\n- **Display / UI / Headings / Tags**: `IBM Plex Mono`, with fallback: `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`\n- **Body / Prose**: `Source Sans Pro`, with fallback: `Inter, system-ui, -apple-system, sans-serif`\n- **Editorial (rare, blog only)**: `Source Serif Pro`, with fallback: `Georgia, serif`\n\n### Hierarchy\n\n| Role | Font | Size | Weight | Line Height | Letter Spacing | Notes |\n|------|------|------|--------|-------------|----------------|-------|\n| Display | IBM Plex Mono | 48px (3rem) | 600 | 1.1 | -0.01em | Marketing hero |\n| H1 | IBM Plex Mono | 32px (2rem) | 600 | 1.2 | normal | Page heading, model name |\n| H2 | IBM Plex Mono | 24px (1.5rem) | 600 | 1.25 | normal | Section heading |\n| H3 | IBM Plex Mono | 18px (1.125rem) | 600 | 1.3 | normal | Sub-section |\n| Body Large | Source Sans Pro | 18px (1.125rem) | 400 | 1.6 | normal | Lede, blog intro |\n| Body | Source Sans Pro | 15px (0.9375rem) | 400 | 1.55 | normal | Standard prose, model card |\n| Caption | Source Sans Pro | 13px (0.8125rem) | 500 | 1.4 | 0.01em | Author byline, timestamp |\n| Tag / Badge | IBM Plex Mono | 12px (0.75rem) | 500 | 1.2 | 0.02em | Task tags, framework chips |\n| Code | IBM Plex Mono | 14px (0.875rem) | 400 | 1.55 | normal | Code blocks, inline `model_id` |\n\n### Principles\n- **Mono everywhere it matters**: nav links, headings, tags, and metadata are all monospaced. Sans is reserved for paragraphs of prose.\n- **Weight under 600**: 600 is the cap; 700 is too loud against yellow. Hierarchy is size and color.\n- **Tags read as code**: model tags use mono so they look like the strings developers will paste into Python.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary**\n- Background: `#0d1117`\n- Text: `#ffffff`\n- Padding: 8px 16px\n- Radius: 6px\n- Hover: `#374151`\n- Use: \"Use this model\", primary forms.\n\n**Yellow CTA**\n- Background: `#ffd21e`\n- Text: `#0d1117`\n- Padding: 8px 16px\n- Radius: 6px\n- Hover: `#f59e0b`\n- Use: \"Pro upgrade\", \"Sponsor\".\n\n**Outline**\n- Background: `#ffffff`\n- Text: `#0d1117`\n- Border: 1px solid `#e5e7eb`\n- Hover: background `#f3f4f6`\n\n### Cards / Model Cards\n- Background: `#ffffff`\n- Border: 1px solid `#e5e7eb`\n- Radius: 6px\n- Padding: 16px 20px\n- Header strip: `#ffd21e` background, 4px tall, only on featured model cards.\n\n### Inputs\n- Background: `#ffffff`\n- Border: 1px solid `#e5e7eb`\n- Radius: 6px\n- Padding: 8px 12px\n- Focus: border `#0d1117`, ring `0 0 0 3px rgba(13,17,23,0.1)`\n\n### Tags / Chips (Task / Framework)\n- Background: category-tinted soft (`#dbeafe` for NLP, `#dcfce7` for vision, etc.)\n- Text: matching strong category color.\n- Padding: 2px 8px\n- Radius: 4px\n- Font: IBM Plex Mono 12px / 500\n\n### Tables\n- Header: background `#fafafa`, border-bottom 1px `#e5e7eb`.\n- Row: border-bottom 1px `#f3f4f6`, hover `#f3f4f6`.\n- Padding: 8px 16px per cell — dense by design.\n\n## 5. Spacing & Layout\n\n- **Base unit**: 4px. Scale: 4, 8, 12, 16, 24, 32, 48, 64.\n- **Container**: max 1280px, 24px gutter.\n- **Sidebar (model browser)**: 280px wide.\n- **Section rhythm**: 64–96px vertical between major sections.\n\n## 6. Motion\n\n- **Duration**: 120ms for hover; 200ms for menu open.\n- **Easing**: `ease-out`.\n- **Tag pop**: a 1.05× scale on hover at 120ms — the only exception to flat-on-hover.\n"
+  }
+}

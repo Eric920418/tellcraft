@@ -1,0 +1,294 @@
+{
+  "styleKey": "canva",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/canva/DESIGN.md",
+    "sha256OfMd": "0dd369bc89b510773c577d494eb7f4e7c6363444a900198d2e99c2d670c16b56",
+    "parsedAt": "2026-05-16T14:17:31.488Z"
+  },
+  "atmosphereKeywords": [
+    "canva",
+    "friendly",
+    "face",
+    "design",
+    "tools",
+    "brand",
+    "makes",
+    "point",
+    "looking",
+    "inviting",
+    "where",
+    "adobe"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "canva",
+      "generatedAt": 1778941051472
+    },
+    "visualTheme": {
+      "atmosphere": "Canva is the friendly face of design tools — the brand makes a point of looking inviting where Adobe looks intimidating. The page is built on a clean white canvas (`#ffffff`) with a signature **purple-to-blue gradient** (`#7d2ae8` → `#00c4cc`) used in the brand mark, hero buttons, and Pro/Magic moments. Surfaces are generously padded, edges are gently rounded (8–16px), and shadows are soft and cool-toned.\n\nTypography uses **Canva Sans** (a custom geometric sans) for chrome and prose, with rounded letterforms that share DNA with brands like Airbnb and Asana. Weight contrast does the heavy lifting — 800 for hero display, 700 for section heads, 400 for body — while size hierarchy is more compressed than typical product brands so cards and templates read at a glance.\n\nThe shape system is ultra-soft: 12px on most cards, 16–20px on larger panels, 9999px on chips. Buttons are rectangles with a subtle elevation shadow (`0 2px 8px rgba(0,0,0,0.06)`) that grows on hover. Iconography is filled and rounded, never line-only — Canva's icons speak the same shape language as its UI."
+    },
+    "colorPalette": {
+      "brand": [
+        {
+          "name": "Canva Purple",
+          "value": "#7d2ae8",
+          "role": "Brand primary; gradient origin."
+        },
+        {
+          "name": "Canva Cyan",
+          "value": "#00c4cc",
+          "role": "Brand secondary; gradient terminus."
+        },
+        {
+          "name": "Canva Pink",
+          "value": "#ff5757",
+          "role": "Tertiary brand accent (Magic Studio)."
+        }
+      ],
+      "accent": [
+        {
+          "name": "Success",
+          "value": "#00b894",
+          "role": "Saved, exported."
+        },
+        {
+          "name": "Warning",
+          "value": "#ffb020",
+          "role": "Storage limit, advisory."
+        },
+        {
+          "name": "Error",
+          "value": "#ff5757",
+          "role": "Validation, destructive."
+        },
+        {
+          "name": "Info",
+          "value": "#0d99ff",
+          "role": "Tip, link."
+        }
+      ],
+      "surface": [
+        {
+          "name": "Canvas",
+          "value": "#ffffff",
+          "role": "Primary background."
+        },
+        {
+          "name": "Surface Subtle",
+          "value": "#f4f5f7",
+          "role": "Section break, sidebar."
+        },
+        {
+          "name": "Surface Inset",
+          "value": "#e8eaed",
+          "role": "Disabled, inset block."
+        },
+        {
+          "name": "Surface Cool",
+          "value": "#eef0fc",
+          "role": "Hover tint on purple-themed cards."
+        }
+      ],
+      "border": [
+        {
+          "name": "Border Default",
+          "value": "#e1e3e6",
+          "role": "Standard hairline."
+        },
+        {
+          "name": "Border Strong",
+          "value": "#c7cdd3",
+          "role": "Emphasized border, hover state."
+        }
+      ],
+      "other": [
+        {
+          "name": "Ink Primary",
+          "value": "#0e1318",
+          "role": "Primary text."
+        },
+        {
+          "name": "Ink Secondary",
+          "value": "#3c4043",
+          "role": "Body prose."
+        },
+        {
+          "name": "Ink Muted",
+          "value": "#5f6368",
+          "role": "Captions, descriptions."
+        },
+        {
+          "name": "Ink Faint",
+          "value": "#9aa0a6",
+          "role": "Placeholder, disabled label."
+        },
+        {
+          "name": "Coral",
+          "value": "#ff7059",
+          "role": "Social posts."
+        },
+        {
+          "name": "Tangerine",
+          "value": "#ff9633",
+          "role": "Marketing."
+        },
+        {
+          "name": "Mint",
+          "value": "#48c997",
+          "role": "Education."
+        },
+        {
+          "name": "Sky",
+          "value": "#3ea6ff",
+          "role": "Business."
+        },
+        {
+          "name": "Lavender",
+          "value": "#9b87f5",
+          "role": "Personal."
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Display / UI / Body",
+      "monoFont": "Code (devtools only)",
+      "hierarchy": [
+        {
+          "role": "Hero",
+          "font": "Canva Sans",
+          "size": "64px (4rem)",
+          "weight": "800",
+          "lineHeight": "1.05",
+          "letterSpacing": "-0.02em",
+          "notes": "Marketing hero, \"Design anything.\""
+        },
+        {
+          "role": "H1",
+          "font": "Canva Sans",
+          "size": "36px (2.25rem)",
+          "weight": "700",
+          "lineHeight": "1.15",
+          "letterSpacing": "-0.01em",
+          "notes": "Page heading"
+        },
+        {
+          "role": "H2",
+          "font": "Canva Sans",
+          "size": "24px (1.5rem)",
+          "weight": "700",
+          "lineHeight": "1.2",
+          "letterSpacing": "-0.005em",
+          "notes": "Section heading"
+        },
+        {
+          "role": "H3",
+          "font": "Canva Sans",
+          "size": "18px (1.125rem)",
+          "weight": "600",
+          "lineHeight": "1.3",
+          "letterSpacing": "normal",
+          "notes": "Sub-section, card title"
+        },
+        {
+          "role": "Body Large",
+          "font": "Canva Sans",
+          "size": "16px (1rem)",
+          "weight": "400",
+          "lineHeight": "1.55",
+          "letterSpacing": "normal",
+          "notes": "Lede, marketing body"
+        },
+        {
+          "role": "Body",
+          "font": "Canva Sans",
+          "size": "14px (0.875rem)",
+          "weight": "400",
+          "lineHeight": "1.5",
+          "letterSpacing": "normal",
+          "notes": "Standard UI prose"
+        },
+        {
+          "role": "Caption",
+          "font": "Canva Sans",
+          "size": "12px (0.75rem)",
+          "weight": "500",
+          "lineHeight": "1.4",
+          "letterSpacing": "0.005em",
+          "notes": "Metadata, hint text"
+        },
+        {
+          "role": "Button",
+          "font": "Canva Sans",
+          "size": "14px (0.875rem)",
+          "weight": "600",
+          "lineHeight": "1.2",
+          "letterSpacing": "normal",
+          "notes": "Default button label"
+        },
+        {
+          "role": "Tag",
+          "font": "Canva Sans",
+          "size": "11px (0.6875rem)",
+          "weight": "600",
+          "lineHeight": "1.2",
+          "letterSpacing": "0.04em",
+          "notes": "Uppercase category chip"
+        }
+      ],
+      "principles": [
+        "hierarchy steps via 800→700→600→400; the surface stays neutral.",
+        "card titles use 1.15–1.2 so a 3-line title still fits a 4:3 thumbnail.",
+        "Canva is sans-only across all surfaces; serifs appear only as user-selectable template fonts inside the editor."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary (Gradient)",
+          "properties": {
+            "background": "`linear-gradient(135deg, #7d2ae8, #00c4cc)`",
+            "text": "`#ffffff`",
+            "padding": "12px 20px",
+            "radius": "8px",
+            "shadow": "`0 2px 8px rgba(125, 42, 232, 0.2)`",
+            "hover": "shadow grows to `0 4px 14px rgba(125, 42, 232, 0.3)`",
+            "use": "hero CTAs, \"Try Canva Pro\""
+          }
+        },
+        {
+          "name": "Primary (Solid Purple)",
+          "properties": {
+            "background": "`#7d2ae8`",
+            "text": "`#ffffff`",
+            "padding": "12px 20px",
+            "radius": "8px",
+            "hover": "`#6815d4`"
+          }
+        },
+        {
+          "name": "Secondary",
+          "properties": {
+            "background": "`#ffffff`",
+            "text": "`#0e1318`",
+            "border": "1px solid `#e1e3e6`",
+            "radius": "8px",
+            "hover": "background `#f4f5f7`, border `#c7cdd3`"
+          }
+        },
+        {
+          "name": "Subtle / Tertiary",
+          "properties": {
+            "background": "`rgba(125, 42, 232, 0.08)`",
+            "text": "`#7d2ae8`",
+            "hover": "background `rgba(125, 42, 232, 0.14)`"
+          }
+        }
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by Canva\n\n> Category: Design & Creative\n> Visual creation platform. Vivid purple-blue gradient, generous spacing, friendly geometry.\n\n## 1. Visual Theme & Atmosphere\n\nCanva is the friendly face of design tools — the brand makes a point of looking inviting where Adobe looks intimidating. The page is built on a clean white canvas (`#ffffff`) with a signature **purple-to-blue gradient** (`#7d2ae8` → `#00c4cc`) used in the brand mark, hero buttons, and Pro/Magic moments. Surfaces are generously padded, edges are gently rounded (8–16px), and shadows are soft and cool-toned.\n\nTypography uses **Canva Sans** (a custom geometric sans) for chrome and prose, with rounded letterforms that share DNA with brands like Airbnb and Asana. Weight contrast does the heavy lifting — 800 for hero display, 700 for section heads, 400 for body — while size hierarchy is more compressed than typical product brands so cards and templates read at a glance.\n\nThe shape system is ultra-soft: 12px on most cards, 16–20px on larger panels, 9999px on chips. Buttons are rectangles with a subtle elevation shadow (`0 2px 8px rgba(0,0,0,0.06)`) that grows on hover. Iconography is filled and rounded, never line-only — Canva's icons speak the same shape language as its UI.\n\n**Key Characteristics:**\n- White canvas with a violet-to-cyan gradient (`#7d2ae8` → `#00c4cc`)\n- Canva Sans (rounded geometric) for everything; weight contrast over color\n- 12–20px radii everywhere; 9999px pills for chips and tags\n- Soft cool-toned shadows that grow on hover\n- Filled rounded iconography — never outlined\n- Vibrant secondary palette (coral, mint, tangerine) for category tags\n- Pro/Magic moments lit by a static gradient — no animation\n\n## 2. Color Palette & Roles\n\n### Brand Gradient\n- **Canva Purple** (`#7d2ae8`): Brand primary; gradient origin.\n- **Canva Cyan** (`#00c4cc`): Brand secondary; gradient terminus.\n- **Canva Pink** (`#ff5757`): Tertiary brand accent (Magic Studio).\n\n### Surface\n- **Canvas** (`#ffffff`): Primary background.\n- **Surface Subtle** (`#f4f5f7`): Section break, sidebar.\n- **Surface Inset** (`#e8eaed`): Disabled, inset block.\n- **Surface Cool** (`#eef0fc`): Hover tint on purple-themed cards.\n\n### Ink & Text\n- **Ink Primary** (`#0e1318`): Primary text.\n- **Ink Secondary** (`#3c4043`): Body prose.\n- **Ink Muted** (`#5f6368`): Captions, descriptions.\n- **Ink Faint** (`#9aa0a6`): Placeholder, disabled label.\n\n### Semantic\n- **Success** (`#00b894`): Saved, exported.\n- **Warning** (`#ffb020`): Storage limit, advisory.\n- **Error** (`#ff5757`): Validation, destructive.\n- **Info** (`#0d99ff`): Tip, link.\n\n### Category Accents (Template Tags)\n- **Coral** (`#ff7059`): Social posts.\n- **Tangerine** (`#ff9633`): Marketing.\n- **Mint** (`#48c997`): Education.\n- **Sky** (`#3ea6ff`): Business.\n- **Lavender** (`#9b87f5`): Personal.\n\n### Border\n- **Border Default** (`#e1e3e6`): Standard hairline.\n- **Border Strong** (`#c7cdd3`): Emphasized border, hover state.\n\n## 3. Typography Rules\n\n### Font Family\n- **Display / UI / Body**: `Canva Sans`, with fallback: `'YS Text', system-ui, -apple-system, sans-serif`\n- **Editorial (rare)**: `Canva Sans Display`, with fallback: `'Canva Sans', sans-serif`\n- **Code (devtools only)**: `JetBrains Mono`, with fallback: `ui-monospace, Menlo, Consolas, monospace`\n\n### Hierarchy\n\n| Role | Font | Size | Weight | Line Height | Letter Spacing | Notes |\n|------|------|------|--------|-------------|----------------|-------|\n| Hero | Canva Sans | 64px (4rem) | 800 | 1.05 | -0.02em | Marketing hero, \"Design anything.\" |\n| H1 | Canva Sans | 36px (2.25rem) | 700 | 1.15 | -0.01em | Page heading |\n| H2 | Canva Sans | 24px (1.5rem) | 700 | 1.2 | -0.005em | Section heading |\n| H3 | Canva Sans | 18px (1.125rem) | 600 | 1.3 | normal | Sub-section, card title |\n| Body Large | Canva Sans | 16px (1rem) | 400 | 1.55 | normal | Lede, marketing body |\n| Body | Canva Sans | 14px (0.875rem) | 400 | 1.5 | normal | Standard UI prose |\n| Caption | Canva Sans | 12px (0.75rem) | 500 | 1.4 | 0.005em | Metadata, hint text |\n| Button | Canva Sans | 14px (0.875rem) | 600 | 1.2 | normal | Default button label |\n| Tag | Canva Sans | 11px (0.6875rem) | 600 | 1.2 | 0.04em | Uppercase category chip |\n\n### Principles\n- **Weight contrast over color contrast**: hierarchy steps via 800→700→600→400; the surface stays neutral.\n- **Tight line-height for cards**: card titles use 1.15–1.2 so a 3-line title still fits a 4:3 thumbnail.\n- **No display serif**: Canva is sans-only across all surfaces; serifs appear only as user-selectable template fonts inside the editor.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary (Gradient)**\n- Background: `linear-gradient(135deg, #7d2ae8, #00c4cc)`\n- Text: `#ffffff`\n- Padding: 12px 20px\n- Radius: 8px\n- Shadow: `0 2px 8px rgba(125, 42, 232, 0.2)`\n- Hover: shadow grows to `0 4px 14px rgba(125, 42, 232, 0.3)`\n- Use: hero CTAs, \"Try Canva Pro\"\n\n**Primary (Solid Purple)**\n- Background: `#7d2ae8`\n- Text: `#ffffff`\n- Padding: 12px 20px\n- Radius: 8px\n- Hover: `#6815d4`\n\n**Secondary**\n- Background: `#ffffff`\n- Text: `#0e1318`\n- Border: 1px solid `#e1e3e6`\n- Radius: 8px\n- Hover: background `#f4f5f7`, border `#c7cdd3`\n\n**Subtle / Tertiary**\n- Background: `rgba(125, 42, 232, 0.08)`\n- Text: `#7d2ae8`\n- Hover: background `rgba(125, 42, 232, 0.14)`\n\n### Cards / Template Tiles\n- Background: `#ffffff`\n- Border: 1px solid `#e1e3e6`\n- Radius: 12px\n- Shadow at rest: `0 1px 3px rgba(0,0,0,0.04)`\n- Shadow on hover: `0 8px 24px rgba(0,0,0,0.08)`, lift 2px\n- Aspect ratio: thumbnail respects template (1:1, 4:3, 9:16)\n\n### Inputs\n- Background: `#ffffff`\n- Border: 1px solid `#e1e3e6`\n- Radius: 8px\n- Padding: 10px 14px\n- Focus: border `#7d2ae8`, ring `0 0 0 3px rgba(125, 42, 232, 0.16)`\n\n### Chips / Tags\n- Background: category-tinted soft.\n- Text: matching strong category color.\n- Padding: 4px 10px\n- Radius: 9999px\n- Font: 11px / 600 / uppercase\n\n### Pro Badge\n- Background: `linear-gradient(135deg, #7d2ae8, #ff5757)`\n- Text: `#ffffff`\n- Padding: 2px 8px\n- Radius: 9999px\n- Font: 10px / 700 / uppercase\n\n## 5. Spacing & Layout\n\n- **Base unit**: 4px. Scale: 4, 8, 12, 16, 24, 32, 48, 64, 96.\n- **Container**: max 1320px, 32px gutter.\n- **Sidebar (editor)**: 320px wide; collapses to 56px icons.\n- **Card grid gap**: 16px on mobile, 24px on desktop.\n\n## 6. Motion\n\n- **Duration**: 180ms for hover; 280ms for menu open; 420ms for editor sidebar collapse.\n- **Easing**: `cubic-bezier(0.4, 0, 0.2, 1)` (Material-style).\n- **Card lift**: translateY(-2px) + shadow grow on hover, single transition.\n"
+  }
+}

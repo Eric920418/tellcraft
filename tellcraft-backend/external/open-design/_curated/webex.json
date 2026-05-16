@@ -1,0 +1,254 @@
+{
+  "styleKey": "webex",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/webex/DESIGN.md",
+    "sha256OfMd": "86613900466a274e192ff2bd61759c2a82569df5cf2269a1d24a20554ff34fe2",
+    "parsedAt": "2026-05-16T14:17:31.490Z"
+  },
+  "atmosphereKeywords": [
+    "webex",
+    "cleaner",
+    "friendlier",
+    "more",
+    "product",
+    "than",
+    "cisco",
+    "corporate",
+    "while",
+    "still",
+    "living",
+    "inside"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "webex",
+      "generatedAt": 1778941051486
+    },
+    "visualTheme": {
+      "atmosphere": "Webex is cleaner, friendlier, and more product-led than Cisco corporate while still living inside the same trust-oriented universe. The brand language combines bright white canvases with dark in-product surfaces, then anchors interaction around a precise family of blue action colors drawn from Momentum. The result is a collaboration platform aesthetic: capable, legible, modern, and designed for continuous use rather than one-shot marketing drama.\n\nTypography is driven by the Momentum system, whose primary font stack is `Momentum, Inter, Arial, Helvetica Neue, Helvetica, sans-serif`. This gives Webex a more software-native rhythm than Cisco's broader corporate presence. Headings should be clear and confident, but not monumental. Body copy should feel practical and human. In contrast to Cisco's singular-signal visual system, Webex allows a broader supporting collaboration palette — cobalt, cyan, mint, lime, gold, orange, pink, purple — but these should appear as **secondary accents** for teams, avatars, presence, or workspace state, not as uncontrolled decoration.\n\nWhat defines Webex is **blue-guided clarity plus collaborative color**. Action is blue. Surfaces are simple. Supporting colors represent people, teams, or activity."
+    },
+    "colorPalette": {
+      "primary": [
+        {
+          "name": "Webex Action Blue",
+          "value": "#1170cf",
+          "role": "Primary buttons, active controls, main links, selected states"
+        },
+        {
+          "name": "Action Blue Hover",
+          "value": "#0353a8",
+          "role": "Hover and stronger emphasis"
+        },
+        {
+          "name": "Action Blue Pressed",
+          "value": "#063a75",
+          "role": "Pressed / active interaction state"
+        },
+        {
+          "name": "Accent Light Blue",
+          "value": "#64b4fa",
+          "role": "Focus ring, bright dark-surface link state, supportive highlight"
+        }
+      ],
+      "neutral": [
+        {
+          "name": "Primary Text (Light Theme)",
+          "value": "#000000f2",
+          "role": "Main light-surface text"
+        },
+        {
+          "name": "Secondary Text (Light Theme)",
+          "value": "#000000b3",
+          "role": "Support copy and metadata"
+        },
+        {
+          "name": "Primary Text (Dark Theme)",
+          "value": "#fffffff2",
+          "role": "Main dark-surface text"
+        },
+        {
+          "name": "Secondary Text (Dark Theme)",
+          "value": "#ffffffb3",
+          "role": "Support copy on dark"
+        },
+        {
+          "name": "White Canvas",
+          "value": "#ffffff",
+          "role": "Primary light background"
+        },
+        {
+          "name": "Black Canvas",
+          "value": "#000000",
+          "role": "Full dark background"
+        },
+        {
+          "name": "Dark Surface 1",
+          "value": "#1a1a1a",
+          "role": "Dark cards, modals, product chrome"
+        },
+        {
+          "name": "Dark Surface 2",
+          "value": "#262626",
+          "role": "Elevated dark layers"
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Momentum",
+      "hierarchy": [
+        {
+          "role": "Hero Display",
+          "font": "Momentum",
+          "size": "64px",
+          "weight": "500",
+          "lineHeight": "1.10",
+          "letterSpacing": "-1px",
+          "notes": "Marketing hero headline"
+        },
+        {
+          "role": "Section Display",
+          "font": "Momentum",
+          "size": "40px",
+          "weight": "500",
+          "lineHeight": "1.20",
+          "letterSpacing": "-0.5px",
+          "notes": "Section lead"
+        },
+        {
+          "role": "Heading",
+          "font": "Momentum",
+          "size": "24px",
+          "weight": "500",
+          "lineHeight": "1.33",
+          "letterSpacing": "normal",
+          "notes": "Card title, feature title"
+        },
+        {
+          "role": "Body",
+          "font": "Momentum",
+          "size": "16px",
+          "weight": "400",
+          "lineHeight": "1.50",
+          "letterSpacing": "normal",
+          "notes": "Default product/marketing body"
+        },
+        {
+          "role": "Body Small",
+          "font": "Momentum",
+          "size": "14px",
+          "weight": "400",
+          "lineHeight": "1.43",
+          "letterSpacing": "normal",
+          "notes": "Metadata, nav, helper text"
+        },
+        {
+          "role": "Label",
+          "font": "Momentum",
+          "size": "12px",
+          "weight": "500",
+          "lineHeight": "1.33",
+          "letterSpacing": "normal",
+          "notes": "Chips, tags, presence labels"
+        },
+        {
+          "role": "Button",
+          "font": "Momentum",
+          "size": "16px",
+          "weight": "500",
+          "lineHeight": "1.25",
+          "letterSpacing": "normal",
+          "notes": "CTA label"
+        }
+      ],
+      "principles": [
+        "Keep typography highly legible and product-oriented.",
+        "Use medium weight for structural emphasis, not ultra-bold display theatrics.",
+        "The system should feel modern and easy to scan, especially in dashboard and collaboration contexts.",
+        "Avoid decorative font mixing unless the artifact explicitly requires a marketing flourish."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary Blue Pill",
+          "properties": {
+            "background": "Webex Action Blue (`#1170cf`)",
+            "text": "White (`#ffffff`)",
+            "radius": "pill",
+            "hover": "`#0353a8`",
+            "active": "`#063a75`"
+          }
+        },
+        {
+          "name": "Secondary Outline / Ghost on Light",
+          "properties": {
+            "background": "transparent or white",
+            "text": "`#1170cf`",
+            "border": "subtle dark or blue-tinted alpha border",
+            "radius": "pill",
+            "purpose": "secondary CTA on white or light product surfaces"
+          }
+        },
+        {
+          "name": "Secondary Outline / Ghost on Dark",
+          "properties": {
+            "background": "transparent or `#1a1a1a`",
+            "text": "`#64b4fa` or white for the strongest emphasis",
+            "border": "1px white-alpha or Accent Light Blue (`#64b4fa`) depending on emphasis",
+            "radius": "pill",
+            "hover": "soft blue-tinted dark fill with the text color preserved",
+            "focus ring": "2px Accent Light Blue halo",
+            "purpose": "dark-surface secondary CTA without dropping below contrast targets"
+          }
+        }
+      ],
+      "other": [
+        {
+          "name": "Meeting Card",
+          "properties": {
+            "anatomy": "title, time block, participant count, host avatar, device or room status, primary join action",
+            "states": "upcoming, live, ended, recording, muted-device warning",
+            "brand behavior": "primary action stays blue; meeting state uses subtle chips rather than full-surface color fills"
+          }
+        },
+        {
+          "name": "Presence Chip",
+          "properties": {
+            "anatomy": "avatar or initials, user name, compact status dot/chip, optional location/device label",
+            "sizes": "24px compact, 32px default, 40px prominent",
+            "states": "available, presenting, in meeting, away, do-not-disturb",
+            "color rule": "use collaboration colors as supporting identity accents, not as replacements for semantic status"
+          }
+        },
+        {
+          "name": "Workspace Sidebar",
+          "properties": {
+            "anatomy": "workspace switcher, search, primary nav groups, badge counts, pinned spaces, footer utilities",
+            "behavior": "keep hierarchy obvious and allow badge counts or unread state to read at a glance",
+            "states": "selected item, unread, hovered, collapsed narrow mode"
+          }
+        },
+        {
+          "name": "Roster Row",
+          "properties": {
+            "anatomy": "avatar, display name, role label, mute/video state, hand-raise or reaction slot, overflow actions",
+            "states": "speaking, muted, hand raised, spotlighted, disconnected",
+            "density": "support both meeting roster density and more spacious messaging/contact density"
+          }
+        }
+      ]
+    },
+    "spacing": {
+      "scale": [
+        "8px",
+        "8px",
+        "767px"
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by Webex\n\n> Category: Productivity & SaaS\n> Collaboration platform. Momentum typography, blue action system, multi-user accent spectrum.\n\n## 1. Visual Theme & Atmosphere\n\nWebex is cleaner, friendlier, and more product-led than Cisco corporate while still living inside the same trust-oriented universe. The brand language combines bright white canvases with dark in-product surfaces, then anchors interaction around a precise family of blue action colors drawn from Momentum. The result is a collaboration platform aesthetic: capable, legible, modern, and designed for continuous use rather than one-shot marketing drama.\n\nTypography is driven by the Momentum system, whose primary font stack is `Momentum, Inter, Arial, Helvetica Neue, Helvetica, sans-serif`. This gives Webex a more software-native rhythm than Cisco's broader corporate presence. Headings should be clear and confident, but not monumental. Body copy should feel practical and human. In contrast to Cisco's singular-signal visual system, Webex allows a broader supporting collaboration palette — cobalt, cyan, mint, lime, gold, orange, pink, purple — but these should appear as **secondary accents** for teams, avatars, presence, or workspace state, not as uncontrolled decoration.\n\nWhat defines Webex is **blue-guided clarity plus collaborative color**. Action is blue. Surfaces are simple. Supporting colors represent people, teams, or activity.\n\n**Key Characteristics:**\n- Momentum typography stack with clean product rhythm\n- Blue action system centered on `#1170cf`, `#0353a8`, and `#063a75`\n- White marketing/product canvases paired with optional charcoal dark-mode surfaces\n- Soft pill geometry for actions and controls\n- Collaboration-spectrum accent colors used sparingly for people/workspaces\n- Product-first clarity over ornamental flourish\n- Motion should feel polished and unobtrusive\n\n## 2. Color Palette & Roles\n\n### Primary Action\n- **Webex Action Blue** (`#1170cf`): Primary buttons, active controls, main links, selected states\n- **Action Blue Hover** (`#0353a8`): Hover and stronger emphasis\n- **Action Blue Pressed** (`#063a75`): Pressed / active interaction state\n- **Accent Light Blue** (`#64b4fa`): Focus ring, bright dark-surface link state, supportive highlight\n\n### Text & Surface\n- **Primary Text (Light Theme)** (`#000000f2`): Main light-surface text\n- **Secondary Text (Light Theme)** (`#000000b3`): Support copy and metadata\n- **Primary Text (Dark Theme)** (`#fffffff2`): Main dark-surface text\n- **Secondary Text (Dark Theme)** (`#ffffffb3`): Support copy on dark\n- **White Canvas** (`#ffffff`): Primary light background\n- **Black Canvas** (`#000000`): Full dark background\n- **Dark Surface 1** (`#1a1a1a`): Dark cards, modals, product chrome\n- **Dark Surface 2** (`#262626`): Elevated dark layers\n\n### Collaboration / Team Spectrum\n- **Team Cobalt** (`#5ebff7`)\n- **Team Cyan** (`#22c7d6`)\n- **Team Mint** (`#30c9b0`)\n- **Team Lime** (`#93c437`)\n- **Team Gold** (`#d6b220`)\n- **Team Orange** (`#fd884e`)\n- **Team Pink** (`#fc97aa`)\n- **Team Purple** (`#f294f1`)\n\nUse these as secondary collaboration accents: avatars, presence markers, workspace labels, chips, or lightweight category signals.\n\n### Semantic\n- **Success** (`#3cc29a`)\n- **Warning** (`#f2990a`)\n- **Danger** (`#fc8b98`)\n\n## 3. Typography Rules\n\n### Font Family\n- **Primary**: `Momentum`, fallbacks: `Inter, Arial, Helvetica Neue, Helvetica, sans-serif`\n\n### Hierarchy\n\n| Role | Font | Size | Weight | Line Height | Letter Spacing | Notes |\n|------|------|------|--------|-------------|----------------|-------|\n| Hero Display | Momentum | 64px | 500 | 1.10 | -1px | Marketing hero headline |\n| Section Display | Momentum | 40px | 500 | 1.20 | -0.5px | Section lead |\n| Heading | Momentum | 24px | 500 | 1.33 | normal | Card title, feature title |\n| Body | Momentum | 16px | 400 | 1.50 | normal | Default product/marketing body |\n| Body Small | Momentum | 14px | 400 | 1.43 | normal | Metadata, nav, helper text |\n| Label | Momentum | 12px | 500 | 1.33 | normal | Chips, tags, presence labels |\n| Button | Momentum | 16px | 500 | 1.25 | normal | CTA label |\n\n### Principles\n- Keep typography highly legible and product-oriented.\n- Use medium weight for structural emphasis, not ultra-bold display theatrics.\n- The system should feel modern and easy to scan, especially in dashboard and collaboration contexts.\n- Avoid decorative font mixing unless the artifact explicitly requires a marketing flourish.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary Blue Pill**\n- Background: Webex Action Blue (`#1170cf`)\n- Text: White (`#ffffff`)\n- Radius: pill\n- Hover: `#0353a8`\n- Active: `#063a75`\n\n**Secondary Outline / Ghost on Light**\n- Background: transparent or white\n- Text: `#1170cf`\n- Border: subtle dark or blue-tinted alpha border\n- Radius: pill\n- Purpose: secondary CTA on white or light product surfaces\n\n**Secondary Outline / Ghost on Dark**\n- Background: transparent or `#1a1a1a`\n- Text: `#64b4fa` or white for the strongest emphasis\n- Border: 1px white-alpha or Accent Light Blue (`#64b4fa`) depending on emphasis\n- Radius: pill\n- Hover: soft blue-tinted dark fill with the text color preserved\n- Focus ring: 2px Accent Light Blue halo\n- Purpose: dark-surface secondary CTA without dropping below contrast targets\n\n### Cards & Containers\n- Light cards: white fill with subtle outline\n- Dark cards: `#1a1a1a` fill with bright text and light outline\n- Radius: 16px\n- Keep interiors airy; do not over-densify by default\n\n### Inputs & Controls\n- Light surfaces: subtle outline, blue focus\n- Dark surfaces: bright text, soft white-alpha outline, blue focus signal\n- Toggles, tabs, and nav should feel precise and product-native, not ornamental\n\n### Collaboration Tokens\n- Use team-spectrum colors for presence chips, avatar backgrounds, workspace badges, or lightweight categorization\n- Do not assign them to all primary buttons or all large surfaces\n\n### Brand-Specific Recipes\n\n**Meeting Card**\n- Anatomy: title, time block, participant count, host avatar, device or room status, primary join action\n- States: upcoming, live, ended, recording, muted-device warning\n- Brand behavior: primary action stays blue; meeting state uses subtle chips rather than full-surface color fills\n\n**Presence Chip**\n- Anatomy: avatar or initials, user name, compact status dot/chip, optional location/device label\n- Sizes: 24px compact, 32px default, 40px prominent\n- States: available, presenting, in meeting, away, do-not-disturb\n- Color rule: use collaboration colors as supporting identity accents, not as replacements for semantic status\n\n**Workspace Sidebar**\n- Anatomy: workspace switcher, search, primary nav groups, badge counts, pinned spaces, footer utilities\n- Behavior: keep hierarchy obvious and allow badge counts or unread state to read at a glance\n- States: selected item, unread, hovered, collapsed narrow mode\n\n**Roster Row**\n- Anatomy: avatar, display name, role label, mute/video state, hand-raise or reaction slot, overflow actions\n- States: speaking, muted, hand raised, spotlighted, disconnected\n- Density: support both meeting roster density and more spacious messaging/contact density\n\n## 5. Layout Principles\n\n### Spacing & Grid\n- Base rhythm: 8px\n- Common scale: 8px, 12px, 16px, 24px, 32px, 48px, 64px, 88px\n- Use clean marketing bands and product-story sections\n- Prefer simple grids with clear scanning order\n- Breakpoints: mobile up to 767px, tablet 768px-1199px, desktop 1200px and above\n\n### Composition\n- White space is important; the UI should not feel cramped\n- Marketing layouts should balance clarity with product focus\n- Collaboration/product pages may mix white sections with dark embedded product surfaces\n- Blue should lead the eye; collaboration colors should support, not compete\n- On tablet, reduce multi-panel collaboration layouts to two primary regions and preserve a clear action rail\n- On mobile, stack sidebars beneath the main header, collapse meeting side-panels into drawers, and keep call controls centered in a single thumb-reachable row\n- Navigation should shift to a compact app bar plus drawer on smaller screens rather than shrinking labels until they wrap\n\n### Accessibility & Responsiveness\n- Minimum touch target: 44px by 44px for buttons, tabs, roster actions, and call controls\n- Maintain visible keyboard focus with an Accent Light Blue halo on both light and dark surfaces\n- Any hover-revealed affordance must also appear on focus and touch\n- Respect reduced-motion users by replacing staggered entrance motion with instant layout plus subtle opacity changes only\n\n## 6. Motion & Interaction\n\n- Motion should feel polished, calm, and practical\n- Use fade, slide, and soft stagger in the 160ms–280ms range\n- Hover and focus can use gentle blue glow or highlight\n- Avoid loud spring physics or excessive flourish\n- Under `prefers-reduced-motion`, remove stagger choreography and large panel slides; keep state feedback under 120ms with opacity or outline changes only\n\n## 7. Voice & Brand\n\n- Webex voice is practical, clear, and human\n- Headlines should emphasize usefulness, outcomes, and collaborative capability\n- The brand should feel like a trusted workspace platform for meetings, messaging, devices, and shared work\n- It should be warmer than Cisco corporate, but still disciplined\n\n## 8. Anti-patterns\n\n- Do not turn Webex into a rainbow-heavy consumer social product\n- Do not use collaboration colors as primary CTA colors\n- Do not overuse gradients as core brand language\n- Do not make the system overly corporate-dark when the artifact is meant to feel collaborative and accessible\n- Do not use decorative typography that harms scannability\n\n## 9. Agent Prompt Guide\n\n### Quick Color Reference\n- Primary action: `#1170cf`\n- Hover: `#0353a8`\n- Pressed: `#063a75`\n- Focus / bright dark-surface accent: `#64b4fa`\n- Success: `#3cc29a`\n- Warning: `#f2990a`\n- Danger: `#fc8b98`\n\n### Example Component Prompts\n- \"Create a Webex-style product landing page with white canvases, Momentum typography, and blue pill CTAs using #1170cf.\"\n- \"Design a collaboration dashboard with clean white cards, one embedded dark product panel, and secondary team-color chips for presence.\"\n- \"Build a settings or admin surface that uses calm spacing, blue action states, and restrained multi-user color accents.\"\n"
+  }
+}

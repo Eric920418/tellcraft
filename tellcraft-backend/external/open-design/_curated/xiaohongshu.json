@@ -1,0 +1,176 @@
+{
+  "styleKey": "xiaohongshu",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/xiaohongshu/DESIGN.md",
+    "sha256OfMd": "e1a103ef765f4dd20d814372d7d18f3a5e99bfcce085537bb289d5d59b4bc2d9",
+    "parsedAt": "2026-05-16T14:17:31.491Z"
+  },
+  "atmosphereKeywords": [
+    "xiaohongshu",
+    "小红书",
+    "visual",
+    "opposite",
+    "saas",
+    "console",
+    "open",
+    "other",
+    "people",
+    "breakfasts",
+    "hotel",
+    "sofas"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "xiaohongshu",
+      "generatedAt": 1778941051487
+    },
+    "visualTheme": {
+      "atmosphere": "Xiaohongshu (小红书 / RED) is the visual opposite of a SaaS console. Open the app and you do not see \"Xiaohongshu\" — you see other people's breakfasts, hotel sofas, the lipstick they bought on the third try. That is by design. The entire UI tries to act as a transparent picture frame: white surfaces, low-noise components, no shadow stacks competing for attention. Everything yields to the user-uploaded image.\n\nThe palette is brutally restrained. A near-white canvas (`#FFFFFF` / `#F5F5F5`) covers the majority of every page. Neutrals are built from translucent overlays (`rgba(48,48,52, 0.05~0.20)`) rather than discrete grey steps — the same fill drops onto white for hover, onto a card for divider, onto a button for disabled. The brand red `#FF2442` is the only saturated color the system permits, and it shows up only on tab indicators, the heart-active state, and primary CTAs. Semantic colors (success green, warning orange, info blue) exist as tokens but are nearly invisible in the consumer flow — danger is not a separate color, it just reuses brand red.\n\nForm is soft. Cards round at 12–16px. Buttons round all the way to pills (`border-radius: 9999px`). Shadows are essentially absent — depth comes from spacing and rounding, not elevation. The signature layout is a two-column (mobile) or 5-column (PC) waterfall masonry where rows do not align — image height drives card height, and that misalignment *is* the realism."
+    },
+    "colorPalette": {
+      "primary": [
+        {
+          "name": "Brand Red — Token",
+          "value": "#FF2442",
+          "role": "`--primary` and `--color-red`. The design-system source of truth. Use for accents, active tabs, hearts, primary CTAs."
+        },
+        {
+          "name": "Brand Red — Component",
+          "value": "#FF2E4D",
+          "role": "hard-coded on `.reds-button-new.primary`, `.active-bar`, outlined-button border. Slightly pinker and marginally lighter — same red channel (`FF`), with `+10` on green (`24` → `2E`) and `+11` on blue (`42` → `4D`). The lifted green/blue raises overall lightness while the proportionally larger blue lift nudges the hue a touch toward pink, the net effect of which likely reduces visual sting on large button fills. Whether this divergence from `--primary` is intentional (accessibility / large-fill ergonomics) or historical drift (a hard-coded override that should eventually merge back to the token) is undocumented upstream. Use when emitting actual buttons or active-bar UI; see §9 *Brand Red Disambiguation* for the per-surface rule."
+        },
+        {
+          "name": "Star Yellow",
+          "value": "#FDBC5F",
+          "role": "bookmark / collect-active icon fill (sampled from `<symbol id=\"collected\">` SVG). Only place yellow is allowed."
+        }
+      ]
+    },
+    "typography": {
+      "hierarchy": [
+        {
+          "role": "Page hero title",
+          "size": "32px",
+          "weight": "600"
+        },
+        {
+          "role": "Section heading",
+          "size": "24px",
+          "weight": "600"
+        },
+        {
+          "role": "Card heading",
+          "size": "20px",
+          "weight": "600"
+        },
+        {
+          "role": "Strong label",
+          "size": "18px",
+          "weight": "600"
+        },
+        {
+          "role": "Medium label",
+          "size": "16px",
+          "weight": "500"
+        },
+        {
+          "role": "Secondary label",
+          "size": "14px",
+          "weight": "500"
+        },
+        {
+          "role": "Body large",
+          "size": "16px",
+          "weight": "400"
+        },
+        {
+          "role": "Long-form body",
+          "size": "16px",
+          "weight": "400"
+        },
+        {
+          "role": "Body standard",
+          "size": "14px",
+          "weight": "400"
+        },
+        {
+          "role": "Body long-form",
+          "size": "14px",
+          "weight": "400"
+        },
+        {
+          "role": "Caption",
+          "size": "13px",
+          "weight": "400"
+        },
+        {
+          "role": "Small caption",
+          "size": "12px",
+          "weight": "400"
+        },
+        {
+          "role": "Badge / smallest",
+          "size": "10px",
+          "weight": "400"
+        }
+      ],
+      "principles": [
+        "Max display is 32/600 — there is no 48px / 64px hero type. Density wins over visual jumps.",
+        "400 (Regular), 500 (Medium), 600 (Semibold). Weight 700 is reserved exclusively for `--number-emphasized-font-weight`. No thin / light.",
+        "Every `--Typography-Spacing-*` token is `0`. Component-level overrides (cookie banner, category title) hand-tune `-0.3px`–`-0.64px`, but base tokens are flat.",
+        "Title text is `rgba(0,0,0,0.80)`. Pure `#000` is never used for body or title text.",
+        "Counts, stats, and follow-numbers always use `RED Number` for tabular alignment."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary",
+          "description": "No shadow",
+          "properties": {
+            "background": "`#FF2442` (or `#FF2E4D` when matching the live `.reds-button-new.primary` class)",
+            "text": "`#FFFFFF`, weight 500, 14px",
+            "radius": "**pill — `border-radius: 9999px`**",
+            "padding": "`8px 20px` small / `12px 32px` large"
+          }
+        },
+        {
+          "name": "Secondary (filled)",
+          "description": "Same pill radius",
+          "properties": {
+            "background": "`rgba(48,48,52,0.10)` (`--fill2`) — soft grey",
+            "text": "`rgba(0,0,0,0.80)` (`--title`)"
+          }
+        },
+        {
+          "name": "Secondary (outlined)",
+          "description": "Pill radius. Used for the unfollowed-state follow CTA on profile cards.",
+          "properties": {
+            "background": "`#FFFFFF`",
+            "border": "`1px solid #FF2E4D`",
+            "text": "`#FF2E4D`"
+          }
+        },
+        {
+          "name": "Icon button (like / collect / comment)",
+          "description": "Pure icon (24px) stacked over count (12px, `rgba(0,0,0,0.45)`); No background plate",
+          "properties": {
+            "active state": "icon flips to `#FF2442` (heart) or `#FDBC5F` (star); count text matches"
+          }
+        }
+      ],
+      "cards": [
+        {
+          "name": "No box-shadow by default.",
+          "description": "White card sits on `#F5F5F5` canvas — separation comes from the canvas color, not elevation.",
+          "properties": {}
+        }
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by Xiaohongshu\n\n> Category: Media & Consumer\n> Lifestyle UGC social platform. Singular brand red, generous radius, content-first.\n\n## 1. Visual Theme & Atmosphere\n\nXiaohongshu (小红书 / RED) is the visual opposite of a SaaS console. Open the app and you do not see \"Xiaohongshu\" — you see other people's breakfasts, hotel sofas, the lipstick they bought on the third try. That is by design. The entire UI tries to act as a transparent picture frame: white surfaces, low-noise components, no shadow stacks competing for attention. Everything yields to the user-uploaded image.\n\nThe palette is brutally restrained. A near-white canvas (`#FFFFFF` / `#F5F5F5`) covers the majority of every page. Neutrals are built from translucent overlays (`rgba(48,48,52, 0.05~0.20)`) rather than discrete grey steps — the same fill drops onto white for hover, onto a card for divider, onto a button for disabled. The brand red `#FF2442` is the only saturated color the system permits, and it shows up only on tab indicators, the heart-active state, and primary CTAs. Semantic colors (success green, warning orange, info blue) exist as tokens but are nearly invisible in the consumer flow — danger is not a separate color, it just reuses brand red.\n\nForm is soft. Cards round at 12–16px. Buttons round all the way to pills (`border-radius: 9999px`). Shadows are essentially absent — depth comes from spacing and rounding, not elevation. The signature layout is a two-column (mobile) or 5-column (PC) waterfall masonry where rows do not align — image height drives card height, and that misalignment *is* the realism.\n\nType is PingFang SC at medium weight throughout. There is no thin-light heroic display, no all-caps Latin headline. Hierarchy is compact (`H1: 32/600`, body: `14-16/400`), tracking is `0`, and digits use a custom `RED Number` family so counts on like buttons line up. The voice of the writing matches the visual: second person, conversational, never enterprise. \"你的生活兴趣社区\" — *your* lifestyle interest community, not \"the platform\".\n\nThe result reads like a slightly worn lifestyle magazine with a few handwritten Post-its tucked between the pages. Not Apple-store cold-minimal. Not Lark efficiency-console. Definitely not any SaaS dashboard. The design baseline is *daily-ness* — the user should not feel they are using software, only flipping through someone else's life.\n\n**Key Characteristics:**\n- Singular brand red (`#FF2442` token, `#FF2E4D` at the component layer) — never two saturated colors at once\n- Translucent neutrals (`rgba(48,48,52, .05/.10/.20)`) instead of discrete grey steps\n- Generous rounding everywhere: cards 12–16px, buttons fully pill, sheets 16px top-only\n- Near-zero shadow — flat by default\n- PingFang SC at 400/500/600 only; no thin display weights\n- Content (user photos) is the color source — UI yields\n- Bottom sheet for secondary actions on mobile, never modal\n- Voice: second person, lifestyle, never SaaS-enterprise\n\n## 2. Color Palette & Roles\n\nAll values below are sampled from production CSS at `https://www.xiaohongshu.com/explore` (inline `<style>` blocks for `:root, .force-light` and `:root[dark], .force-dark`).\n\n### Primary Brand\n- **Brand Red — Token** (`#FF2442`): `--primary` and `--color-red`. The design-system source of truth. Use for accents, active tabs, hearts, primary CTAs.\n- **Brand Red — Component** (`#FF2E4D`): hard-coded on `.reds-button-new.primary`, `.active-bar`, outlined-button border. Slightly pinker and marginally lighter — same red channel (`FF`), with `+10` on green (`24` → `2E`) and `+11` on blue (`42` → `4D`). The lifted green/blue raises overall lightness while the proportionally larger blue lift nudges the hue a touch toward pink, the net effect of which likely reduces visual sting on large button fills. Whether this divergence from `--primary` is intentional (accessibility / large-fill ergonomics) or historical drift (a hard-coded override that should eventually merge back to the token) is undocumented upstream. Use when emitting actual buttons or active-bar UI; see §9 *Brand Red Disambiguation* for the per-surface rule.\n- **Star Yellow** (`#FDBC5F`): bookmark / collect-active icon fill (sampled from `<symbol id=\"collected\">` SVG). Only place yellow is allowed.\n\n### Neutrals (translucent overlay system)\n- **Surface** (`#FFFFFF`) — `--bg`. Cards, modals.\n- **Canvas** (`#F5F5F5`) — `--bg0`. Page background behind cards.\n- **Subtle** (`#FAFAFA`) — `--bg0-lighter` / `--color-information-background`. Information backgrounds.\n- **Fill 1** (`rgba(48,48,52,0.05)`) — `--fill1`. Lightest hover, group lines.\n- **Fill 2** (`rgba(48,48,52,0.10)`) — `--fill2`. Hover surface, disabled button bg, the \"following\" follow-button state.\n- **Fill 3** (`rgba(48,48,52,0.20)`) — `--fill3`. Pressed.\n- **Separator** (`rgba(0,0,0,0.08)`) — `--separator`. Hairline border.\n- **Separator Strong** (`rgba(0,0,0,0.20)`) — `--separator2`.\n- **Opaque Separator** (`#EAEAEA`) — `--opaque-separator`. When a real solid border is needed.\n\n### Text\n- **Title / Primary** (`rgba(0,0,0,0.80)`) — `--title`. Headings and titles. Soft black, never pure black.\n- **Paragraph / Secondary** (`rgba(0,0,0,0.62)`) — `--paragraph`. Body, secondary text.\n- **Description** (`rgba(0,0,0,0.45)`) — `--description`. Auxiliary captions.\n- **Disabled / Placeholder** (`rgba(0,0,0,0.27)`) — `--disabled` / `--placeholder`.\n\n### Semantic (token-level only — rarely visible in consumer UI)\n- **Success** (`#02B940`) — `--success`. Background variant `#EAF8EF` (`--success2`).\n- **Warning** (`#FF7D03`) — `--warning`. Background variant `#FFF2E6` (`--warning2`).\n- **Info** (`#3D8AF5`) — `--info` / `--color-blue`. Almost never appears in consumer flow.\n- **Link** (`#133667`) — `--link`. Deep navy, not a typical link blue. In practice, brand red is used for emphasis instead.\n- **Danger / Error**: no independent token — danger reuses `--primary` (brand red). Heads-up for skill authors: an emitted destructive action and an emitted primary CTA will therefore be visually identical out of the box (a \"Delete account\" button reads exactly like a \"Follow\" button). RED's production destructive treatment is not directly observable in this snapshot, so as a defensive default, differentiate destructive intent via outline-style + brand-red text, or a leading destructive icon, when the difference matters.\n\n### Functional Gradients (the only gradients allowed)\nBrand red itself is **never gradient**. The only gradients in the system are functional:\n- **Search Hotspot Hint** (`linear-gradient(90deg, #FF2543 0%, #FF5225 100%)`) — `--search-hotspot-hint`. Trending-search badge only.\n- **Video Player Mask** (`linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0) 50%, rgba(0,0,0,0.75))`) — `--mask-video-player-mask`. Top + bottom gradient on video tiles.\n\n### Dark Mode\n\nDark mode follows `prefers-color-scheme: dark` with a manual override; both the `:root[dark]` attribute and the `.force-dark` class are honored in source.\n\n- **Surface** (`#19191E`) — purple-tinted near-black, not pure `#000`.\n- **Canvas** (`#0E0E11`) — deepest layer.\n- **Title** (`rgba(255,255,255,0.84)`).\n- **Paragraph** (`rgba(255,255,255,0.56)`).\n- **Brand Primary** (`#FF2E4D`) — slight pink shift vs. light mode (`#FF2442` → `#FF2E4D`) to lower visual sting in low light.\n- **Separator** (`rgba(255,255,255,0.07)`).\n\n## 3. Typography Rules\n\nAll values sampled from production CSS at `https://www.xiaohongshu.com/`.\n\n### Font Family\n\n**Chinese (display + body, all levels):**\n```\nPingFang SC\n```\nEvery `--Typography-FontFamily-*` variable resolves to `PingFang SC`. There is no separate display face.\n\n**Site-wide fallback chain:**\n```\n-apple-system, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB',\n'Microsoft Yahei', Arial\n```\n\n**Numbers (custom):**\n```\n'RED Number' (Regular 400 / Medium 500 / Bold 700)\n```\nUsed for like counts, follower counts, stat displays. Solves PingFang's non-tabular digit problem.\n\n**Mobile app embedded:** 方正悠黑 (`FZ YouHei`) ships in the iOS / Android app; users can fall back to system PingFang SC / Noto Sans CJK SC.\n\n### Hierarchy (PC web tokens)\n\n| Token | Size | Weight | Line-height | Role |\n|---|---|---|---|---|\n| `--h1` | 32px | 600 | 40px (125%) | Page hero title |\n| `--h2` | 24px | 600 | 32px (133%) | Section heading |\n| `--h3` | 20px | 600 | 28px (140%) | Card heading |\n| `--t1` | 18px | 600 | 26px (144%) | Strong label |\n| `--t2` | 16px | 500 | 24px (150%) | Medium label |\n| `--t3` | 14px | 500 | 20px (143%) | Secondary label |\n| `--b1` | 16px | 400 | 24px (150%) | Body large |\n| `--b1-loose` | 16px | 400 | 26px (162%) | Long-form body |\n| `--b2` | 14px | 400 | 20px (143%) | Body standard |\n| `--b2-loose` | 14px | 400 | 22px (157%) | Body long-form |\n| `--c1` | 13px | 400 | 20px (154%) | Caption |\n| `--c2` | 12px | 400 | 18px (150%) | Small caption |\n| `--c3` | 10px | 400 | 14px (140%) | Badge / smallest |\n\n`*-emphasized` variants (e.g. `--c1-emphasized`) bump the same size to weight 500.\n\n### Principles\n\n- **Compact heading scale.** Max display is 32/600 — there is no 48px / 64px hero type. Density wins over visual jumps.\n- **Three weights only.** 400 (Regular), 500 (Medium), 600 (Semibold). Weight 700 is reserved exclusively for `--number-emphasized-font-weight`. No thin / light.\n- **Tracking is zero.** Every `--Typography-Spacing-*` token is `0`. Component-level overrides (cookie banner, category title) hand-tune `-0.3px`–`-0.64px`, but base tokens are flat.\n- **Soft black, not pure black.** Title text is `rgba(0,0,0,0.80)`. Pure `#000` is never used for body or title text.\n- **Dedicated digit face.** Counts, stats, and follow-numbers always use `RED Number` for tabular alignment.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary**\n- Background: `#FF2442` (or `#FF2E4D` when matching the live `.reds-button-new.primary` class)\n- Text: `#FFFFFF`, weight 500, 14px\n- Radius: **pill — `border-radius: 9999px`**\n- Padding: `8px 20px` small / `12px 32px` large\n- No shadow\n\n**Secondary (filled)**\n- Background: `rgba(48,48,52,0.10)` (`--fill2`) — soft grey\n- Text: `rgba(0,0,0,0.80)` (`--title`)\n- Same pill radius\n\n**Secondary (outlined)**\n- Background: `#FFFFFF`\n- Border: `1px solid #FF2E4D`\n- Text: `#FF2E4D`\n- Pill radius. Used for the unfollowed-state follow CTA on profile cards.\n\n**Icon button (like / collect / comment)**\n- Pure icon (24px) stacked over count (12px, `rgba(0,0,0,0.45)`)\n- No background plate\n- Active state: icon flips to `#FF2442` (heart) or `#FDBC5F` (star); count text matches\n\n### Follow Button — three-state (highest-recognition component)\n\n| State | Background | Label (Chinese / English) | Text | Shape |\n|---|---|---|---|---|\n| Not following | `#FF2442` | `+ 关注` (Follow) | white | pill |\n| Following | `rgba(48,48,52,0.10)` | `已关注` (Following) | `rgba(0,0,0,0.45)` | pill |\n| Mutual | `rgba(48,48,52,0.10)` | `互相关注` (Mutual) | `rgba(0,0,0,0.62)` | pill |\n\nFeed-card variant: `6px 14px` padding, 12px text. Profile-page variant: `8px 20px`, 14px text.\n\n### Cards (Feed / Note Card)\n\n- Radius **12px** (16px for larger feature cards)\n- **No box-shadow by default.** White card sits on `#F5F5F5` canvas — separation comes from the canvas color, not elevation.\n- Structure: image fills top edge-to-edge → title (1–2 lines, 12px padding) → footer (32px round avatar + nickname + heart + count)\n- Image clips to top corners only; bottom corners are square because the image fills to the bottom of the image region.\n- PC hover: subtle `translateY(-2px)` plus a very light shadow (`0 4px 12px rgba(0,0,0,0.08)`). Mobile: no hover state.\n\n### Inputs / Search\n\n- Background: `#F5F5F5`\n- Border: none (focus may add a `1px solid` of `--separator`)\n- Radius: pill (or 20px for taller fields)\n- Height: 36–40px\n- Inline magnifier icon at the leading edge\n\n### Tabs / Segmented Control\n\n- Text-only tabs with a **2px underline bar** — never pill background, never colored chip.\n- Active: text color shifts to `rgba(0,0,0,0.80)` and weight bumps to 600; underline bar uses `#FF2E4D`, width matches text width.\n- Inactive: text `rgba(0,0,0,0.45)`, weight 400.\n- Tab spacing: ~40px.\n\n### Tags / Topics\n\n- Pill rectangle, `padding: 4px 12px`, `font-size: 12px`\n- Default: `rgba(48,48,52,0.10)` bg + `rgba(0,0,0,0.62)` text\n- Trending / featured: `#FF2442` bg + white text\n\n### Badges / Counts\n\n- Numeric badge: `#FF2442` bg + white digit, min 16×16, pill\n- Pure red dot: 8px diameter, offset `-4px / -4px` from icon corner\n- HOT marker: small pill, `#FF6B35` or brand red, 10px white text\n\n### Avatars\n\n- Always circular (`border-radius: 50%`)\n- Feed: 28–32px. Profile hero: 80–96px.\n- No white stroke.\n- Verification badges sit on the lower-right at ~25–30% of the avatar diameter:\n  - Red V (creator)\n  - Blue V (enterprise)\n\n### Bottom Sheet (mobile only — replaces most modals)\n\n- Slides from screen bottom over a `rgba(0,0,0,0.5)` scrim\n- **Top-only radius `16px 16px 0 0`**\n- Drag handle: `4px × 36px`, `#E0E0E0`, centered, ~6px below top edge\n- Dismiss: drag-down past threshold, or tap scrim\n- Used for: share, report, more-actions, comment-compose — almost everything that would be a modal on PC.\n\n### PC Modal\n\n- Centered, white background, 12px radius\n- Light shadow (`0 8px 32px rgba(0,0,0,0.12)`) — the only place shadow is conspicuous\n\n## 5. Layout Principles\n\n### Spacing System (8pt grid)\n\nBase unit 8px. Common stops: `4 / 8 / 12 / 16 / 20 / 24 / 32`. Section gaps jump to `48 / 64`.\n\n### Responsive Waterfall (PC discover)\n\nFive-column masonry at the standard desktop width, stepping down on narrower viewports.\n\n| Viewport | Columns | Column gap |\n|---|---|---|\n| ≥ 960px | 5 | 10px |\n| 690–960px | 4 | 10px |\n| 500–690px | 3 | 10px |\n| < 500px | 2 | 10px |\n\nImplementation is JavaScript-positioned (`translate3d` + ResizeObserver), not CSS Grid, because card heights are unknown until images load. This also predates widespread CSS Masonry support (still behind flags in most browsers as of 2026); the JS approach buys cross-browser consistency at the cost of layout-shift risk on slow image loads. The masonry deliberately does not align rows — variable image height *is* the realism.\n\n### Mobile Two-Column\n\n- Two columns, each ~48.2% of viewport width\n- Row gap ~7px\n- Outer side margin `12rpx` per side (≈ 6px @ 375px)\n\n### Note Detail (PC)\n\n- Two-pane: left ~500px image carousel / right ~500px metadata + comments, total ~1100px\n- Image aspect chosen at upload time — vertical 3:4 / square 1:1 / horizontal 4:3\n- The carousel is the dominant visual; comments scroll independently on the right\n\n### Profile\n\n- 16:9 banner image at top\n- Circular avatar (80–96px) overlaps banner / content edge\n- Three-stat horizontal row (following / followers / likes-and-collects)\n- Tab strip below: Notes / Saved / Liked (笔记 / 收藏 / 赞过)\n\n### Creator / Ad Console (B2B)\n\nStandard left-nav console: 200–240px sidebar + ~1000–1100px content area. Top of content is a row of stat cards (impressions, likes, follower delta), below is a list or chart region. **No left-border accent on cards.** Surfaces are white, separation is by spacing.\n\n### Whitespace\n\n- The discover grid is dense — *content* density is the value proposition.\n- Section padding sits *between* feeds, not within them.\n- Cards do not have internal vertical padding above the image — image is flush to the top of the card.\n\n## 6. Depth & Elevation\n\nThree levels, used sparingly.\n\n| Level | Treatment | Use |\n|---|---|---|\n| Flat (0) | No shadow | Default — feed cards, tags, buttons (both modes) |\n| Subtle (1) | `0 4px 12px rgba(0,0,0,0.08)` | PC card hover (light mode only) |\n| Modal (2) | `0 8px 32px rgba(0,0,0,0.12)` | Centered modal on PC (light mode only) |\n| Dark mode | Drop shadows or replace with a `1px` hairline (`rgba(255,255,255,0.07)`) | `rgba(0,0,0,*)` shadows are invisible on the `#19191E` canvas; the scrim alone provides modal separation, and the PC card-hover `translateY(-2px)` is dropped entirely (motion + shadow both read as no-ops against the dark surface) |\n\n**Shadow is the exception, not the rule.** Depth comes from:\n1. Background color contrast (`#F5F5F5` canvas under `#FFFFFF` cards)\n2. Generous radius (cards visually float because corners are rounded)\n3. Whitespace between elements\n\nNo neumorphism. No glassmorphism. No coloured shadows. Bottom sheet has no shadow at all — the scrim provides the separation. In dark mode, drop the PC card-hover effect (`translateY(-2px)` + alpha-on-black shadow) entirely; both motion and shadow read as no-ops against the dark canvas.\n\n## 7. Do's and Don'ts\n\n### Do\n- ✅ Treat brand red as singular. One CTA accent per screen, no second saturated color competing.\n- ✅ Use translucent fill overlays (`rgba(48,48,52,0.05/.10/.20)`) for hover / disabled / pressed — not separate grey shades.\n- ✅ Round generously: 12–16px on cards, full pill on buttons.\n- ✅ Set body text at `rgba(0,0,0,0.80)` for titles and `rgba(0,0,0,0.62)` for paragraphs — soft black always.\n- ✅ Use `RED Number` (or any tabular-numerals stack) for stats and counts.\n- ✅ Let user-uploaded images carry the color story. The UI is the picture frame.\n- ✅ Default to bottom-sheet for secondary actions on mobile; reserve centered modal for PC and confirmations only.\n- ✅ Tabs are text + 2px underline. Always.\n- ✅ Speak in second person, conversational. \"what you just scrolled past\" is more RED than \"Discover trending content\".\n\n### Don't\n- ❌ Don't use purple, deep blue, or black-gold as a primary color. Tech / fintech / luxury vocabulary is the wrong genre — RED is lifestyle.\n- ❌ Don't gradient the brand red itself. The only gradients are functional (search-hotspot badge, video mask).\n- ❌ Don't fill an entire hero with a brand-color background. Brand red is accent-only; a red-bordered hero reads as a sale poster, not a feed.\n- ❌ Don't fabricate the `小红书` wordmark or the RED logotype as artifact output. Tokens are not protectable; the wordmark is — that is the part of the brand identity with actual IP risk. When a logo placeholder is needed, emit a labelled grey block (e.g. an empty pill with `LOGO` in `rgba(0,0,0,0.45)`) and let the user drop in a licensed asset.\n- ❌ Don't use Inter, Helvetica, or Roboto as the Chinese display face. PingFang SC is the system — Latin fallback chains use `-apple-system` first.\n- ❌ Don't reference the `RED Number` family standalone in generated CSS. End users do not have it installed; without the PingFang fallback chain it silently falls back to whatever the OS picks, which breaks digit alignment. Always emit it inside a stack, e.g. `font-family: 'RED Number', PingFang SC, -apple-system, 'Helvetica Neue', Arial, sans-serif;`.\n- ❌ Don't ship light / thin weights at body sizes. Notes carry dense Chinese text; light weights destroy mobile legibility.\n- ❌ Don't add a left-border colored accent stripe to cards (the SaaS / dashboard tell). Cards separate via canvas color and radius, not colored chrome.\n- ❌ Don't drop heavy shadows. Concrete threshold: avoid alpha darker than `rgba(0,0,0,0.15)` or spread greater than `16px`. If the shadow is visible at arm's length on a phone, it is too strong for this system.\n- ❌ Don't pile glassmorphism, neumorphism, or 2020-era trend effects. The visual era reference is \"lifestyle magazine\", not \"tech demo\".\n- ❌ Don't write a \"Trusted by 10,000+ teams\" enterprise social-proof block. UGC trust comes from real people, not logo walls.\n- ❌ Don't write hero CTAs in all-caps Latin. Sentence-case Chinese, sentence-case Latin, no exceptions.\n- ❌ Don't use stock business photography (handshakes, laptop close-ups, conference rooms). Use real-life UGC-style imagery.\n- ❌ Don't use 3D isometric / blob / abstract-network illustrations. They are SaaS-marketing tells. RED uses real photos or hand-drawn editorial illustrations.\n- ❌ Don't write copy in third person (\"the platform provides…\"). Always second person (\"what you want to see\").\n- ❌ Don't surface unverifiable stat claims (\"10× faster\", \"save N hours\"). RED's brand voice is emotional resonance, not metric promises.\n- ❌ Don't use orange / yellow as a Toast emphasis color. Emphasis in this system is brand red, period.\n- ❌ Don't hard-pin every card to the same height. Variable card height across columns is the realism — don't \"fix\" it.\n\n## 8. Responsive Behavior\n\n### Breakpoints\n\n| Name | Width | Discover columns | Notes |\n|---|---|---|---|\n| Mobile | < 500px | 2 | App-like density, edge-to-edge waterfall |\n| Tablet | 500–690px | 3 | Padding eases, tap targets stay 44px+ |\n| Small Desktop | 690–960px | 4 | Standard reading width |\n| Desktop | ≥ 960px | 5 | Full waterfall, sidebar visible |\n\n### Collapsing Strategy\n\n- **Discover**: 5 → 4 → 3 → 2 columns; column gap stays at 10px throughout.\n- **Note detail**: two-pane PC layout collapses to single-column stack on mobile (image carousel on top, body + comments below).\n- **Profile**: stat row stays horizontal at 3 columns down to mobile; tab strip remains horizontal with overflow scroll.\n- **Console (creator / ad)**: sidebar collapses to a hamburger drawer below ~768px; stat-card row wraps to 2-up.\n\n### Touch Targets\n\n- Minimum tap target 44×44px on mobile. Icon buttons render at 24px icon inside a 44×44 hit zone.\n- Pill buttons keep 36–40px height on mobile to honor this without growing radius.\n\n### Type at Mobile\n\n- Body sizes do not shrink below 14px. Small captions stay at 12px to preserve density without becoming illegible on Chinese characters.\n\n## 9. Agent Prompt Guide\n\n### Brand Red Disambiguation\n\nTwo reds ship in the live system. They split by **surface**, not by mood — the wrong surface choice is the most common artifact-level slop in this design system, so the rule is explicit:\n\n- **Default — emit `#FF2442`** (`--primary` / `--color-red`) for everything that is *not* a pixel-for-pixel replica of an existing component: new CTAs, hearts, accent fills, tag-on-trending, page-token references.\n- **Pixel-replica — emit `#FF2E4D`** *only* when reproducing the live `.reds-button-new.primary` button fill, the `.active-bar` tab indicator, or the outlined follow-button border. Treat this as the production-fidelity value; do not generalize it to other components.\n- **Never mix the two on one component.** `background: #FF2442` next to `border: 1px solid #FF2E4D` on the same element is the failure mode this rule prevents — pick one surface category, then stay in it.\n\nThe Component One-Liners block below is intentional: the primary CTA uses `#FF2442` (token red, default) while the tab indicator uses `#FF2E4D` (component red, pixel-replica). They are different surfaces, so they get different reds.\n\n### Quick Color Reference\n\n- Brand: `#FF2442` (token, default) / `#FF2E4D` (component layer, pixel-replica only — see disambiguation above)\n- Star (collect): `#FDBC5F`\n- Surface: `#FFFFFF`\n- Canvas: `#F5F5F5`\n- Title text: `rgba(0,0,0,0.80)`\n- Paragraph: `rgba(0,0,0,0.62)`\n- Description: `rgba(0,0,0,0.45)`\n- Hover / disabled fill: `rgba(48,48,52,0.10)`\n- Hairline: `rgba(0,0,0,0.08)`\n\n### Quick Type Reference\n\n- Family: `PingFang SC, -apple-system, 'Helvetica Neue', 'Hiragino Sans GB', 'Microsoft Yahei', Arial`\n- Stat / digit family: `RED Number`\n- Heading: 20–32px, weight 600, line-height 125–140%\n- Body: 14–16px, weight 400, line-height 143–150%\n- Tracking: 0\n\n### Component One-Liners\n\n- Primary CTA: `background: #FF2442; color: #FFF; border-radius: 9999px; padding: 8px 20px; font-weight: 500;`\n- Follow button (idle): same as primary CTA, label `+ 关注` (Follow)\n- Follow button (following): `background: rgba(48,48,52,0.10); color: rgba(0,0,0,0.45); border-radius: 9999px;` label `已关注` (Following)\n- Feed card: `background: #FFF; border-radius: 12px; box-shadow: none;` image flush to top\n- Tab indicator: 2px underline `#FF2E4D` matched to text width; active text `rgba(0,0,0,0.80)` weight 600\n- Search input: `background: #F5F5F5; border-radius: 9999px; padding: 8px 16px; height: 36–40px; border: none;`\n- Bottom sheet: `border-radius: 16px 16px 0 0; background: #FFF;` 4×36px drag handle `#E0E0E0` centered\n\n### Iteration Guide\n\n1. **Start from the picture, not the chrome.** Drop a generous photographic hero or pin grid first; build UI around it as quietly as possible.\n2. **One accent.** If you have used `#FF2442` once on a screen, you have used it enough.\n3. **Translucent neutrals.** Reach for `rgba(48,48,52, .10)` before reaching for a fresh grey hex.\n4. **Pill everything that's tappable.** If it looks like a square button, it is wrong.\n5. **No shadow until a hover or modal demands it.** Default elevation is flat.\n6. **Second person Chinese voice.** Even Latin copy should read like a friend talking, not a vendor pitching.\n7. **Variable card heights.** A 3:4 image next to a 4:5 image is the look — do not pad both to the same height.\n8. **Mobile-first density.** Two-column waterfall is the canonical layout; everything else is a response to a wider viewport.\n"
+  }
+}

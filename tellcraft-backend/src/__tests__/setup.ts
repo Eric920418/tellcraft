@@ -23,6 +23,9 @@ vi.mock('../lib/env', () => ({
     API_URL: 'http://localhost:3100',
     SOCKET_VERBOSE_LOG: false,
     ALLOWED_CALLBACK_HOSTS: 'http://localhost:3000',
+    ENABLE_DESIGN_TELEMETRY_V2: true,
+    ENABLE_OPEN_DESIGN_STYLES: true,
+    OPEN_DESIGN_STYLE_MAX_INJECT_COUNT: 1,
   })),
 }))
 

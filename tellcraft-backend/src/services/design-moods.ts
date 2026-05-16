@@ -7,6 +7,8 @@
  */
 
 import type { DesignTier } from './uiux-generation'
+import { matchOpenDesignStyle, type OpenDesignCuratedEntry } from './open-design-md-loader'
+import { getEnv } from '../lib/env'
 
 // ============================================================
 // Types
@@ -397,12 +399,36 @@ interface MoodScore {
  * 規則式推薦 1-3 個 mood ID
  * 三層加權：feeling 關鍵詞(50) + 產品類型親和(30) + tier 過濾(必要條件)
  * 無匹配（分數太低）→ 回傳空陣列
+ *
+ * **既有 caller 不傳 options 時行為零改變**（return string[]）。
+ * 新 caller 可改用 recommendMoodsWithHint() 拿到 open-design hint。
  */
 export function recommendMoods(
   feeling: string,
   productType: string,
   tier: DesignTier
 ): string[] {
+  return recommendMoodsWithHint(feeling, productType, tier).moodIds
+}
+
+export interface RecommendMoodsResult {
+  moodIds: string[]
+  /** Phase 1: open-design 差集風格 hint，未命中或 flag off 時 undefined */
+  openDesignStyleHint?: OpenDesignCuratedEntry
+}
+
+/**
+ * Phase 1 擴展版 recommendMoods：同時回傳 open-design hint。
+ *
+ * Layer 2.5（在 Layer 2 既有加權之後）：呼叫 matchOpenDesignStyle 找差集 style 匹配。
+ * 命中即 set hint，呼叫端決定要不要注入 generateVariants dynamic block。
+ * 嚴格門檻（loader 端 ≥15 分 + 受 OPEN_DESIGN_STYLE_MAX_INJECT_COUNT 上限約束）。
+ */
+export function recommendMoodsWithHint(
+  feeling: string,
+  productType: string,
+  tier: DesignTier
+): RecommendMoodsResult {
   const input = feeling.toLowerCase()
   const scores: MoodScore[] = []
 
@@ -438,10 +464,24 @@ export function recommendMoods(
 
   // 門檻：至少 15 分（避免過低分推薦）
   const MIN_SCORE = 15
-  return scores
+  const moodIds = scores
     .filter(s => s.score >= MIN_SCORE)
     .slice(0, 3)
     .map(s => s.id)
+
+  // Layer 2.5: open-design 差集風格 hint（Phase 1, gate ENABLE_OPEN_DESIGN_STYLES）
+  // fail-soft：loader 異常或 flag off 自動返回 null，不影響 moodIds 主流程
+  let openDesignStyleHint: OpenDesignCuratedEntry | undefined
+  if (getEnv().ENABLE_OPEN_DESIGN_STYLES) {
+    try {
+      const matched = matchOpenDesignStyle(feeling, productType)
+      if (matched) openDesignStyleHint = matched
+    } catch {
+      // 任何 loader 異常都不阻塞 recommendMoods
+    }
+  }
+
+  return { moodIds, openDesignStyleHint }
 }
 
 // ============================================================

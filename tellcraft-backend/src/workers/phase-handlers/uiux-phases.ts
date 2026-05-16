@@ -26,6 +26,7 @@ import { getBddSession, updateBddSession } from '../../services/bdd-session'
 import { analyzeReference, analyzeUploadedImage, analyzeMultipleReferences, extractAllUrls, formatMergedReferenceForPrompt } from '../../services/reference-analyzer'
 import { getImageLibraryOrFallback, invalidateImageLibrary } from '../../services/image-library-service'
 import { recommendMoods, getMoodSummary } from '../../services/design-moods'
+import { matchOpenDesignStyle } from '../../services/open-design-md-loader'
 import { updateDesignMemory, extractPaletteFromDesignSystem, extractFontFamily, extractStyleKeywords } from '../../services/design-memory'
 import {
   pickNextClarifyAxis, shouldAskSupplementary, pickSupplementaryQuestion,
@@ -1333,6 +1334,27 @@ export async function handleVariantSelection(
   state.uiuxCodeGenerationStartedAt = Date.now()
   await saveFlowState(redis, conversationId, state)
 
+  // Phase 1: 反向匹配此次 brief 是否命中 open-design 差集風格（純記憶體 O(N)，N≈10，零 LLM）
+  // 命中即寫 state + telemetry，供 Phase 1.5 監控按 styleKey 切片是否拖低 score
+  if (getEnv().ENABLE_OPEN_DESIGN_STYLES) {
+    try {
+      const feelingSource = [
+        state.uiuxDesignBrief?.styleSummary,
+        state.uiuxDesignBrief?.signature,
+        state.uiuxDesignBrief?.domainKeywords?.join(' '),
+        state.fastModeExpandedPrompt,
+      ].filter(Boolean).join(' ')
+      const productType = state.uiuxPreparedTemplate?.category ?? state.fastModeProductType ?? ''
+      const openDesignMatch = matchOpenDesignStyle(feelingSource, productType)
+      if (openDesignMatch) {
+        state.uiuxOpenDesignStyleKey = openDesignMatch.styleKey
+        await saveFlowState(redis, conversationId, state)
+      }
+    } catch {
+      // fail-soft：loader 異常不影響 variant 選定流程
+    }
+  }
+
   // Phase 0 閉環：固化此次設計選擇（mood/tier/dsHash/variantConcept）。fire-and-forget，gate ENABLE_DESIGN_TELEMETRY_V2
   if (getEnv().ENABLE_DESIGN_TELEMETRY_V2) {
     recordTelemetry({
@@ -1351,6 +1373,7 @@ export async function handleVariantSelection(
         variantConceptName: variantConcept.name,
         variantSignature: variantConcept.signatureElement ?? null,
         selectedVariantIds: selectedIds,
+        openDesignStyleKey: state.uiuxOpenDesignStyleKey ?? null,
       },
     }).catch(() => {})
   }

@@ -190,6 +190,7 @@ export type DesignSystemSource =
   | 'vendored_modified'    // vendored 後用戶迭代修改過
   | 'iteration_modified'   // Phase G: 迭代修改後從代碼反推同步（design-system-token / mixed tier）
   | 'imported_design_md'   // Phase I: 用戶上傳 DESIGN.md 解析後套用
+  | 'open_design_md'       // Phase 1: nexu-io/open-design 差集風格範本（bergside/awesome-design-skills 來源）
   | 'rolled_back'          // 從版本 snapshot 還原
 
 export interface FreezeResult {

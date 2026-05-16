@@ -107,6 +107,9 @@ const envSchema = z.object({
   ENABLE_READABILITY_CHECK: z.stringbool().default(true),        // Flesch-Kincaid 英文 + 中文長度規則（hero >30 字 / CTA >12 字）。在 evaluator desktop-light 跑，FKGL ≥14 critical，11-14 warning
   // 設計審美閉環 telemetry v2（Phase 0）— 寫 design_quality_snapshot / iteration_score_delta / iteration_aesthetic_complaint / design_choice_recorded 給週報「Design Knowledge Effectiveness」章節用。fire-and-forget 純寫入無副作用
   ENABLE_DESIGN_TELEMETRY_V2: z.stringbool().default(true),      // kill switch：失控時設 false 立即停止寫新事件，不影響 pipeline
+  // open-design 差集風格範本（Phase 1）— 整合 nexu-io/open-design 跟 awesome-design-md 的差集（~15 個 bergside/awesome-design-skills 來源）。用戶選擇立刻啟用，48h 內密集監控 telemetry
+  ENABLE_OPEN_DESIGN_STYLES: z.stringbool().default(true),       // kill switch：iteration_aesthetic_complaint 突增或 score_delta 顯著惡化時設 false 立即關閉注入
+  OPEN_DESIGN_STYLE_MAX_INJECT_COUNT: z.coerce.number().default(1), // 單次 generateVariants prompt dynamic block 最多注入 N 個 style hint（≥2 易造成選擇爆炸）
   // T9: 金絲雀放量百分比（0-100，default 0；> 0 時優先於 ENABLE_*=true 的硬開關）
   ENABLE_UI_EVALUATOR_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
   ENABLE_DESIGN_QUALITY_REPORT_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),

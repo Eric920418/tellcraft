@@ -1,0 +1,238 @@
+{
+  "styleKey": "arc",
+  "meta": {
+    "source": "open-design",
+    "license": "apache-2.0",
+    "upstreamPath": "design-systems/arc/DESIGN.md",
+    "sha256OfMd": "59eec6f733a4a55f95f3c1e7b6cb329349c9b3f1774d74042146ad42809f430f",
+    "parsedAt": "2026-05-16T14:17:31.487Z"
+  },
+  "atmosphereKeywords": [
+    "browser",
+    "dissolves",
+    "boundary",
+    "between",
+    "chrome",
+    "page",
+    "where",
+    "safari",
+    "treat",
+    "frame",
+    "container",
+    "treats"
+  ],
+  "productTypeAffinity": [],
+  "designSystem": {
+    "metadata": {
+      "source": "vendored_designmd",
+      "brandKey": "arc",
+      "generatedAt": 1778941051471
+    },
+    "visualTheme": {
+      "atmosphere": "Arc Browser dissolves the boundary between the chrome and the page. Where Chrome and Safari treat the browser frame as a container, Arc treats it as scenery — the toolbar fades into the system wallpaper, the sidebar carries gradient warmth from the user's chosen \"theme color\", and translucency is everywhere. The visual signature is **frosted glass plus a single saturated gradient** — most often a peach-to-coral or violet-to-fuchsia bloom — that sets the emotional temperature of the entire window.\n\nTypography uses **Inter** for chrome and a custom display serif (`Argent CF` or similar) for marketing — when Arc speaks publicly it speaks editorially, in a serif voice unusual for tech. The product itself is sans-only, with tight tracking and generous line-height.\n\nShapes are squircle-soft: 12–16px radii on cards, 8px on tabs, 9999px pills for tags. Borders are rare — Arc prefers tinted background washes (`rgba(255, 255, 255, 0.5)` over the gradient) to delineate panes."
+    },
+    "colorPalette": {
+      "primary": [
+        {
+          "name": "Sunset Start",
+          "value": "#ff7e5f",
+          "role": "Peach gradient origin."
+        },
+        {
+          "name": "Sunset End",
+          "value": "#feb47b",
+          "role": "Soft coral gradient terminus."
+        },
+        {
+          "name": "Twilight Start",
+          "value": "#7f5af0",
+          "role": "Violet gradient origin."
+        },
+        {
+          "name": "Twilight End",
+          "value": "#e84393",
+          "role": "Fuchsia gradient terminus."
+        },
+        {
+          "name": "Aurora Start",
+          "value": "#16f2b3",
+          "role": "Mint gradient origin."
+        },
+        {
+          "name": "Aurora End",
+          "value": "#0db4f7",
+          "role": "Cyan gradient terminus."
+        }
+      ],
+      "brand": [
+        {
+          "name": "Arc Coral",
+          "value": "#ff5f5f",
+          "role": "Default brand color — used in marketing, `arc.net`."
+        },
+        {
+          "name": "Arc Lavender",
+          "value": "#b794f4",
+          "role": "Secondary brand accent."
+        }
+      ],
+      "accent": [
+        {
+          "name": "Success",
+          "value": "#48bb78",
+          "role": "Toast confirmation."
+        },
+        {
+          "name": "Warning",
+          "value": "#f6ad55",
+          "role": "Permission prompt."
+        },
+        {
+          "name": "Error",
+          "value": "#f56565",
+          "role": "Form validation."
+        }
+      ],
+      "other": [
+        {
+          "name": "Ink Primary",
+          "value": "#1a1a1f",
+          "role": "Primary text on light frosted surface."
+        },
+        {
+          "name": "Ink Secondary",
+          "value": "#54545a",
+          "role": "Secondary text, tab title at rest."
+        },
+        {
+          "name": "Ink Muted",
+          "value": "#8c8c93",
+          "role": "Tertiary, captions, URL bar."
+        },
+        {
+          "name": "Ink Inverse",
+          "value": "#fafafa",
+          "role": "Text on dark frosted surface."
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Display / Marketing",
+      "monoFont": "Code / Mono",
+      "hierarchy": [
+        {
+          "role": "Marketing Hero",
+          "font": "Argent CF",
+          "size": "72px (4.5rem)",
+          "weight": "400",
+          "lineHeight": "1.05",
+          "letterSpacing": "-0.03em",
+          "notes": "Editorial display, marketing only"
+        },
+        {
+          "role": "Section Heading",
+          "font": "Argent CF",
+          "size": "40px (2.5rem)",
+          "weight": "400",
+          "lineHeight": "1.15",
+          "letterSpacing": "-0.02em",
+          "notes": "Marketing section titles"
+        },
+        {
+          "role": "Page H1",
+          "font": "Inter",
+          "size": "32px (2rem)",
+          "weight": "700",
+          "lineHeight": "1.2",
+          "letterSpacing": "-0.02em",
+          "notes": "Settings, command bar header"
+        },
+        {
+          "role": "Page H2",
+          "font": "Inter",
+          "size": "22px (1.375rem)",
+          "weight": "600",
+          "lineHeight": "1.25",
+          "letterSpacing": "-0.01em",
+          "notes": "Sub-section"
+        },
+        {
+          "role": "Tab Title",
+          "font": "Inter",
+          "size": "13px (0.8125rem)",
+          "weight": "500",
+          "lineHeight": "1.3",
+          "letterSpacing": "-0.005em",
+          "notes": "Sidebar tab label"
+        },
+        {
+          "role": "Body",
+          "font": "Inter",
+          "size": "15px (0.9375rem)",
+          "weight": "400",
+          "lineHeight": "1.55",
+          "letterSpacing": "normal",
+          "notes": "Settings prose, tooltips"
+        },
+        {
+          "role": "Caption",
+          "font": "Inter",
+          "size": "12px (0.75rem)",
+          "weight": "500",
+          "lineHeight": "1.4",
+          "letterSpacing": "0.01em",
+          "notes": "URL bar protocol, metadata"
+        },
+        {
+          "role": "Code",
+          "font": "Berkeley Mono",
+          "size": "13px (0.8125rem)",
+          "weight": "400",
+          "lineHeight": "1.5",
+          "letterSpacing": "normal",
+          "notes": "URL bar, devtools"
+        }
+      ],
+      "principles": [
+        "Argent CF appears only in marketing. The product is sans-only.",
+        "tabs render at 13px so a long sidebar of 30+ tabs stays scannable.",
+        "0.03em at 72px, returning to normal by 15px."
+      ]
+    },
+    "components": {
+      "buttons": [
+        {
+          "name": "Primary (Filled)",
+          "properties": {
+            "background": "linear-gradient on theme color (e.g., `linear-gradient(135deg, #ff7e5f, #feb47b)`)",
+            "text": "`#ffffff`",
+            "padding": "10px 20px",
+            "radius": "12px",
+            "shadow": "`0 4px 16px rgba(255, 127, 95, 0.3)`",
+            "hover": "shadow grows to `0 8px 24px rgba(255, 127, 95, 0.4)`"
+          }
+        },
+        {
+          "name": "Glass (Secondary)",
+          "properties": {
+            "background": "`rgba(255, 255, 255, 0.7)`",
+            "backdrop": "`blur(20px)`",
+            "text": "`#1a1a1f`",
+            "border": "1px solid `rgba(255, 255, 255, 0.4)`",
+            "padding": "10px 20px",
+            "radius": "12px"
+          }
+        },
+        {
+          "name": "Subtle",
+          "properties": {
+            "background": "transparent",
+            "text": "theme color",
+            "hover": "background `rgba(255, 127, 95, 0.1)`"
+          }
+        }
+      ]
+    },
+    "rawMarkdown": "# Design System Inspired by Arc Browser\n\n> Category: Productivity & SaaS\n> \"The browser that browses for you.\" Translucent surfaces, gradient warmth, sidebar-first layout.\n\n## 1. Visual Theme & Atmosphere\n\nArc Browser dissolves the boundary between the chrome and the page. Where Chrome and Safari treat the browser frame as a container, Arc treats it as scenery — the toolbar fades into the system wallpaper, the sidebar carries gradient warmth from the user's chosen \"theme color\", and translucency is everywhere. The visual signature is **frosted glass plus a single saturated gradient** — most often a peach-to-coral or violet-to-fuchsia bloom — that sets the emotional temperature of the entire window.\n\nTypography uses **Inter** for chrome and a custom display serif (`Argent CF` or similar) for marketing — when Arc speaks publicly it speaks editorially, in a serif voice unusual for tech. The product itself is sans-only, with tight tracking and generous line-height.\n\nShapes are squircle-soft: 12–16px radii on cards, 8px on tabs, 9999px pills for tags. Borders are rare — Arc prefers tinted background washes (`rgba(255, 255, 255, 0.5)` over the gradient) to delineate panes.\n\n**Key Characteristics:**\n- Translucent frosted-glass surfaces over a saturated gradient background\n- Theme-color gradients (peach-coral, violet-fuchsia, mint-cyan) as the primary mood\n- Inter for product chrome, Argent CF (serif) for marketing display\n- Squircle-soft 12–16px radii everywhere\n- Sidebar-first layout: tabs, spaces, and bookmarks live on the left, not the top\n- Color picker is a brand surface — themes are user-driven, not fixed\n- Subtle shadows (`0 8px 32px rgba(0,0,0,0.08)`) over the gradient backdrop\n\n## 2. Color Palette & Roles\n\n### Primary Theme Gradients (User-selectable; default is \"Sunset\")\n- **Sunset Start** (`#ff7e5f`): Peach gradient origin.\n- **Sunset End** (`#feb47b`): Soft coral gradient terminus.\n- **Twilight Start** (`#7f5af0`): Violet gradient origin.\n- **Twilight End** (`#e84393`): Fuchsia gradient terminus.\n- **Aurora Start** (`#16f2b3`): Mint gradient origin.\n- **Aurora End** (`#0db4f7`): Cyan gradient terminus.\n\n### Surface (Frosted)\n- **Glass Light** (`rgba(255, 255, 255, 0.7)`): Standard frosted pane over gradient.\n- **Glass Medium** (`rgba(255, 255, 255, 0.5)`): Hover state, tab pill background.\n- **Glass Heavy** (`rgba(255, 255, 255, 0.85)`): Active pane, command bar.\n- **Glass Dark** (`rgba(20, 20, 25, 0.6)`): Dark-mode frosted surface.\n\n### Ink & Text\n- **Ink Primary** (`#1a1a1f`): Primary text on light frosted surface.\n- **Ink Secondary** (`#54545a`): Secondary text, tab title at rest.\n- **Ink Muted** (`#8c8c93`): Tertiary, captions, URL bar.\n- **Ink Inverse** (`#fafafa`): Text on dark frosted surface.\n\n### Border & Divider\n- **Border Glass** (`rgba(255, 255, 255, 0.4)`): Frosted-edge border.\n- **Border Hairline** (`rgba(0, 0, 0, 0.06)`): Hairline divider on light surface.\n- **Border Active** (`rgba(0, 0, 0, 0.18)`): Active tab outline.\n\n### Brand Accent\n- **Arc Coral** (`#ff5f5f`): Default brand color — used in marketing, `arc.net`.\n- **Arc Lavender** (`#b794f4`): Secondary brand accent.\n\n### Semantic\n- **Success** (`#48bb78`): Toast confirmation.\n- **Warning** (`#f6ad55`): Permission prompt.\n- **Error** (`#f56565`): Form validation.\n\n## 3. Typography Rules\n\n### Font Family\n- **Display / Marketing**: `Argent CF`, with fallback: `'Source Serif Pro', Georgia, serif`\n- **Body / UI**: `Inter`, with fallback: `system-ui, -apple-system, BlinkMacSystemFont, sans-serif`\n- **Code / Mono**: `Berkeley Mono`, with fallback: `ui-monospace, Menlo, Consolas, monospace`\n\n### Hierarchy\n\n| Role | Font | Size | Weight | Line Height | Letter Spacing | Notes |\n|------|------|------|--------|-------------|----------------|-------|\n| Marketing Hero | Argent CF | 72px (4.5rem) | 400 | 1.05 | -0.03em | Editorial display, marketing only |\n| Section Heading | Argent CF | 40px (2.5rem) | 400 | 1.15 | -0.02em | Marketing section titles |\n| Page H1 | Inter | 32px (2rem) | 700 | 1.2 | -0.02em | Settings, command bar header |\n| Page H2 | Inter | 22px (1.375rem) | 600 | 1.25 | -0.01em | Sub-section |\n| Tab Title | Inter | 13px (0.8125rem) | 500 | 1.3 | -0.005em | Sidebar tab label |\n| Body | Inter | 15px (0.9375rem) | 400 | 1.55 | normal | Settings prose, tooltips |\n| Caption | Inter | 12px (0.75rem) | 500 | 1.4 | 0.01em | URL bar protocol, metadata |\n| Code | Berkeley Mono | 13px (0.8125rem) | 400 | 1.5 | normal | URL bar, devtools |\n\n### Principles\n- **Serif moments are rare**: Argent CF appears only in marketing. The product is sans-only.\n- **Title size is small**: tabs render at 13px so a long sidebar of 30+ tabs stays scannable.\n- **Tracking tightens with size**: -0.03em at 72px, returning to normal by 15px.\n\n## 4. Component Stylings\n\n### Buttons\n\n**Primary (Filled)**\n- Background: linear-gradient on theme color (e.g., `linear-gradient(135deg, #ff7e5f, #feb47b)`)\n- Text: `#ffffff`\n- Padding: 10px 20px\n- Radius: 12px\n- Shadow: `0 4px 16px rgba(255, 127, 95, 0.3)`\n- Hover: shadow grows to `0 8px 24px rgba(255, 127, 95, 0.4)`\n\n**Glass (Secondary)**\n- Background: `rgba(255, 255, 255, 0.7)`\n- Backdrop: `blur(20px)`\n- Text: `#1a1a1f`\n- Border: 1px solid `rgba(255, 255, 255, 0.4)`\n- Padding: 10px 20px\n- Radius: 12px\n\n**Subtle**\n- Background: transparent\n- Text: theme color\n- Hover: background `rgba(255, 127, 95, 0.1)`\n\n### Tabs (Sidebar)\n- Background at rest: transparent\n- Background on hover: `rgba(255, 255, 255, 0.5)`\n- Background active: `rgba(255, 255, 255, 0.85)` + soft shadow\n- Padding: 8px 12px\n- Radius: 8px\n- Favicon: 16px square at left, 8px gap to title.\n\n### Cards / Panes\n- Background: `rgba(255, 255, 255, 0.7)`\n- Backdrop: `blur(24px)` saturate 180%\n- Border: 1px solid `rgba(255, 255, 255, 0.4)`\n- Radius: 16px\n- Shadow: `0 8px 32px rgba(0, 0, 0, 0.08)`\n- Padding: 24px\n\n### Inputs (Command Bar)\n- Background: `rgba(255, 255, 255, 0.85)`\n- Backdrop: `blur(40px)`\n- Text: `#1a1a1f`\n- Border: 1px solid `rgba(255, 255, 255, 0.4)`\n- Radius: 14px\n- Padding: 14px 18px\n- Focus: shadow `0 0 0 4px rgba(255, 127, 95, 0.2)`\n\n### Pills (Spaces / Bookmarks Folder)\n- Background: theme color at 16% alpha\n- Text: theme color (full)\n- Padding: 4px 10px\n- Radius: 9999px\n- Font: 12px / 600\n\n## 5. Spacing & Layout\n\n- **Base unit**: 4px. Scale: 4, 8, 12, 16, 24, 32, 48, 64.\n- **Sidebar**: 240px wide; collapsible to 56px.\n- **Window radius**: 12px on the OS window itself (macOS-only flourish).\n- **Padding inside panes**: 24px.\n\n## 6. Motion\n\n- **Duration**: 200ms for hover; 320ms for tab create/close; 480ms for \"Little Arc\" window expand.\n- **Easing**: `cubic-bezier(0.32, 0.72, 0, 1)` for window expand (Apple's spring-style).\n- **Tab swap**: 1px translate + opacity blend, no scale change.\n"
+  }
+}

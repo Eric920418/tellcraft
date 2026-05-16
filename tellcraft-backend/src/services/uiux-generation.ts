@@ -13,6 +13,7 @@ import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { selectTechniques, formatTechniquesForPrompt, formatTechniquesForPromptFast } from './design-techniques'
 import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary, getMoodCodeFragment, getMoodCodeFragmentCompact, getMoodById } from './design-moods'
+import { matchOpenDesignStyle, type OpenDesignCuratedEntry } from './open-design-md-loader'
 import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
 import { formatStructuredDataForPrompt } from './reference-analyzer'
 import { createLogger } from '../lib/logger'
@@ -1156,6 +1157,41 @@ const VARIANT_AXES = {
  * 生成 5 個設計變體
  * 一次 LLM 調用生成所有變體的 Design System
  */
+/**
+ * Phase 1 — open-design 差集風格 hint 注入 helper（dynamic block，cache 不失效）。
+ *
+ * 設計：
+ *   - 從 originalRequirements/bddSpec 抽 feeling string + productType 做匹配
+ *   - matchOpenDesignStyle 內部已 gate ENABLE_OPEN_DESIGN_STYLES，無命中返回 null → 整段 noop
+ *   - 注入內容極簡（≤300 字），只給「風格名稱 + atmosphere 摘要 + 主色提示」，不貼整份 DESIGN.md
+ *   - fail-soft：loader 異常自動 noop，不影響 variants 生成
+ */
+function buildOpenDesignStyleHintSection(feeling: string, productType: string): string {
+  let entry: OpenDesignCuratedEntry | null = null
+  try {
+    entry = matchOpenDesignStyle(feeling, productType)
+  } catch {
+    return ''
+  }
+  if (!entry) return ''
+
+  const ds = entry.designSystem
+  const atmo = ds.visualTheme?.atmosphere ?? ''
+  const primaryColors = (ds.colorPalette?.primary ?? ds.colorPalette?.brand ?? [])
+    .slice(0, 3)
+    .map(c => `${c.name}(${c.value})`)
+    .join(', ')
+  const summaryAtmo = atmo.length > 220 ? atmo.slice(0, 220) + '...' : atmo
+
+  return `
+## Open-Design 風格參考（Phase 1 差集，僅作 1 個變體的靈感來源，不要 5 個都套）
+- 風格：${entry.styleKey}
+${summaryAtmo ? `- 氛圍：${summaryAtmo}` : ''}
+${primaryColors ? `- 主色提示：${primaryColors}` : ''}
+- 用法：把這個風格作為其中 1 個變體的差異化方向，其他 4 個保持原本 mood/pattern 多樣性。
+`
+}
+
 export async function generateDesignVariants(
   template: TemplateData,
   bddSpec: string,
@@ -1221,6 +1257,7 @@ ${bddSpec || '（無規格）'}
 
 ${getVariantPromptHint(tier)}
 ${moodId ? `\n## Design Mood（視覺風格指引 — 最高優先）\n${getMoodPromptBlock(moodId)}\n` : ''}
+${buildOpenDesignStyleHintSection(originalRequirements ?? bddSpec ?? '', productType)}
 ${listPatternsForVariants(tier)}
 
 ## 5 個設計軸
