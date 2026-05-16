@@ -520,3 +520,166 @@ describe('CMS Skeleton — ui-scaffold (Week 3.4)', () => {
     expect(isAdminShellPath('lib/actions/admin-login.ts')).toBe(false)
   })
 })
+
+describe('CMS Skeleton — Framework registry (Week 5.1)', () => {
+  // 注意：此 describe 不能 _resetModulesForTesting()，否則會清掉 contact-form/newsletter
+  // 整個 test suite share 同一個 registry
+  it('getAllModules 含 contact_form + newsletter（5.2/5.3 註冊）', async () => {
+    const { getAllModules } = await import('../services/cms-skeleton')
+    const mods = getAllModules()
+    const ids = mods.map(m => m.id).sort()
+    expect(ids).toContain('contact_form')
+    expect(ids).toContain('newsletter')
+  })
+
+  it('getModuleById 找得到 contact_form', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('contact_form')
+    expect(mod).toBeDefined()
+    expect(mod?.displayName).toBe('Contact Form')
+  })
+
+  it('selectEnabledModules 根據 features 過濾', async () => {
+    const { getAllModules, selectEnabledModules } = await import('../services/cms-skeleton')
+    const all = getAllModules()
+
+    // 無 contact / newsletter keyword → 0 module enabled
+    const enabledEmpty = selectEnabledModules(all, {
+      features: [{ name: 'List FAQs', actionName: 'list_faqs' }],
+    })
+    expect(enabledEmpty.length).toBe(0)
+
+    // 含 contact_form keyword → contact_form enabled
+    const enabledContact = selectEnabledModules(all, {
+      features: [{ name: 'Submit Contact Form', actionName: 'submit_contact_form' }],
+    })
+    expect(enabledContact.map(m => m.id)).toContain('contact_form')
+
+    // 含 newsletter keyword → newsletter enabled
+    const enabledNews = selectEnabledModules(all, {
+      features: [{ name: 'Subscribe Newsletter', actionName: 'subscribe_newsletter' }],
+    })
+    expect(enabledNews.map(m => m.id)).toContain('newsletter')
+  })
+
+  it('hasFeatureWithKeyword 邊界（空 features / 空 keywords / nullable name）', async () => {
+    const { hasFeatureWithKeyword } = await import('../services/cms-skeleton')
+    expect(hasFeatureWithKeyword([], ['contact']).matched).toBe(false)
+    expect(hasFeatureWithKeyword(undefined as any, ['contact']).matched).toBe(false)
+    expect(hasFeatureWithKeyword([{ name: 'Submit Contact' }], []).matched).toBe(false)
+    expect(hasFeatureWithKeyword([{ actionName: 'contact_form' }], ['contact']).matched).toBe(true)
+    // nullable name 不炸
+    expect(hasFeatureWithKeyword([{}], ['x']).matched).toBe(false)
+  })
+})
+
+describe('CMS Skeleton — contact_form module (Week 5.2)', () => {
+  it('detection 命中 contact_form keyword', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('contact_form')!
+    const c = mod.detect({
+      features: [{ name: 'Submit Contact Form', actionName: 'submit_contact_form' }],
+    })
+    expect(c.matched).toBe(true)
+    expect(c.score).toBe(20)
+    expect(c.rule).toBe('contactFormModule')
+  })
+
+  it('detection 不命中無關 features', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('contact_form')!
+    expect(mod.detect({ features: [{ name: 'List FAQs', actionName: 'list_faqs' }] }).matched).toBe(false)
+  })
+
+  it('ddl 含 contact_submissions 表 + 必要欄位', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('contact_form')!
+    expect(mod.ddl).toContain('CREATE TABLE IF NOT EXISTS contact_submissions')
+    expect(mod.ddl).toMatch(/email VARCHAR.*NOT NULL/)
+    expect(mod.ddl).toContain('status VARCHAR')
+  })
+
+  it('generateServerActions 含 submit + list 兩個', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('contact_form')!
+    const actions = mod.generateServerActions({})
+    expect(actions.length).toBe(2)
+    const submit = actions.find(a => a.actionName === 'submit_contact_form')!
+    expect(submit.content).toContain('EMAIL_RE')
+    expect(submit.content).toContain('INSERT INTO contact_submissions')
+    expect(submit.content).toContain("__status: 201")
+  })
+
+  it('generateFeatures 含 valid + invalid scenarios', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('contact_form')!
+    const features = mod.generateFeatures({})
+    const submit = features.find(f => f.actionName === 'submit_contact_form')!
+    expect(submit.content).toContain('Submit valid contact form')
+    expect(submit.content).toContain('Reject invalid email')
+    expect(submit.content).toContain('Then 操作失敗')
+  })
+})
+
+describe('CMS Skeleton — newsletter module (Week 5.3 + framework 壓力測試)', () => {
+  it('detection 命中 newsletter / subscribe keyword', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('newsletter')!
+    expect(mod.detect({ features: [{ actionName: 'subscribe_newsletter' }] }).matched).toBe(true)
+    expect(mod.detect({ features: [{ actionName: 'subscribe_mailing_list' }] }).matched).toBe(true)
+    // 反向：純 'subscribe' 不在 keywords list（避免 false positive 例如 subscribe_plan）
+    expect(mod.detect({ features: [{ actionName: 'subscribe_plan' }] }).matched).toBe(false)
+  })
+
+  it('ddl 含 UNIQUE email constraint（防重複訂閱）', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('newsletter')!
+    expect(mod.ddl).toMatch(/email VARCHAR.*NOT NULL UNIQUE/)
+  })
+
+  it('subscribe Server Action 用 ON CONFLICT 處理重複訂閱', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('newsletter')!
+    const actions = mod.generateServerActions({})
+    const subscribe = actions.find(a => a.actionName === 'subscribe_newsletter')!
+    expect(subscribe.content).toContain('ON CONFLICT (email)')
+    expect(subscribe.content).toContain('crypto.randomBytes(24)')
+  })
+
+  it('unsubscribe Server Action 標記 unsubscribed + unsubscribed_at', async () => {
+    const { getModuleById } = await import('../services/cms-skeleton')
+    const mod = getModuleById('newsletter')!
+    const actions = mod.generateServerActions({})
+    const unsub = actions.find(a => a.actionName === 'unsubscribe_newsletter')!
+    expect(unsub.content).toContain("status = 'unsubscribed'")
+    expect(unsub.content).toContain('unsubscribed_at = NOW()')
+  })
+})
+
+describe('CMS Skeleton — detect-cms-shape framework integration', () => {
+  it('contact_form 為單一信號時不足以觸發 isCmsShape（只 20 分）', async () => {
+    const { detectCmsShape } = await import('../services/cms-skeleton')
+    const result = detectCmsShape({
+      features: [{ name: 'Submit Contact Form', actionName: 'submit_contact_form' }],
+    })
+    expect(result.score).toBe(20)
+    expect(result.isCmsShape).toBe(false)  // 60 threshold
+    expect(result.reasons.some(r => r.rule === 'contactFormModule')).toBe(true)
+  })
+
+  it('admin login + contact form + newsletter → 70 分過 threshold', async () => {
+    const { detectCmsShape } = await import('../services/cms-skeleton')
+    const result = detectCmsShape({
+      features: [
+        { name: 'Admin Login', actionName: 'admin_login' },
+        { name: 'Submit Contact Form', actionName: 'submit_contact_form' },
+        { name: 'Subscribe Newsletter', actionName: 'subscribe_newsletter' },
+      ],
+    })
+    expect(result.score).toBe(70)  // 30 + 20 + 20
+    expect(result.isCmsShape).toBe(true)
+    expect(result.reasons.map(r => r.rule).sort()).toEqual([
+      'adminLoginFeature', 'contactFormModule', 'newsletterModule',
+    ])
+  })
+})

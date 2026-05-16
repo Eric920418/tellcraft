@@ -1394,23 +1394,44 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
   tracking?: { conversationId?: string; userId?: string; projectId?: string },
 ): Promise<{ features: GeneratedFeature[]; schemaSql: string; entityMapping: string }> {
   try {
-    const { detectCmsShape, generateSkeletonFeatures, getCmsSkeletonDdl, CMS_SKELETON_ENTITY_MAPPING } =
-      await import('./cms-skeleton')
+    const {
+      detectCmsShape, generateSkeletonFeatures, getCmsSkeletonDdl, CMS_SKELETON_ENTITY_MAPPING,
+      getAllModules, selectEnabledModules,
+    } = await import('./cms-skeleton')
 
-    const report = detectCmsShape({ features, schemaSql })
+    const detectionInput = { features, schemaSql }
+    const report = detectCmsShape(detectionInput)
     if (!report.isCmsShape) {
       return { features, schemaSql, entityMapping }
     }
+
+    // 同時偵測 framework modules（contact_form / newsletter / ...）獨立 enable
+    const allFrameworkModules = getAllModules()
+    const enabledFrameworkModules = selectEnabledModules(allFrameworkModules, detectionInput)
 
     logger.info({
       score: report.score,
       threshold: report.threshold,
       reasons: report.reasons.map(r => r.rule),
+      enabledFrameworkModules: enabledFrameworkModules.map(m => m.id),
     }, 'CMS Skeleton: 偵測到 CMS shape，補 canonical features + DDL')
 
     const skeletonFeatures = generateSkeletonFeatures()
     const existingActionNames = new Set(features.map(f => f.actionName))
-    const toAdd = skeletonFeatures.filter(sf => !existingActionNames.has(sf.actionName))
+
+    // collect 所有來源的 features：admin core + enabled framework modules
+    const allCandidates = [
+      ...skeletonFeatures.map(f => ({ source: 'core', feature: f })),
+      ...enabledFrameworkModules.flatMap(mod => {
+        try {
+          return mod.generateFeatures({}).map(f => ({ source: mod.id, feature: f }))
+        } catch (e) {
+          logger.warn({ moduleId: mod.id, err: e }, '框架 module generateFeatures 失敗，跳過')
+          return []
+        }
+      }),
+    ]
+    const toAdd = allCandidates.filter(c => !existingActionNames.has(c.feature.actionName))
 
     if (toAdd.length === 0) {
       return { features, schemaSql, entityMapping }  // 全已存在，不重複
@@ -1418,18 +1439,28 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
 
     const mergedFeatures: GeneratedFeature[] = [
       ...features,
-      ...toAdd.map(sf => ({ name: sf.name, actionName: sf.actionName, content: sf.content })),
+      ...toAdd.map(c => ({ name: c.feature.name, actionName: c.feature.actionName, content: c.feature.content })),
     ]
 
-    // DDL 追加（IF NOT EXISTS 安全）
-    const skeletonDdl = getCmsSkeletonDdl(['admins', 'site_settings'])
-    const mergedSchemaSql = schemaSql.includes('CREATE TABLE IF NOT EXISTS admins')
+    // DDL 追加（IF NOT EXISTS 安全）— core + enabled framework modules
+    const coreDdl = getCmsSkeletonDdl(['admins', 'site_settings'])
+    let mergedSchemaSql = schemaSql.includes('CREATE TABLE IF NOT EXISTS admins')
       ? schemaSql
-      : schemaSql.trim() + '\n\n-- CMS Skeleton tables (auto-injected)\n' + skeletonDdl
+      : schemaSql.trim() + '\n\n-- CMS Skeleton tables (auto-injected)\n' + coreDdl
+    for (const mod of enabledFrameworkModules) {
+      const firstTableName = (mod.ddl.match(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)/i)?.[1] ?? '').toLowerCase()
+      if (firstTableName && !mergedSchemaSql.toLowerCase().includes(`create table if not exists ${firstTableName}`)) {
+        mergedSchemaSql = mergedSchemaSql.trim() + `\n\n-- CMS Skeleton module: ${mod.id}\n` + mod.ddl
+      }
+    }
 
-    // Entity mapping 追加（不覆蓋）
+    // Entity mapping 追加（不覆蓋）— core + enabled framework modules
     let mergedEntityMapping = entityMapping
-    for (const [entity, table] of Object.entries(CMS_SKELETON_ENTITY_MAPPING)) {
+    const mappingsToAdd: Record<string, string> = {
+      ...CMS_SKELETON_ENTITY_MAPPING,
+      ...Object.fromEntries(enabledFrameworkModules.flatMap(m => Object.entries(m.entityMapping))),
+    }
+    for (const [entity, table] of Object.entries(mappingsToAdd)) {
       const re = new RegExp(`^\\s*${entity}\\s*:`, 'm')
       if (!re.test(mergedEntityMapping)) {
         mergedEntityMapping = mergedEntityMapping.trim() + `\n  ${entity}: ${table}`
@@ -1437,7 +1468,8 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
     }
 
     logger.info({
-      added: toAdd.map(f => f.actionName),
+      added: toAdd.map(c => c.feature.actionName),
+      sources: toAdd.map(c => c.source),
       totalFeatures: mergedFeatures.length,
     }, 'CMS Skeleton: 注入完成')
 
@@ -1456,7 +1488,9 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
           score: report.score,
           threshold: report.threshold,
           reasons: report.reasons.map(r => r.rule),
-          addedActions: toAdd.map(f => f.actionName),
+          addedActions: toAdd.map(c => c.feature.actionName),
+          addedSources: toAdd.map(c => c.source),
+          enabledFrameworkModules: enabledFrameworkModules.map(m => m.id),
           totalFeatures: mergedFeatures.length,
         },
       })

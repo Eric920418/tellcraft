@@ -38,6 +38,25 @@ export {
   type LockedItem,
 } from './slots-merge'
 
+// Framework（Phase 1 Week 5.1）
+export {
+  type SkeletonModuleDefinition,
+  type ModuleDetectionContribution,
+  hasFeatureWithKeyword,
+  selectEnabledModules,
+} from './module-types'
+export {
+  registerModule,
+  getAllModules,
+  getModuleById,
+  getDetectionContributors,
+  _resetModulesForTesting,
+} from './modules-registry'
+
+// 自動載入所有 Framework module（side-effect import → registerModule）
+// 加新 module 時在這多一行 import 即可
+import './modules'
+
 export type CmsSkeletonManifest = typeof manifest
 
 export function getCmsSkeletonManifest(): CmsSkeletonManifest {

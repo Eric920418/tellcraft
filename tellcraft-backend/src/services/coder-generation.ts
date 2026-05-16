@@ -3347,11 +3347,24 @@ export async function executeCoderPipeline(
 
   // Step 3: 並行生成 action 函數（限制並發 3）
   // CMS Skeleton Phase 1 Week 2: skeleton actions（admin_login/logout/list_admins/update_admin_profile/get_site_settings）
-  // 跳過 LLM 直接 render canonical template — 0 LLM call、永不失敗
-  const { isSkeletonActionName, generateSkeletonServerActions } = await import('./cms-skeleton')
+  //   跳過 LLM 直接 render canonical template — 0 LLM call、永不失敗
+  // Phase 1 Week 5.1: 同時 collect framework modules（contact_form/newsletter/...）的 server actions
+  const { generateSkeletonServerActions, getAllModules } = await import('./cms-skeleton')
   const skeletonActions = generateSkeletonServerActions()
-  const skeletonByActionName = new Map(skeletonActions.map(s => [s.actionName, s]))
-  const skeletonHits = actions.filter(a => isSkeletonActionName(a.name))
+  const frameworkActions = getAllModules().flatMap(mod => {
+    try {
+      return mod.generateServerActions({})
+    } catch (e) {
+      logger.warn({ moduleId: mod.id, err: e }, '框架 module generateServerActions 失敗，跳過')
+      return []
+    }
+  })
+  const skeletonByActionName = new Map<string, { filePath: string; content: string }>([
+    ...skeletonActions.map(s => [s.actionName, { filePath: s.filePath, content: s.content }] as const),
+    ...frameworkActions.map(s => [s.actionName, { filePath: s.filePath, content: s.content }] as const),
+  ])
+  // 統一用 skeletonByActionName.has 判斷（含 core admin + framework modules）
+  const skeletonHits = actions.filter(a => skeletonByActionName.has(a.name))
   if (skeletonHits.length > 0) {
     logger.info({
       skeletonCount: skeletonHits.length,

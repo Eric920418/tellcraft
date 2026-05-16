@@ -11,6 +11,7 @@
 // ============================================================
 
 import manifest from './manifest.json'
+import { getDetectionContributors } from './modules-registry'
 
 export interface CmsShapeInput {
   features?: Array<{ name?: string; actionName?: string; content?: string }>
@@ -157,6 +158,16 @@ export function detectCmsShape(input: CmsShapeInput): CmsShapeReport {
   if (r4.hit) {
     score += manifest.detection.rules.uploadAction
     reasons.push({ rule: 'uploadAction', points: manifest.detection.rules.uploadAction, evidence: r4.evidence })
+  }
+
+  // Phase 1 Week 5.1: 把 framework module 的 detection contribution 也加進來
+  // 新 module（contact_form / newsletter / ...）自帶 detect()，不用改本檔
+  for (const mod of getDetectionContributors()) {
+    const c = mod.detect(input)
+    if (c.matched) {
+      score += c.score
+      reasons.push({ rule: c.rule, points: c.score, evidence: c.evidence ?? '' })
+    }
   }
 
   return {

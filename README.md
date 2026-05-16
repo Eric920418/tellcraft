@@ -1057,8 +1057,44 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 - [x] 後端 2378 tests 全綠
 - [ ] **End-to-end 場景驗證需用戶手動跑** — 跑完 3 個 CMS-like 場景後再執行 `cms-skeleton-baseline-report.ts --days=30` 看真實效果
 
-**Week 5+ 持續性任務**：
-- [ ] 每月看 telemetry 週報 + baseline 報告，反覆出現的業務 feature（contact form / newsletter / FAQ）提煉進 skeleton
+**Week 5（縮版：擴充框架 + 2 個高確定性 PoC）**：
+
+> 用戶選的「縮版」優先於「原版 5-10 個 feature 全 vendored」—— 因為 A（真實數據驗證）還沒跑，硬擴 5-10 個有「擴錯方向」風險。先建框架 + 2 個業界共識最強的 PoC（contact form + newsletter），等 A 數據出來再擴更多。
+
+- [x] **5.1 擴充框架**：
+  - `services/cms-skeleton/module-types.ts`（新）：`SkeletonModuleDefinition` interface（id/displayName/ddl/entityMapping/canonicalFeatures/locked/slots/detect/generateFeatures/generateServerActions）；`hasFeatureWithKeyword` / `selectEnabledModules` helper
+  - `services/cms-skeleton/modules-registry.ts`（新）：`registerModule` / `getAllModules` / `getModuleById` / `getDetectionContributors` / `_resetModulesForTesting`
+  - `services/cms-skeleton/modules/index.ts`（新）：side-effect import 所有 framework module，觸發 registerModule
+  - **重要**：admin_auth / site_settings 等 Phase 1 Week 1-2 既有結構 **不重構**（已穩定），新 module 走 framework — 雙軌共存策略
+  - `detect-cms-shape.ts` 整合 `getDetectionContributors()` aggregate
+  - `formulation.injectCmsSkeletonFeaturesIfApplicable` 整合 `selectEnabledModules` → enabled module 的 features + DDL + entity_mapping 一併注入；core admin features 不變
+  - `coder-generation.executeCoderPipeline` Step 3 整合 `getAllModules` → 把所有 framework module 的 server actions 加進 `skeletonByActionName` map（用 has 取代 isSkeletonActionName 統一判斷）
+- [x] **5.2 Contact form**（業界共識 #1）：
+  - `services/cms-skeleton/modules/contact-form.ts`（新）：完整 `SkeletonModuleDefinition`，detection keywords `contact_form/contact_us/submit_inquiry/send_message`，score 20
+  - 2 個 canonical features：`submit_contact_form (POST /api/contact)` + `list_contact_submissions (GET /api/admin/contact-submissions)`
+  - DDL：`contact_submissions(id/name/email/subject/message/status/responded_at/created_at)` + 2 個 index
+  - Server Actions：email format validate + INSERT + optional 寄通知信給 admin（透過 `lib/email` primitive + `CONTACT_NOTIFY_EMAIL` env）
+  - Slot：`notify_admin_email` (string|null, default null)
+- [x] **5.3 Newsletter subscribe**（業界共識 #2，**框架壓力測試**）：
+  - `services/cms-skeleton/modules/newsletter.ts`（新）：實作相同 `SkeletonModuleDefinition`，驗證框架真的能讓「加新 module 只動 4 檔」（module.ts + modules/index.ts import + 測試 + README）
+  - 2 個 canonical features：`subscribe_newsletter (POST)` + `unsubscribe_newsletter (POST)`
+  - DDL：`newsletter_subscribers(id/email UNIQUE/status/confirmation_token/confirmed_at/unsubscribed_at)` + 2 個 index
+  - Server Actions：subscribe 用 `INSERT ... ON CONFLICT (email) DO UPDATE`（重複訂閱自動 reactivate）+ `crypto.randomBytes(24)` 生 confirmation token；unsubscribe 標 `status='unsubscribed' + unsubscribed_at=NOW()`
+  - Slot：`require_double_opt_in` (boolean, default true)
+- [x] cms-skeleton.test.ts 52 → 66 tests（+14）：framework registry 4 case + contact_form 5 case + newsletter 4 case + detect-shape framework integration 1 case
+- [x] 後端 2378 → 2393 tests 全綠
+
+**加新 module 的 4 步驟**（5.1 框架後）：
+1. 在 `tellcraft-backend/src/services/cms-skeleton/modules/<module-id>.ts` 實作 `SkeletonModuleDefinition`（含 ddl/canonicalFeatures/detect/generateFeatures/generateServerActions），檔末 `registerModule(myModule)`
+2. 在 `modules/index.ts` 加一行 `import './<module-id>'`
+3. 在 `__tests__/cms-skeleton.test.ts` 加 describe block 驗 ddl/server actions 形狀
+4. README M8 章節列入該 module
+
+預期：1 個 module 從原本 1 天工作量降到 1 小時（純模板填充，不動既有 pipeline）。
+
+**Week 6+ 持續性任務**：
+- [ ] 跑 3 個真實 CMS-like 場景拿 baseline 數據（用 `cms-skeleton-baseline-report.ts --days=30`）— 待 A 完成
+- [ ] 數據驅動擴充：每月看 baseline + telemetry，反覆出現的業務 feature（search / comments / tags / m2m）提煉進 skeleton
 
 **預期效果**（CMS 場景）：
 | 指標 | 改造前 | 改造後 |
