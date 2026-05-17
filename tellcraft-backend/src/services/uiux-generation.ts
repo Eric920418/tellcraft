@@ -4157,10 +4157,13 @@ ${interactionSection}
 ${productContext?.incrementalFirstBatch
 ? `**嚴格限制：本批次只生成以下頁面**：${targetPages.join(', ')}
 - ⚠️ 禁止生成上述列表以外的頁面（其他頁面會在後續批次生成）
-- 必須生成 app/layout.tsx（root layout 必須含 \`<html lang="zh-TW">\` 和 \`<body>\` 標籤包裹 Header + children + Footer）
+- 必須生成 app/layout.tsx（結構：\`<html lang="zh-TW"><body><Header /><main>{children}</main><Footer /></body></html>\`，import 自 @/components/Header 和 @/components/Footer）
+- **必須生成 components/Header.tsx**（站點 nav：品牌 + 頁面導航連結，所有後續批次共用）
+- **必須生成 components/Footer.tsx**（站點 footer：分類連結 + 聯繫資訊 + 版權）
 - 必須生成 globals.css
 - 頁面中使用有意義的模擬數據（和產品領域相關）
-- 共用組件盡量抽取，後續批次可直接 import 複用`
+- 共用組件盡量抽取，後續批次可直接 import 複用
+- ⚠️ Header/Footer 元件未本批次輸出會 build fail`
 : `以下頁面列表${isLaterBatch ? '（本批次）' : '僅作為起始建議'}：${targetPages.join(', ')}`}
 
 ${productContext?.incrementalFirstBatch
@@ -4220,9 +4223,29 @@ ${isLaterBatch
 3. 功能所需的 UI 組件
 4. globals.css（包含 CSS variables）`
 : `1. 每個頁面的 page.tsx（完整互動結構，根據需求規格決定具體內容）
-2. app/layout.tsx — root layout 必須含 \`<html lang="zh-TW">\` 和 \`<body>\` 標籤，包裹 Header + {children} + Footer
-3. 頁面所需的 UI 組件（根據功能需求決定，不要為了生成而生成）
-4. globals.css（包含 CSS variables）`}
+2. **app/layout.tsx — 結構必須是**：
+   \`\`\`tsx
+   import Header from '@/components/Header'  // ← 必須 import
+   import Footer from '@/components/Footer'  // ← 必須 import
+   export default function RootLayout({ children }) {
+     return (
+       <html lang="zh-TW">
+         <body>
+           <Header />            {/* ← 必須 render 在 children 之前 */}
+           <main>{children}</main>
+           <Footer />            {/* ← 必須 render 在 children 之後 */}
+         </body>
+       </html>
+     )
+   }
+   \`\`\`
+3. **components/Header.tsx — 必須生成**（站點 nav：品牌 logo + 各 page 導航連結 + 視覺風格符合 mood）
+4. **components/Footer.tsx — 必須生成**（站點 footer：分類連結 + 聯繫資訊 + 版權）
+5. 頁面所需的 UI 組件（根據功能需求決定，不要為了生成而生成）
+6. globals.css（包含 CSS variables）
+
+⚠️ Header/Footer 元件必須本批次輸出 — layout.tsx import 找不到元件會 build fail
+⚠️ 不可用 semantic \`<header>\`/\`<footer>\` inline 寫在 layout 內取代元件（多頁面需共用元件）`}
 
 ## ⚠️ 自給自足規則（Critical — 違反會導致 build 失敗）
 **每個 import 語句引用的檔案，你都必須在輸出中生成對應檔案。** 禁止引用不存在的內部模組。
