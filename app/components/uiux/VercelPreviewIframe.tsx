@@ -1,21 +1,23 @@
 'use client'
 
 /**
- * VercelPreviewIframe — Vercel preview URL iframe（替換 WebContainer in-browser preview）
+ * VercelPreviewIframe — Vercel preview URL「新分頁開啟」UI（不再用 iframe inline embed）
  *
- * 簡化版：iframe + status overlay + 失敗 retry。Device frame / PropertyEditor 等高級 UI
- * 沿用 WebContainer 模式（flag-off 時用）— 待 Vercel preview 穩定後再 port。
+ * 為何不用 iframe：
+ *   chrome 158+ 預設 block 第三方 cookies + vercel.live preview toolbar nested iframe inject
+ *   兩者組合在 cross-origin iframe context 下，Vercel preview URL 載入後會進 chrome-error://chromewebdata/
+ *   即使 React key re-mount、移除 sandbox、移除 query buster 都救不了（結構性問題）
+ *   v0 / lovable.dev / bolt.new 等競品也都用「新分頁開啟」做 fallback
  *
- * Props 跟 WebContainerPreview 簡化版對齊（只接 vercel state，不接 code / files）：
- *   - previewUrl: 由 usePreviewDeployment hook 拿到的 vercel deploy URL
- *   - previewStatus / progressStep / etaSeconds：UI 進度顯示
- *   - lkgUrl / error：失敗 fallback
+ * 改用「全螢幕 placeholder + 大按鈕」UX：
+ *   - ready 狀態：顯示 URL + 「在新分頁開啟預覽」大按鈕（卡片設計）
+ *   - building 狀態：spinner + 進度（沿用原 overlay）
+ *   - failed 狀態：error + retry（沿用原 overlay）
+ *   - idle 狀態：等待提示（沿用原 overlay）
  *
- * Edit bridge 跨 origin：iframe 內 edit-bridge.js 已用 postMessage(*, '*') wildcard，
- * 主視窗 listener 用 VERCEL_PREVIEW_ORIGIN_REGEX 白名單驗 e.origin（見 usePreviewDeployment.ts）
+ * Props 不變（vs iframe 版），dispatch 切換無 breaking change
  */
 
-import { useEffect, useRef, useState } from 'react'
 import type { PreviewStatus } from '@/app/hooks/usePreviewDeployment'
 
 export interface VercelPreviewIframeProps {
@@ -39,10 +41,6 @@ export default function VercelPreviewIframe({
   lkgUrl,
   onRetry,
 }: VercelPreviewIframeProps) {
-  const iframeRef = useRef<HTMLIFrameElement>(null)
-  const [iframeLoadError, setIframeLoadError] = useState<string | null>(null)
-  const [loadAttempt, setLoadAttempt] = useState(0)
-
   // 顯示優先級：ready url > lkg url > placeholder
   const displayUrl = previewStatus === 'ready' && previewUrl
     ? previewUrl
@@ -50,75 +48,40 @@ export default function VercelPreviewIframe({
     ? lkgUrl
     : null
 
-  // iframe src 不帶任何 query buster — 避免 vercel app 內 Next.js router 抹掉 unknown query 觸發第二次 SPA navigation，
-  // 跨 origin iframe 第二次 navigation 會被 chrome 擋進 chrome-error 狀態（R7 incident: onLoad 成功後 frame crash）
-  const iframeSrc = displayUrl ?? undefined
-
-  // 用 React key 強制 re-mount iframe（vs 改 src）— 完全重建 DOM element 規避 chrome 跨 origin navigation policy
-  const iframeKey = `${displayUrl ?? 'empty'}-${loadAttempt}`
-
-  // displayUrl 改變時 reset error state（讓 onLoad 重新判定）
-  useEffect(() => {
-    setIframeLoadError(null)
-  }, [displayUrl])
+  // displayUrl 主機名稱（顯示在卡片上方）
+  let hostLabel = ''
+  if (displayUrl) {
+    try { hostLabel = new URL(displayUrl).hostname } catch { hostLabel = displayUrl }
+  }
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#fff' }}>
-      {iframeSrc && (
-        <iframe
-          key={iframeKey}
-          ref={iframeRef}
-          title="Preview"
-          src={iframeSrc}
-          // sandbox 移除：對自己 deploy 的 vercel preview URL 信任，避免 allow-scripts+allow-same-origin
-          // 組合在某 chrome 版本被 deny。要恢復 sandbox 需用 allow-scripts allow-forms 不含 allow-same-origin
-          referrerPolicy="no-referrer-when-downgrade"
-          loading="eager"
-          onLoad={() => {
-            console.log('[VercelPreviewIframe] iframe onLoad fired for', iframeSrc)
-            setIframeLoadError(null)
-          }}
-          onError={(e) => {
-            const msg = `iframe onError event — type=${e.type} target=${(e.target as HTMLIFrameElement)?.src}`
-            console.error('[VercelPreviewIframe]', msg, e)
-            setIframeLoadError(msg)
-          }}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            display: 'block',
-          }}
-        />
-      )}
+    <div style={containerStyle}>
+      {/* Ready：全螢幕 placeholder + 開啟按鈕 */}
+      {previewStatus === 'ready' && displayUrl && (
+        <div style={readyCardStyle}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🚀</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>
+            預覽已就緒
+          </div>
+          <div style={{ fontSize: 13, color: '#64748b', marginBottom: 6 }}>
+            完整 production preview，點下方按鈕開啟新分頁查看
+          </div>
+          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 24, fontFamily: 'monospace', wordBreak: 'break-all', padding: '6px 12px', background: '#f1f5f9', borderRadius: 4, maxWidth: 480 }}>
+            {hostLabel}
+          </div>
 
-      {/* iframe-level error overlay — 顯示 chrome 載入失敗的具體訊息（用戶能直接看到原因不需開 devtools） */}
-      {iframeLoadError && previewStatus === 'ready' && (
-        <div style={{ ...overlayStyle, background: 'rgba(255, 248, 230, 0.95)' }}>
-          <div style={contentBoxStyle}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#92400e', marginBottom: 8 }}>
-              預覽 iframe 載入失敗
-            </div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12, wordBreak: 'break-word', fontFamily: 'monospace', textAlign: 'left', maxHeight: 100, overflow: 'auto', background: '#fef3c7', padding: 8, borderRadius: 4 }}>
-              {iframeLoadError}
-            </div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
-              請開 F12 → Network → 過濾 cms-* → 看 Status 欄具體 error code
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-              <button
-                onClick={() => setLoadAttempt(n => n + 1)}
-                style={{ padding: '6px 12px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-              >
-                重試 iframe
-              </button>
-              <button
-                onClick={() => window.open(displayUrl!, '_blank')}
-                style={{ padding: '6px 12px', background: '#fff', color: '#0f172a', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
-              >
-                新分頁開啟
-              </button>
-            </div>
+          <a
+            href={displayUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={primaryButtonStyle}
+          >
+            在新分頁開啟預覽
+            <span style={{ fontSize: 16 }}>↗</span>
+          </a>
+
+          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 24, maxWidth: 420, lineHeight: 1.5 }}>
+            為什麼不直接 inline 顯示？chrome 158+ 預設阻擋跨網域 cookie + Vercel 預覽工具列在巢狀 iframe 中衝突，導致 iframe 內預覽崩潰。新分頁開啟可避開所有限制
           </div>
         </div>
       )}
@@ -138,9 +101,14 @@ export default function VercelPreviewIframe({
               <div style={{ ...progressBarInnerStyle, width: `${progressPercent}%` }} />
             </div>
             {lkgUrl && (
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 16 }}>
-                正顯示上次成功版本，新版完成後自動更新
-              </div>
+              <a
+                href={lkgUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-block', marginTop: 16, fontSize: 12, color: '#0f172a', textDecoration: 'underline' }}
+              >
+                先看上次成功版本 ↗
+              </a>
             )}
           </div>
         </div>
@@ -157,25 +125,32 @@ export default function VercelPreviewIframe({
               {error || 'Unknown error'}
             </div>
             {lkgUrl && (
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
-                ↑ 顯示上次成功的版本
-              </div>
+              <a
+                href={lkgUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-block', marginBottom: 12, fontSize: 12, color: '#0f172a', textDecoration: 'underline' }}
+              >
+                看上次成功版本 ↗
+              </a>
             )}
             {onRetry && (
-              <button
-                onClick={onRetry}
-                style={{
-                  padding: '8px 16px',
-                  background: '#0f172a',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  fontSize: 14,
-                }}
-              >
-                重新部署
-              </button>
+              <div>
+                <button
+                  onClick={onRetry}
+                  style={{
+                    padding: '8px 16px',
+                    background: '#0f172a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontSize: 14,
+                  }}
+                >
+                  重新部署
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -199,6 +174,45 @@ export default function VercelPreviewIframe({
       `}</style>
     </div>
   )
+}
+
+const containerStyle: React.CSSProperties = {
+  position: 'relative',
+  width: '100%',
+  height: '100%',
+  background: '#fff',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+}
+
+const readyCardStyle: React.CSSProperties = {
+  textAlign: 'center',
+  padding: 40,
+  maxWidth: 560,
+  background: 'linear-gradient(135deg, #fafafa 0%, #f1f5f9 100%)',
+  borderRadius: 12,
+  border: '1px solid #e5e7eb',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+}
+
+const primaryButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '14px 28px',
+  background: '#0f172a',
+  color: '#fff',
+  border: 'none',
+  borderRadius: 8,
+  cursor: 'pointer',
+  fontSize: 15,
+  fontWeight: 600,
+  textDecoration: 'none',
+  boxShadow: '0 4px 12px rgba(15, 23, 42, 0.15)',
+  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
 }
 
 const overlayStyle: React.CSSProperties = {
