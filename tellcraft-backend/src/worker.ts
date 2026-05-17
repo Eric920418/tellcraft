@@ -76,6 +76,13 @@ const orchestratorWorker = createOrchestratorWorker(workerRedis, generalRedis, e
 const previewDeployWorker = createPreviewDeployWorker(workerRedis, emitter)
 getPreviewDeployQueue(workerRedis)  // init singleton 讓 phase handlers 能 import 拿到
 
+// Startup log：暴露 preview flag 狀態（fail-silent 排查用 — phase 完成沒看到卡片時先看這條 log）
+logger.info({
+  ENABLE_VERCEL_PREVIEW: getEnv().ENABLE_VERCEL_PREVIEW,
+  PREVIEW_DEPLOY_RATE_LIMIT_PER_HOUR: getEnv().PREVIEW_DEPLOY_RATE_LIMIT_PER_HOUR,
+  PREVIEW_DEPLOY_TIMEOUT_MS: getEnv().PREVIEW_DEPLOY_TIMEOUT_MS,
+}, '[startup] Preview deploy worker 已啟動')
+
 const queueEvents = new QueueEvents('orchestrator', { connection: eventsRedis })
 queueEvents.on('stalled', ({ jobId }) => {
   logger.warn({ jobId }, '[STALLED] Job stalled — 可能 event loop 阻塞')

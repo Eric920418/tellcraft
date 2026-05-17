@@ -111,7 +111,8 @@ const envSchema = z.object({
   ENABLE_OPEN_DESIGN_STYLES: z.stringbool().default(true),       // kill switch：iteration_aesthetic_complaint 突增或 score_delta 顯著惡化時設 false 立即關閉注入
   OPEN_DESIGN_STYLE_MAX_INJECT_COUNT: z.coerce.number().default(1), // 單次 generateVariants prompt dynamic block 最多注入 N 個 style hint（≥2 易造成選擇爆炸）
   // Vercel preview iframe 替換 WebContainer（2026-05-17 incident 治本）— phase 完成 enqueue quickPreviewDeploy → Vercel target='preview' → iframe src
-  ENABLE_VERCEL_PREVIEW: z.stringbool().default(false),          // master kill switch；false 走既有 WebContainer，true 走 Vercel preview iframe
+  // 2026-05-17 default 改 true：commit 4420645d 砍了 SplitLayout，flag-off 用戶看不到任何 preview UI（chat 全寬 + 卡片不會注入）
+  ENABLE_VERCEL_PREVIEW: z.stringbool().default(true),           // master kill switch；false 走既有 WebContainer (legacy)，true 走 Vercel preview iframe + chat inline 卡片
   PREVIEW_DEPLOY_RATE_LIMIT_PER_HOUR: z.coerce.number().default(10), // 每 conversation 每小時最多 N 次 preview deploy（防炸 Vercel 配額）
   PREVIEW_DEPLOY_DEBOUNCE_MS: z.coerce.number().default(30000),  // 連續 enqueue 30 秒內 dedup（同對話多次 phase 完成只跑最後一次）
   PREVIEW_DEPLOY_TIMEOUT_MS: z.coerce.number().default(240000),  // Vercel build polling 上限 4 分鐘，超時標 failed
