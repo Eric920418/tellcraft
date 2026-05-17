@@ -9,6 +9,8 @@ import * as path from 'path'
 import * as fsPromises from 'fs/promises'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
+import { autoSwapButtonContrast } from './deployer-fixes/contrast-auto-swap'
+import type { DesignSystem } from './uiux-generation'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
 import { repairMissingReactImports, repairBracketLookupAccess } from './uiux-generation'
@@ -325,7 +327,7 @@ function deduplicateRouteConflicts<T extends { path: string }>(files: T[]): T[] 
  * 部署前代碼預檢 + 自動修復
  * 掃描所有已知的 build 失敗模式，自動修復後返回乾淨的代碼
  */
-export function sanitizeCodeForDeploy(code: GeneratedCode): SanitizeResult {
+export function sanitizeCodeForDeploy(code: GeneratedCode, designSystem?: DesignSystem): SanitizeResult {
   const fixes: string[] = []
   const injectedFiles: { file: string; data: string }[] = []
   const extraDependencies: Record<string, string> = {}
@@ -1061,6 +1063,28 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
     }
   }
 
+  // ── 修復 11: 按鈕對比度兜底（R9 Layer 3，100% 保證 WCAG AA）──
+  // 偵測 <button>/<a class="btn|cta">/role="button" 內 bg-* + text-* 配對 ratio < 4.5
+  // → swap text class 為 on-* token 或 pickReadableForeground 結果
+  // fail-soft：任何錯誤不阻塞 deploy
+  try {
+    const swapResult = autoSwapButtonContrast(sanitized, designSystem)
+    if (swapResult.swaps.length > 0 || swapResult.unsafeFallbacks.length > 0) {
+      // 把 swap 後的 code 套用回去（fixedCode 含 pages/components 新內容）
+      sanitized.pages = swapResult.fixedCode.pages
+      sanitized.components = swapResult.fixedCode.components
+      for (const s of swapResult.swaps) {
+        fixes.push(`contrast auto-swap: ${s.filePath} ${s.bgClass} ${s.oldFgClass}(ratio ${s.oldRatio.toFixed(2)}) → ${s.newFgClass}(ratio ${s.newRatio.toFixed(2)}) [${s.reason}]`)
+      }
+      for (const u of swapResult.unsafeFallbacks) {
+        fixes.push(`⚠ contrast unsafe: ${u.filePath} ${u.bgClass} + ${u.oldFgClass} 無法找到 ≥ 4.5 fg（ratio ${u.oldRatio.toFixed(2)}），建議用戶 iteration 調整 ${u.bgClass}`)
+      }
+    }
+  } catch (err) {
+    // fail-soft：contrast swap 失敗不阻塞 deploy（記 fix 提示）
+    fixes.push(`⚠ contrast auto-swap 失敗（fail-soft skip）: ${(err as Error).message}`)
+  }
+
   return { code: sanitized, fixes, injectedFiles, extraDependencies }
 }
 
@@ -1202,9 +1226,9 @@ export function applyImageLibraryToDeployCode(
 // AST 先跑（對複雜 case 較穩），剩餘 regex 同步 pipeline 再補齊。
 // AST 失敗降級純同步，絕不阻塞 pipeline。
 // ============================================================
-export async function sanitizeCodeForDeployAsync(code: GeneratedCode): Promise<SanitizeResult> {
+export async function sanitizeCodeForDeployAsync(code: GeneratedCode, designSystem?: DesignSystem): Promise<SanitizeResult> {
   if (!getEnv().CODER_AST_SANITIZE) {
-    return sanitizeCodeForDeploy(code)
+    return sanitizeCodeForDeploy(code, designSystem)
   }
 
   const astFixes: string[] = []
@@ -1266,8 +1290,8 @@ export async function sanitizeCodeForDeployAsync(code: GeneratedCode): Promise<S
     logger.warn({ err }, 'AST sanitize 失敗，降級純同步 regex pipeline')
   }
 
-  // 再跑一次同步 regex pipeline，補齊其他 7 類修復（冪等）
-  const syncResult = sanitizeCodeForDeploy(workCode)
+  // 再跑一次同步 regex pipeline，補齊其他 7 類修復（冪等）+ 修復 11 contrast auto-swap
+  const syncResult = sanitizeCodeForDeploy(workCode, designSystem)
   return {
     ...syncResult,
     fixes: [...astFixes, ...syncResult.fixes],
