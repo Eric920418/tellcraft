@@ -17,6 +17,14 @@ const WebContainerPreviewComponent = dynamic(
   { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>Loading preview...</p></div> }
 )
 
+// Phase 3：Vercel preview iframe（替換 WebContainer）— flag NEXT_PUBLIC_ENABLE_VERCEL_PREVIEW='true' 才用
+const VercelPreviewIframeComponent = dynamic(
+  () => import('@/app/components/uiux/VercelPreviewIframe'),
+  { ssr: false, loading: () => <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}><p style={{ color: 'var(--gray-400)', fontSize: 14 }}>Loading preview...</p></div> }
+)
+
+import { usePreviewDeployment, useIsVercelPreviewEnabled, useRetryPreview } from '@/app/hooks/usePreviewDeployment'
+
 import type { Message, SessionInfo } from '@/app/types/chat'
 
 export interface ChatPreviewPanelProps {
@@ -146,6 +154,11 @@ export default function ChatPreviewPanel({
     if (!stablePreviewData) return ''
     return (stablePreviewData.pages[0]?.content?.slice(0, 100) ?? '') + String(stablePreviewData.components.length)
   }, [stablePreviewData])
+
+  // ── Phase 3: Vercel preview hook（flag-on 時用，替換 WebContainer）──
+  const isVercelPreview = useIsVercelPreviewEnabled()
+  const vercelPreview = usePreviewDeployment(sessionInfo?.conversationId)
+  const retryPreview = useRetryPreview()
 
   // ── BDD Q&A 蓋房子場景 ──
   // 用 messages.some() 判斷是否在 BDD 階段，避免用戶回答後 latestMsg 沒 stage 導致動畫消失
@@ -422,29 +435,42 @@ export default function ChatPreviewPanel({
               }}
             >
               <div style={codePreviewDevice !== 'desktop' ? { position: 'absolute', inset: 0 } : { height: '100%' }}>
-                <WebContainerPreviewComponent
-                  pages={pagesData}
-                  components={componentsData}
-                  styles={stylesData}
-                  tailwindConfig={tailwindConfigData}
-                  neonConnectionString={neonConnectionString}
-                  serverActions={serverActions}
-                  apiRoutes={apiRoutes}
-                  dbLib={dbLib}
-                  isStreaming={isStreaming}
-                  editMode={codePreviewEditMode}
-                  onSelectionChanged={handleCodePreviewSelectionChanged}
-                  onElementSelected={handleCodePreviewElementSelected}
-                  pendingUpdate={codePreviewPendingUpdate}
-                  pendingReset={codePreviewPendingReset}
-                  pendingOverrides={codePreviewPendingOverrides}
-                  overrides={codePreviewOverrides}
-                  annotations={codePreviewAnnotations}
-                  onElementResized={handleCodePreviewElementResized}
-                  onRuntimeError={onRuntimeError}
-                  codeVersion={codeVersion}
-                  onFrozenStateChange={setIframeFrozen}
-                />
+                {isVercelPreview ? (
+                  <VercelPreviewIframeComponent
+                    previewUrl={vercelPreview.url}
+                    previewStatus={vercelPreview.status}
+                    progressPercent={vercelPreview.progressPercent}
+                    progressStep={vercelPreview.progressStep}
+                    etaSeconds={vercelPreview.etaSeconds}
+                    error={vercelPreview.error}
+                    lkgUrl={vercelPreview.lkgUrl}
+                    onRetry={retryPreview}
+                  />
+                ) : (
+                  <WebContainerPreviewComponent
+                    pages={pagesData}
+                    components={componentsData}
+                    styles={stylesData}
+                    tailwindConfig={tailwindConfigData}
+                    neonConnectionString={neonConnectionString}
+                    serverActions={serverActions}
+                    apiRoutes={apiRoutes}
+                    dbLib={dbLib}
+                    isStreaming={isStreaming}
+                    editMode={codePreviewEditMode}
+                    onSelectionChanged={handleCodePreviewSelectionChanged}
+                    onElementSelected={handleCodePreviewElementSelected}
+                    pendingUpdate={codePreviewPendingUpdate}
+                    pendingReset={codePreviewPendingReset}
+                    pendingOverrides={codePreviewPendingOverrides}
+                    overrides={codePreviewOverrides}
+                    annotations={codePreviewAnnotations}
+                    onElementResized={handleCodePreviewElementResized}
+                    onRuntimeError={onRuntimeError}
+                    codeVersion={codeVersion}
+                    onFrozenStateChange={setIframeFrozen}
+                  />
+                )}
               </div>
             </div>
             {/* Preview Stale Overlay — AI 正在優化，蓋在 iframe 上但不擋互動 */}
