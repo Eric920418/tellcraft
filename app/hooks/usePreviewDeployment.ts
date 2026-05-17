@@ -193,10 +193,13 @@ export function isVercelPreviewOrigin(origin: string): boolean {
 
 /**
  * 給 ChatPreviewPanel 用：是否啟用 Vercel preview iframe（vs WebContainer）
- * Gate: NEXT_PUBLIC_ENABLE_VERCEL_PREVIEW='true'
+ *
+ * **預設 ON** — 用戶 2026-05-17 決策全換 Vercel preview，不再走 WebContainer。
+ * Kill switch：env 顯式設 `NEXT_PUBLIC_ENABLE_VERCEL_PREVIEW='false'` 才回退 WebContainer
+ * （供 emergency rollback 用，正常情況不該設）
  */
 export function useIsVercelPreviewEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_ENABLE_VERCEL_PREVIEW === 'true'
+  return process.env.NEXT_PUBLIC_ENABLE_VERCEL_PREVIEW !== 'false'
 }
 
 /** 給其他 hook 用：retry 觸發（暫時用 reload 整個對話狀態的 hack；未來加 explicit retry endpoint） */
