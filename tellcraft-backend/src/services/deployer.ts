@@ -1075,9 +1075,31 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
       sanitized.components = swapResult.fixedCode.components
       for (const s of swapResult.swaps) {
         fixes.push(`contrast auto-swap: ${s.filePath} ${s.bgClass} ${s.oldFgClass}(ratio ${s.oldRatio.toFixed(2)}) → ${s.newFgClass}(ratio ${s.newRatio.toFixed(2)}) [${s.reason}]`)
+        // R9 observer：每個 swap fire telemetry（fire-and-forget）
+        void recordTelemetry({
+          skillName: 'uiux',
+          eventType: 'contrast_auto_swapped',
+          patternKey: `${s.bgClass}__${s.oldFgClass}__${s.newFgClass}`,
+          severity: 'info',
+          outcome: 'repaired',
+          userId: null,
+          conversationId: null,
+          payload: { filePath: s.filePath, oldRatio: s.oldRatio, newRatio: s.newRatio, reason: s.reason },
+        }).catch(() => {})
       }
       for (const u of swapResult.unsafeFallbacks) {
         fixes.push(`⚠ contrast unsafe: ${u.filePath} ${u.bgClass} + ${u.oldFgClass} 無法找到 ≥ 4.5 fg（ratio ${u.oldRatio.toFixed(2)}），建議用戶 iteration 調整 ${u.bgClass}`)
+        // R9 observer：unsafe fallback 屬於 high signal（mid-saturation 色找不到 safe fg）
+        void recordTelemetry({
+          skillName: 'uiux',
+          eventType: 'contrast_auto_swap_unsafe',
+          patternKey: `${u.bgClass}__${u.oldFgClass}`,
+          severity: 'warning',
+          outcome: 'failed',
+          userId: null,
+          conversationId: null,
+          payload: { filePath: u.filePath, ratio: u.oldRatio, reason: u.reason },
+        }).catch(() => {})
       }
     }
   } catch (err) {

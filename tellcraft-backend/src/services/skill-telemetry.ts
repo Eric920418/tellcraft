@@ -79,6 +79,10 @@ export type EventType =
   | 'design_choice_recorded'       // variant 選定即寫，固化「這次用了哪些 mood/tier/variantConcept」
   // R8 observer：incrementalFirstBatch LLM 漏生 Header/Footer 元件導致 ship 出去沒 nav（2026-05-17 incident）
   | 'first_batch_missing_nav'      // first batch 完成後 deterministic scan layout.tsx 無 nav marker 即記
+  // R9 observer：按鈕對比度 deployer auto-swap 觸發頻率（2026-05-17 incident，4 層架構驗證）
+  | 'contrast_auto_swapped'        // Layer 3 swap 成功（ratio 從 < 4.5 → ≥ 4.5）
+  | 'contrast_auto_swap_unsafe'    // swap 後仍 < 4.5（fallback ring 後續處理）
+  | 'contrast_qg_residual'         // Layer 4 QG 觸發 = Layer 3 漏網（high signal）
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
@@ -944,6 +948,8 @@ export function findStructuralFailureCandidates(
     'fix_convergence_failed',
     'qg_high_retry_count',  // Tier A4 加的
     'first_batch_missing_nav',  // R8 加：first batch LLM 漏生 Header/Footer 元件
+    'contrast_qg_residual',  // R9 加：QG 觸發 = Layer 3 deployer auto-swap 漏網（high signal）
+    'contrast_auto_swap_unsafe',  // R9 加：swap 後仍 unsafe（mid-saturation 色找不到 safe fg）
   ])
 
   return topPatterns
@@ -961,6 +967,10 @@ export function findStructuralFailureCandidates(
         ? `Coder 業務邏輯重複失敗 — 看是否需要新 coder-handlers 模板`
         : row.event_type === 'first_batch_missing_nav'
         ? `LLM first batch 漏生 Header/Footer — prompt 已強化 (53afbecb)，若仍高頻則考慮 deterministic auto-inject fallback`
+        : row.event_type === 'contrast_qg_residual'
+        ? `Layer 3 deployer auto-swap 漏網（Layer 4 QG 才抓到）— 看 patternKey 解析 button 偵測 regex 缺哪類 pattern`
+        : row.event_type === 'contrast_auto_swap_unsafe'
+        ? `Mid-saturation color (e.g. bg-yellow-400) 找不到 ≥ 4.5 fg — 考慮 darken/lighten base 或加 ring fallback`
         : `規格驗證/對齊重複失敗 — 看是否需要新 deterministic feature fix`,
     }))
     .sort((a, b) => b.count - a.count)

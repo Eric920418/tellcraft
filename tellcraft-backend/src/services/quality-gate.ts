@@ -604,6 +604,17 @@ function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[
             suggestion: `用 text-on-${bg[0].replace('bg-', '')} 配對 token，或改用 bg-slate-900 + text-white`,
           })
           reportedPairs.add(pairKey)
+          // R9 observer：QG 觸發 = Layer 3 漏網 high signal
+          void recordTelemetry({
+            skillName: 'uiux',
+            eventType: 'contrast_qg_residual',
+            patternKey: `${bg[0]}__${text[0]}`,
+            severity: 'warning',
+            outcome: 'failed',
+            userId: null,
+            conversationId: null,
+            payload: { filePath: path, line: i + 1, ratio },
+          }).catch(() => {})
         } else if (failsCritical) {
           issues.push({
             id: `contrast-${++issueCounter}`,
