@@ -15,7 +15,7 @@
  * 主視窗 listener 用 VERCEL_PREVIEW_ORIGIN_REGEX 白名單驗 e.origin（見 usePreviewDeployment.ts）
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PreviewStatus } from '@/app/hooks/usePreviewDeployment'
 
 export interface VercelPreviewIframeProps {
@@ -40,6 +40,8 @@ export default function VercelPreviewIframe({
   onRetry,
 }: VercelPreviewIframeProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const [iframeLoadError, setIframeLoadError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   // 顯示優先級：ready url > lkg url > placeholder
   const displayUrl = previewStatus === 'ready' && previewUrl
@@ -48,21 +50,37 @@ export default function VercelPreviewIframe({
     ? lkgUrl
     : null
 
-  // 當 displayUrl 改變強制 iframe reload（防 Vercel CDN cache）
+  // iframe src 直接帶（不從 about:blank useEffect navigate）— 避免 chrome 跨 origin navigation policy
+  const iframeSrc = useMemo(() => {
+    if (!displayUrl) return undefined
+    return `${displayUrl}${displayUrl.includes('?') ? '&' : '?'}_t=${Date.now()}_a=${loadAttempt}`
+  }, [displayUrl, loadAttempt])
+
+  // displayUrl 改變時 reset error state（讓 onLoad 重新判定）
   useEffect(() => {
-    if (!iframeRef.current || !displayUrl) return
-    // 用 query buster 確保拉最新版
-    const bustUrl = `${displayUrl}${displayUrl.includes('?') ? '&' : '?'}_t=${Date.now()}`
-    iframeRef.current.src = bustUrl
+    setIframeLoadError(null)
   }, [displayUrl])
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#fff' }}>
-      {displayUrl && (
+      {iframeSrc && (
         <iframe
           ref={iframeRef}
           title="Preview"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+          src={iframeSrc}
+          // sandbox 移除：對自己 deploy 的 vercel preview URL 信任，避免 allow-scripts+allow-same-origin
+          // 組合在某 chrome 版本被 deny。要恢復 sandbox 需用 allow-scripts allow-forms 不含 allow-same-origin
+          referrerPolicy="no-referrer-when-downgrade"
+          loading="eager"
+          onLoad={() => {
+            console.log('[VercelPreviewIframe] iframe onLoad fired for', iframeSrc)
+            setIframeLoadError(null)
+          }}
+          onError={(e) => {
+            const msg = `iframe onError event — type=${e.type} target=${(e.target as HTMLIFrameElement)?.src}`
+            console.error('[VercelPreviewIframe]', msg, e)
+            setIframeLoadError(msg)
+          }}
           style={{
             width: '100%',
             height: '100%',
@@ -70,6 +88,37 @@ export default function VercelPreviewIframe({
             display: 'block',
           }}
         />
+      )}
+
+      {/* iframe-level error overlay — 顯示 chrome 載入失敗的具體訊息（用戶能直接看到原因不需開 devtools） */}
+      {iframeLoadError && previewStatus === 'ready' && (
+        <div style={{ ...overlayStyle, background: 'rgba(255, 248, 230, 0.95)' }}>
+          <div style={contentBoxStyle}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: '#92400e', marginBottom: 8 }}>
+              預覽 iframe 載入失敗
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12, wordBreak: 'break-word', fontFamily: 'monospace', textAlign: 'left', maxHeight: 100, overflow: 'auto', background: '#fef3c7', padding: 8, borderRadius: 4 }}>
+              {iframeLoadError}
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
+              請開 F12 → Network → 過濾 cms-* → 看 Status 欄具體 error code
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button
+                onClick={() => setLoadAttempt(n => n + 1)}
+                style={{ padding: '6px 12px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+              >
+                重試 iframe
+              </button>
+              <button
+                onClick={() => window.open(displayUrl!, '_blank')}
+                style={{ padding: '6px 12px', background: '#fff', color: '#0f172a', border: '1px solid #cbd5e1', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+              >
+                新分頁開啟
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Building overlay */}
