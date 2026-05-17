@@ -132,7 +132,7 @@ async function getUserCreditQuotaStatus(userId: string): Promise<{
 router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async (req, res) => {
   try {
     const { id: conversationId } = req.params
-    const { message, projectId, userId: bodyUserId, mode, locale, imageUrls } = req.body
+    const { message, projectId, userId: bodyUserId, mode, locale, imageUrls, precisionOrderId } = req.body
     const userId = req.user?.id || bodyUserId
 
     if (!userId) {
@@ -198,6 +198,25 @@ router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async
       }
     }
 
+    // 精細模式訂單綁定：用戶從 /pay/success 跳回 chat 帶 ?orderId=（前端 ChatSection 每次 sendMessage 帶）。
+    // 第一次 message 時用 conversation.project_id 反向綁定（IS NULL 條件防覆蓋）。
+    // Fail-open：綁定失敗只 log warning，不阻擋對話。
+    if (precisionOrderId && conversation.project_id) {
+      try {
+        const bindRes = await db.query(
+          `UPDATE precision_orders
+           SET project_id = $1
+           WHERE id = $2 AND user_id = $3 AND project_id IS NULL`,
+          [conversation.project_id, precisionOrderId, userId]
+        )
+        if (bindRes.rowCount && bindRes.rowCount > 0) {
+          logger.info({ precisionOrderId, projectId: conversation.project_id, userId }, '精細模式訂單綁定到專案')
+        }
+      } catch (bindErr) {
+        logger.warn({ bindErr, precisionOrderId, projectId: conversation.project_id }, '精細模式訂單綁定失敗（fail-open，不阻擋）')
+      }
+    }
+
     // 限速檢查（5 秒窗口最多 1 條）
     const rateLimit = await checkConversationRateLimit(conversationId)
     if (!rateLimit.allowed) {
@@ -244,6 +263,7 @@ router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async
         mode,
         locale,
         imageUrls: imageUrls || undefined,
+        precisionOrderId: precisionOrderId || undefined,
       }, {
         jobId: `msg:${conversationId}:${messageId}`,
         attempts: 3,
@@ -406,6 +426,39 @@ router.post('/:id/reply', optionalAuth, validateBody(replyMessageSchema), async 
  * GET /api/conversation/:id/messages
  * 取得對話消息（輪詢用）
  */
+/**
+ * Lazy fetch — 拿單條 message 的完整 richContent.data
+ * polling response 對超大 message strip richContent.data 後，前端用此 endpoint 拿 detail
+ * 防 incident 2026-05-17：避免每次 polling 都拉 500KB+ payload freeze 前端
+ */
+router.get('/:id/messages/:msgId/rich-data', optionalAuth, async (req, res) => {
+  try {
+    const { id: conversationId, msgId } = req.params
+    const conversation = await db.getConversation(conversationId)
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+
+    // 所有權驗證
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [conversation.project_id]
+    )
+    if (project && req.user && project.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    const messages = (conversation.messages || []) as Array<Record<string, unknown>>
+    const msg = messages.find(m => m.id === msgId)
+    if (!msg) return res.status(404).json({ error: 'Message not found' })
+    const rc = msg.richContent as { type?: string; data?: unknown } | undefined
+    if (!rc) return res.status(404).json({ error: 'No richContent' })
+
+    return res.json({ messageId: msgId, richContent: rc })
+  } catch (error) {
+    logger.error({ err: error }, '取得 rich-data 失敗')
+    return res.status(500).json({ error: 'Failed to fetch rich-data' })
+  }
+})
+
 router.get('/:id/messages', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
@@ -459,14 +512,29 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
     )
 
     // 如果沒有活躍 task，檢查 bdd_sessions
+    // 防雷 incident 2026-05-17：原條件 `current_phase != 'completed'` 是 bug —
+    // Tellcraft 各 skill 完成 phase 命名各異（uiux_complete / deployer_complete / fast_complete / ...），
+    // 「completed」單一字串不涵蓋任何實際完成狀態 → 所有正常完成的 conv 都被誤判為「仍生成中」
+    // → 每次 polling 都 inject LKG（70+ files / 500KB+）撐爆 response → 前端 freeze
+    const TERMINAL_PHASES = [
+      'completed',           // legacy
+      'uiux_complete',       // UIUX skill 完成
+      'deployer_complete',   // 部署完成
+      'fast_complete',       // Fast Build 完成
+      'clone_complete',      // Clone 完成
+      'domain_complete',     // Domain 完成
+      'failed',              // 任何失敗終態
+    ]
     let activeSessionId: string | undefined
     let activePhase: string | undefined
     if (!activeTask) {
       const bddSession = await db.queryOne<{ id: string; current_phase: string }>(
         `SELECT id, current_phase FROM bdd_sessions
-         WHERE conversation_id = $1 AND current_phase != 'completed'
+         WHERE conversation_id = $1
+           AND current_phase IS NOT NULL
+           AND current_phase != ALL($2::text[])
          ORDER BY created_at DESC LIMIT 1`,
-        [conversationId]
+        [conversationId, TERMINAL_PHASES]
       )
       if (bddSession) {
         activeSessionId = bddSession.id
@@ -477,21 +545,69 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
     // 對 code_preview richContent 套用 in-memory 修復（確保舊對話也能正確渲染）
     const { messages: fixedMessages, changed: messagesChanged } = repairCodePreviewInMessages(conversation.messages)
 
+    // 防雷 incident 2026-05-17：polling response 內單條 message > MESSAGE_INLINE_MAX_BYTES 強制 strip
+    // 保留 type + reference，前端用 GET /api/conversation/:id/messages/:msgId/rich-data 自己 lazy fetch
+    // 不破壞 DB content（DB 仍存原版）— 只在 response 層裁剪
+    const MESSAGE_INLINE_MAX_BYTES = 150 * 1024 // 150 KB / message
+    let messagesStrippedCount = 0
+    const cappedMessages = (fixedMessages as Array<Record<string, unknown>>).map((m, idx) => {
+      const msgStr = JSON.stringify(m)
+      if (msgStr.length <= MESSAGE_INLINE_MAX_BYTES) return m
+      const rc = m.richContent as { type?: string; data?: unknown } | undefined
+      if (!rc || !rc.data) return m // 沒 richContent.data 可裁，無法處理
+      messagesStrippedCount++
+      return {
+        ...m,
+        richContent: {
+          type: rc.type,
+          data: {
+            _stripped: true,
+            _originalSize: msgStr.length,
+            _msgIndex: idx,
+            _reason: `message exceeded ${MESSAGE_INLINE_MAX_BYTES}B cap — fetch via /api/conversation/${conversationId}/messages/${(m as { id?: string }).id}/rich-data`,
+          },
+        },
+      }
+    })
+    if (messagesStrippedCount > 0) {
+      logger.warn({
+        conversationId,
+        strippedCount: messagesStrippedCount,
+        cap: MESSAGE_INLINE_MAX_BYTES,
+      }, 'polling response：訊息超大已 strip richContent.data（前端需 lazy fetch）')
+    }
+
     // Last Known Good fallback：生成中但 preview-gate 攔下壞代碼時，前端需要有上一版可顯示
     // 條件：正在生成（activeTask 或 activePhase 存在）且當前無 streamingPreview → 回傳 LKG
     // 其他情況不查詢，避免每次 polling 都打 project_files
     let lastValidatedFiles = null
+    let lkgStrippedDueToCap = false
     const isGenerating = Boolean(activeTask || activePhase)
     if (isGenerating && !streamingPreview) {
       try {
         const lkgRows = await db.getLastValidatedProjectFiles(conversation.project_id)
         if (lkgRows.length > 0) {
-          lastValidatedFiles = lkgRows.map(r => ({
-            file_path: r.file_path,
-            content: r.content,
-            skill_source: r.skill_source,
-            file_type: r.file_type,
-          }))
+          // 防雷 incident 2026-05-17：response size cap — LKG 70+ files 可達 500KB+ 撐爆前端 main thread
+          // 超過 LKG_INLINE_MAX_BYTES 就 strip，前端應 fallback 用獨立 LKG endpoint lazy load
+          const LKG_INLINE_MAX_BYTES = 200 * 1024 // 200 KB
+          const totalSize = lkgRows.reduce((sum, r) => sum + (r.content?.length || 0), 0)
+          if (totalSize > LKG_INLINE_MAX_BYTES) {
+            lkgStrippedDueToCap = true
+            logger.warn({
+              projectId: conversation.project_id,
+              conversationId,
+              totalSize,
+              fileCount: lkgRows.length,
+              cap: LKG_INLINE_MAX_BYTES,
+            }, 'LKG response 超過 size cap，已 strip（前端應改 lazy fetch）')
+          } else {
+            lastValidatedFiles = lkgRows.map(r => ({
+              file_path: r.file_path,
+              content: r.content,
+              skill_source: r.skill_source,
+              file_type: r.file_type,
+            }))
+          }
         }
       } catch (err) {
         logger.warn({ err, projectId: conversation.project_id }, 'LKG 查詢失敗（不阻塞）')
@@ -499,7 +615,7 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
     }
 
     res.json({
-      messages: fixedMessages,
+      messages: cappedMessages,
       updatedAt: conversation.updated_at,
       hasChanges: true,
       currentTaskId: activeTask?.id || activeSessionId,
@@ -507,6 +623,8 @@ router.get('/:id/messages', optionalAuth, async (req, res) => {
       isComplete: conversation.spec_complete && !activeTask && !activeSessionId,
       streamingPreview,
       lastValidatedFiles,
+      lkgStrippedDueToCap,
+      messagesStrippedCount,
     })
 
     // 背景存回 DB，讓後續輪詢直接拿到修復版本

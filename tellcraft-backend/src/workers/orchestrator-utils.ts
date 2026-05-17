@@ -158,7 +158,7 @@ export async function sendMessage(
     progress?: { current: number; total: number; step: string }
     layoutHint?: 'default' | 'split' | 'full_preview'
     richContent?: {
-      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history' | 'fast_build_progress' | 'building_progress' | 'domain_search_result' | 'domain_progress' | 'domain_dns_instructions' | 'domain_registrant_form' | 'domain_complete_result' | 'db_schema_preview' | 'db_provision_result' | 'clone_progress'
+      type: 'template_picker' | 'variant_picker' | 'design_preview' | 'code_preview' | 'quality_gate_report' | 'deploy_progress' | 'deploy_result' | 'deployment_history' | 'fast_build_progress' | 'building_progress' | 'domain_search_result' | 'domain_progress' | 'domain_dns_instructions' | 'domain_registrant_form' | 'domain_complete_result' | 'db_schema_preview' | 'db_provision_result' | 'clone_progress' | 'iteration_limit_paywall'
       data: Record<string, unknown>
     }
     quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]
@@ -186,6 +186,21 @@ export async function sendMessage(
     layoutHint: options.layoutHint,
     richContent: options.richContent,
     quickReplies: options.quickReplies,
+  }
+
+  // 防雷 incident 2026-05-17：單條 message > 100KB 寫進 DB 後 polling 拉到前端會 freeze JSON.parse + main thread
+  // code_preview richContent.data 整套 pages/components/styles 全塞進來容易超標
+  // 這層只 warn + telemetry（資料完整寫 DB），strip 邏輯由 polling response layer 負責（不破壞 DB content）
+  const MESSAGE_SIZE_WARN_BYTES = 100 * 1024
+  const msgSize = JSON.stringify(message).length
+  if (msgSize > MESSAGE_SIZE_WARN_BYTES) {
+    logger.warn({
+      conversationId,
+      stage: options.stage,
+      rcType: options.richContent?.type,
+      msgSize,
+      warnThreshold: MESSAGE_SIZE_WARN_BYTES,
+    }, 'sendMessage 單條 message 超過 100KB warning（風險：前端 polling 拉到可能 freeze；polling response 會自動 strip）')
   }
 
   // 更新 DB
