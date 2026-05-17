@@ -1906,6 +1906,7 @@ export function wrapInNextJs(
   })
 
   // next.config.ts — 本地已驗證，ignoreBuildErrors 防 VPS/Vercel Node 版本差異
+  // headers(): 允許 tellcraft.com 用 iframe 嵌入做 preview（Vercel preview URL embed）
   files.push({
     file: 'next.config.ts',
     data: `import type { NextConfig } from 'next'
@@ -1916,6 +1917,19 @@ const nextConfig: NextConfig = {
   },
   images: {
 ${CLIENT_APP_IMAGE_REMOTE_PATTERNS}
+  },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          // 允許 tellcraft 主站 iframe 嵌入做 preview；deprecated 但 chrome 仍尊重
+          { key: 'X-Frame-Options', value: 'ALLOWALL' },
+          // 現代 CSP — 取代 X-Frame-Options，明列允許嵌入的 origin
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self' https://tellcraft.com https://*.tellcraft.com https://*.vercel.app http://localhost:* http://127.0.0.1:*" },
+        ],
+      },
+    ]
   },
 }
 
@@ -3220,7 +3234,7 @@ function wrapInNextJsWithIgnoreErrors(
 ): VercelFile[] {
   const files = wrapInNextJs(code, projectName, tailwindConfig, extraDependencies, injectedFiles)
 
-  // 替換 next.config.ts，加回 ignoreBuildErrors: true
+  // 替換 next.config.ts，加回 ignoreBuildErrors: true（headers 同步保留供 Vercel preview iframe）
   const configIdx = files.findIndex(f => f.file === 'next.config.ts')
   if (configIdx >= 0) {
     files[configIdx].data = `import type { NextConfig } from 'next'
@@ -3231,6 +3245,17 @@ const nextConfig: NextConfig = {
   },
   images: {
 ${CLIENT_APP_IMAGE_REMOTE_PATTERNS}
+  },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'ALLOWALL' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self' https://tellcraft.com https://*.tellcraft.com https://*.vercel.app http://localhost:* http://127.0.0.1:*" },
+        ],
+      },
+    ]
   },
 }
 
