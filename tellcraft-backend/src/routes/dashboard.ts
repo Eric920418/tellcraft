@@ -64,6 +64,7 @@ router.get('/stats', requireAuth, async (req, res) => {
          LEFT JOIN LATERAL (
            SELECT id, updated_at FROM conversations
            WHERE project_id = p.id
+             AND jsonb_array_length(COALESCE(messages::jsonb, '[]'::jsonb)) > 0
            ORDER BY updated_at DESC LIMIT 1
          ) lc ON true
          WHERE p.user_id = $1

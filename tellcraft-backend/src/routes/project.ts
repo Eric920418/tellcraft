@@ -128,6 +128,7 @@ router.get('/', requireAuth, async (req, res) => {
               COUNT(c.id) as conversation_count,
               (SELECT c2.id FROM conversations c2
                WHERE c2.project_id = p.id
+                 AND jsonb_array_length(COALESCE(c2.messages::jsonb, '[]'::jsonb)) > 0
                ORDER BY c2.updated_at DESC LIMIT 1) as latest_conversation_id
        FROM projects p
        LEFT JOIN conversations c ON c.project_id = p.id

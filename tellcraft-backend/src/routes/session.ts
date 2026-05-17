@@ -211,19 +211,30 @@ router.post('/initialize', optionalAuth, validateBody(initializeSessionSchema), 
     let messages: any[] = []
 
     if (!createNew) {
-      // 查找未完成的對話
-      const existingConv = await queryOne<{ id: string; messages: any }>(
+      // 1. 優先未完成對話（continuing in-progress work）
+      let existingConv = await queryOne<{ id: string; messages: any }>(
         `SELECT id, messages FROM conversations
          WHERE project_id = $1 AND spec_complete = false
          ORDER BY updated_at DESC LIMIT 1`,
         [projectId]
       )
 
+      // 2. Fallback：找 project 最新對話（含已完成）— 避免已完成 project 被視為「沒對話」而建 mystery 0-msg conv
+      if (!existingConv) {
+        existingConv = await queryOne<{ id: string; messages: any }>(
+          `SELECT id, messages FROM conversations
+           WHERE project_id = $1
+             AND jsonb_array_length(COALESCE(messages::jsonb, '[]'::jsonb)) > 0
+           ORDER BY updated_at DESC LIMIT 1`,
+          [projectId]
+        )
+      }
+
       if (existingConv) {
         conversationIdResult = existingConv.id
         messages = existingConv.messages || []
       } else {
-        // 創建新對話
+        // 真的零對話才建新（理論上 existingProject 應該有對話，這是 safety net）
         conversationIdResult = crypto.randomUUID()
         await query(
           `INSERT INTO conversations (id, project_id, messages, spec_complete, created_at, updated_at)
