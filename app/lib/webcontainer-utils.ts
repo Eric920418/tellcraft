@@ -39,7 +39,7 @@ const BASE_DEPS: Record<string, string> = {
   next: '14.2.28',
   react: '^18.3.0',
   'react-dom': '^18.3.0',
-  motion: '^11.0.0',
+  motion: '^12.0.0',  // 防雷 2026-05-17：npm motion 沒 v11（v10 跳 v12），^11 install fail → WebContainer dev server 缺套件 → Tailwind build 不出來
   tailwindcss: '^3.4.0',
   postcss: '^8.4.0',
   autoprefixer: '^10.0.0',

@@ -246,7 +246,7 @@ const BASE_DEPS: Record<string, string> = {
   next: '^16.0.0',
   react: '^19.0.0',
   'react-dom': '^19.0.0',
-  motion: '^11.0.0',
+  motion: '^12.0.0',  // 防雷 2026-05-17：npm motion 沒 v11（從 framer-motion rename 後 v10 跳 v12），^11 會 install fail → dev server 缺套件 → Tailwind 也 build 不出來
   tailwindcss: '^3.4.0',
   postcss: '^8.4.0',
   autoprefixer: '^10.0.0',
