@@ -107,7 +107,7 @@ export interface ButtonContrastPairs {
   onSurface3?: string
 }
 
-export function deriveButtonPairs(palette: {
+export interface PaletteForPairing {
   primary?: string
   secondary?: string
   accent?: string
@@ -116,8 +116,9 @@ export function deriveButtonPairs(palette: {
   surface1?: string
   surface2?: string
   surface3?: string
-  [k: string]: string | undefined
-}): ButtonContrastPairs {
+}
+
+export function deriveButtonPairs(palette: PaletteForPairing): ButtonContrastPairs {
   const pick = (bg: string | undefined): string => {
     if (!bg) return '#0f172a'
     return pickReadableForeground(bg).hex

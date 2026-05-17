@@ -7,6 +7,7 @@
 import type { DesignTier, DesignSystem, TemplateData } from './uiux-generation'
 import type { ReferenceAnalysis } from './reference-analyzer'
 import { matchTemplates } from './template-matcher'
+import { deriveButtonPairs } from './contrast-pairing'
 import { queryOne } from '../db/client'
 import { z } from 'zod'
 import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
@@ -724,6 +725,16 @@ function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier, productType
   if (p.displayFont) fontFamilies.display = [p.displayFont, 'serif']
   if (tier === 'functional') fontFamilies.mono = ['JetBrains Mono', 'monospace']
 
+  // R9 治本：派生按鈕對比 fg pair
+  const colorPalette = {
+    primary: p.primary, secondary: p.secondary, accent: p.accent,
+    background: p.background, foreground: p.foreground, muted: p.muted, border: p.border,
+    surface1: p.surface1, surface2: p.surface2, surface3: p.surface3, ring: p.ring,
+    destructive: '#ef4444', success: '#22c55e',
+  } as DesignSystem['colorPalette']
+  colorPalette.buttonContrast = deriveButtonPairs(colorPalette)
+  const bc = colorPalette.buttonContrast!
+
   return {
     cssVariables: `:root {
   --color-primary: ${p.primary};
@@ -737,12 +748,16 @@ function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier, productType
   --color-surface-2: ${p.surface2};
   --color-surface-3: ${p.surface3};
   --color-ring: ${p.ring};
+  --color-on-primary: ${bc.onPrimary};
+  --color-on-secondary: ${bc.onSecondary};
+  --color-on-accent: ${bc.onAccent};
 }`,
     tailwindExtend: {
       colors: {
         primary: p.primary, secondary: p.secondary, accent: p.accent,
         background: p.background, foreground: p.foreground, muted: p.muted, border: p.border,
         'surface-1': p.surface1, 'surface-2': p.surface2, 'surface-3': p.surface3, ring: p.ring,
+        'on-primary': bc.onPrimary, 'on-secondary': bc.onSecondary, 'on-accent': bc.onAccent,
       },
       fontFamily: fontFamilies,
     },
@@ -752,12 +767,7 @@ function paletteToDesignSystem(p: IndustryPalette, tier: DesignTier, productType
         ? { 'text-xs': '0.75rem', 'text-sm': '0.875rem', 'text-base': '1rem', 'text-lg': '1.125rem', 'text-xl': '1.25rem', 'text-2xl': '1.5rem', 'text-3xl': '1.875rem', 'text-4xl': '2.25rem' }
         : { 'text-xs': '0.75rem', 'text-sm': '0.875rem', 'text-base': '1rem', 'text-lg': '1.125rem', 'text-xl': '1.25rem', 'text-2xl': '1.5rem', 'text-3xl': '1.875rem', 'text-4xl': '2.25rem', 'text-5xl': '3rem' },
     },
-    colorPalette: {
-      primary: p.primary, secondary: p.secondary, accent: p.accent,
-      background: p.background, foreground: p.foreground, muted: p.muted, border: p.border,
-      surface1: p.surface1, surface2: p.surface2, surface3: p.surface3, ring: p.ring,
-      destructive: '#ef4444', success: '#22c55e',
-    },
+    colorPalette,
     spacing: {
       unit: 4,
       scale: tier === 'functional'

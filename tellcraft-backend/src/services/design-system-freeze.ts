@@ -17,6 +17,7 @@ import { createHash } from 'crypto'
 import type { DesignSystem } from './uiux-generation'
 import type { DesignSystem as VendoredDesignSpec } from '../types/design-system-schema'
 import { createLogger } from '../lib/logger'
+import { deriveButtonPairs } from './contrast-pairing'
 
 const logger = createLogger('design-system-freeze')
 
@@ -175,6 +176,23 @@ export function convertVendoredToDesignSystem(vendored: VendoredDesignSpec): Des
       // 標註此 DesignSystem 來自 vendored，下游若需區分可讀此欄位
       layoutPreference: `vendored:${vendored.metadata.brandKey ?? 'unknown'}`,
     },
+  }
+
+  // R9 治本：派生按鈕對比 fg pair（vendored brand 也適用）
+  ds.colorPalette.buttonContrast = deriveButtonPairs(ds.colorPalette)
+  // tailwindExtend.colors 同步加 on-* token 讓 LLM 可用
+  const bc = ds.colorPalette.buttonContrast
+  if (ds.tailwindExtend.colors && bc) {
+    ds.tailwindExtend.colors['on-primary'] = bc.onPrimary
+    ds.tailwindExtend.colors['on-secondary'] = bc.onSecondary
+    ds.tailwindExtend.colors['on-accent'] = bc.onAccent
+  }
+  // cssVariables 同步加 --color-on-* 派生 token
+  if (bc) {
+    ds.cssVariables = ds.cssVariables.replace(
+      /(\s*--color-ring:[^;]+;)/,
+      `$1\n  --color-on-primary: ${bc.onPrimary};\n  --color-on-secondary: ${bc.onSecondary};\n  --color-on-accent: ${bc.onAccent};`
+    )
   }
 
   // 視覺語氣判斷：vendored visualTheme atmosphere 含 "luxurious"/"premium"/"bold" → creative tier

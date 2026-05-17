@@ -14,6 +14,7 @@ import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
 import { selectTechniques, formatTechniquesForPrompt, formatTechniquesForPromptFast } from './design-techniques'
 import { getMoodPromptBlock, getMoodAnimationHint, getMoodRwdHint, getMoodSummary, getMoodCodeFragment, getMoodCodeFragmentCompact, getMoodById } from './design-moods'
 import { matchOpenDesignStyle, type OpenDesignCuratedEntry } from './open-design-md-loader'
+import { deriveButtonPairs } from './contrast-pairing'
 import { selectCompositionPatterns, formatPatternsForPrompt, listPatternsForVariants } from './composition-patterns'
 import { formatStructuredDataForPrompt } from './reference-analyzer'
 import { createLogger } from '../lib/logger'
@@ -790,6 +791,18 @@ export interface DesignSystem {
     ring?: string
     destructive?: string
     success?: string
+    // R9 治本：deterministic 派生的按鈕對比 fg（generateCssVariables 前注入）
+    // 由 contrast-pairing.ts deriveButtonPairs(palette) 算出，給 LLM 用 text-on-primary 取代 text-white
+    buttonContrast?: {
+      onPrimary: string
+      onSecondary: string
+      onAccent: string
+      onDestructive?: string
+      onSuccess?: string
+      onSurface1?: string
+      onSurface2?: string
+      onSurface3?: string
+    }
   }
   spacing: {
     unit: number // 4px
@@ -1591,8 +1604,25 @@ export function synthesizeVariants(
   // 設置 moodId
   if (moodId) result.mood = moodId
 
-  // 重新生成 CSS variables
+  // R9 治本：派生按鈕對比 fg pair（CSS variables / Tailwind extend / prompt 都依賴）
+  result.colorPalette.buttonContrast = deriveButtonPairs(result.colorPalette)
+
+  // 重新生成 CSS variables（含 --color-on-* 派生 token）
   result.cssVariables = generateCssVariables(result)
+
+  // 同步 tailwindExtend.colors 加 on-primary/on-secondary/on-accent etc.（讓 LLM 能用 text-on-primary）
+  if (!result.tailwindExtend.colors) result.tailwindExtend.colors = {}
+  const bc = result.colorPalette.buttonContrast
+  if (bc) {
+    result.tailwindExtend.colors['on-primary'] = bc.onPrimary
+    result.tailwindExtend.colors['on-secondary'] = bc.onSecondary
+    result.tailwindExtend.colors['on-accent'] = bc.onAccent
+    if (bc.onDestructive) result.tailwindExtend.colors['on-destructive'] = bc.onDestructive
+    if (bc.onSuccess) result.tailwindExtend.colors['on-success'] = bc.onSuccess
+    if (bc.onSurface1) result.tailwindExtend.colors['on-surface-1'] = bc.onSurface1
+    if (bc.onSurface2) result.tailwindExtend.colors['on-surface-2'] = bc.onSurface2
+    if (bc.onSurface3) result.tailwindExtend.colors['on-surface-3'] = bc.onSurface3
+  }
 
   return result
 }
@@ -1601,6 +1631,7 @@ export function synthesizeVariants(
  * 從 Design System 生成 CSS Variables
  */
 function generateCssVariables(ds: DesignSystem): string {
+  const bc = ds.colorPalette.buttonContrast
   return `:root {
   /* Colors */
   --color-primary: ${ds.colorPalette.primary};
@@ -1612,6 +1643,15 @@ function generateCssVariables(ds: DesignSystem): string {
   --color-border: ${ds.colorPalette.border};
   ${ds.colorPalette.destructive ? `--color-destructive: ${ds.colorPalette.destructive};` : ''}
   ${ds.colorPalette.success ? `--color-success: ${ds.colorPalette.success};` : ''}
+  ${bc ? `/* Button contrast pairs (R9 治本) — 按鈕文字色配對，保證 WCAG AA ≥ 4.5 */
+  --color-on-primary: ${bc.onPrimary};
+  --color-on-secondary: ${bc.onSecondary};
+  --color-on-accent: ${bc.onAccent};
+  ${bc.onDestructive ? `--color-on-destructive: ${bc.onDestructive};` : ''}
+  ${bc.onSuccess ? `--color-on-success: ${bc.onSuccess};` : ''}
+  ${bc.onSurface1 ? `--color-on-surface-1: ${bc.onSurface1};` : ''}
+  ${bc.onSurface2 ? `--color-on-surface-2: ${bc.onSurface2};` : ''}
+  ${bc.onSurface3 ? `--color-on-surface-3: ${bc.onSurface3};` : ''}` : ''}
 
   /* Typography */
   --font-family: ${ds.typography.fontFamily};
