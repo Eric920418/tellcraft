@@ -77,6 +77,8 @@ export type EventType =
   | 'iteration_score_delta'        // 迭代完成寫，payload: {prevScore, newScore, delta, tier, scope, ...}
   | 'iteration_aesthetic_complaint'  // 用戶迭代輸入含美感投訴詞（regex 零 LLM）即記
   | 'design_choice_recorded'       // variant 選定即寫，固化「這次用了哪些 mood/tier/variantConcept」
+  // R8 observer：incrementalFirstBatch LLM 漏生 Header/Footer 元件導致 ship 出去沒 nav（2026-05-17 incident）
+  | 'first_batch_missing_nav'      // first batch 完成後 deterministic scan layout.tsx 無 nav marker 即記
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
@@ -941,6 +943,7 @@ export function findStructuralFailureCandidates(
     'coder_test_fix_give_up',
     'fix_convergence_failed',
     'qg_high_retry_count',  // Tier A4 加的
+    'first_batch_missing_nav',  // R8 加：first batch LLM 漏生 Header/Footer 元件
   ])
 
   return topPatterns
@@ -956,6 +959,8 @@ export function findStructuralFailureCandidates(
         ? `UIUX QG 多次失敗 — 考慮啟動 vendored designmd fallback`
         : row.event_type === 'coder_test_fail' || row.event_type === 'coder_test_fix_give_up'
         ? `Coder 業務邏輯重複失敗 — 看是否需要新 coder-handlers 模板`
+        : row.event_type === 'first_batch_missing_nav'
+        ? `LLM first batch 漏生 Header/Footer — prompt 已強化 (53afbecb)，若仍高頻則考慮 deterministic auto-inject fallback`
         : `規格驗證/對齊重複失敗 — 看是否需要新 deterministic feature fix`,
     }))
     .sort((a, b) => b.count - a.count)

@@ -4365,6 +4365,44 @@ ${isLaterBatch
 
       logger.info({ batchIdx: batchIdx + 1, pages: bPages.length, components: bComps.length }, 'generateStructure 批次完成')
 
+      // R8 observer：first batch 完成後 deterministic scan layout.tsx 缺 nav marker → telemetry warning
+      // 不干預生成（observer only），週報 structural_failure_candidates 章節監控驗證 53afbecb prompt 有效性
+      if (batchIdx === 0) {
+        const layoutFile = allRawPages.find(p =>
+          p.path === 'app/layout.tsx' || p.path === 'app/layout.ts' || p.path === 'layout.tsx' || p.path === 'layout.ts'
+        ) || allRawComponents.find(c =>
+          c.path === 'app/layout.tsx' || c.path === 'app/layout.ts' || c.path === 'layout.tsx' || c.path === 'layout.ts'
+        )
+        if (layoutFile) {
+          const hasNavMarker = /<(nav|header|footer)[\s>]|<[A-Z]\w*(Header|Footer|Nav|Navbar)[\s/>]|from\s+['"]@\/components\/(Header|Footer|Nav)/i.test(layoutFile.content)
+          if (!hasNavMarker) {
+            logger.warn({
+              conversationId: trackingContext?.conversationId,
+              layoutFilePath: layoutFile.path,
+              totalBatches: batches.length,
+            }, '[R8 observer] first batch layout.tsx 缺 nav marker — 53afbecb prompt 未生效或 LLM 未 follow')
+            recordTelemetry({
+              skillName: 'uiux',
+              eventType: 'first_batch_missing_nav',
+              patternKey: 'no_nav_marker_in_layout',
+              severity: 'warning',
+              outcome: 'failed',
+              userId: trackingContext?.userId || null,
+              conversationId: trackingContext?.conversationId || null,
+              payload: {
+                batchIdx,
+                totalBatches: batches.length,
+                layoutFilePath: layoutFile.path,
+                layoutSnippet: layoutFile.content.slice(0, 300),
+                tier: designTier,
+                hasHeaderComponent: allRawComponents.some(c => /Header\.(tsx|ts)$/i.test(c.path)),
+                hasFooterComponent: allRawComponents.some(c => /Footer\.(tsx|ts)$/i.test(c.path)),
+              },
+            }).catch(() => {})  // fire-and-forget
+          }
+        }
+      }
+
       // Checkpoint：批次完成後持久化中途結果，防止進程崩潰時遺失
       if (onCheckpoint && allRawPages.length > 0) {
         await onCheckpoint({ pages: allRawPages, components: allRawComponents, styles: styles || '' })
