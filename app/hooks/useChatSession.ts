@@ -138,7 +138,14 @@ export function useChatSession(
           callbacks.onMessagesSet(historyMessages)
 
           const cpMsg = [...historyMessages].reverse().find(m => m.richContent?.type === 'code_preview')
-          callbacks.onCodePreviewData(cpMsg?.richContent?.data ?? null)
+          {
+            // 防雷 incident 2026-05-17：跳過 polling cap stripped data（_stripped=true）
+            // 讓 useStrippedMessageHydration lazy fetch full 後再 fire 給 ChatPreviewPanel
+            // 否則 WebContainer mount 空 files → boot 卡死「啟動環境...」
+            const cpData = cpMsg?.richContent?.data
+            const isStripped = (cpData as { _stripped?: boolean } | undefined)?._stripped === true
+            callbacks.onCodePreviewData(cpData && !isStripped ? cpData : null)
+          }
 
           if (historyResult.data.currentTaskId) {
             setSessionInfo(prev => prev ? {
@@ -256,7 +263,14 @@ export function useChatSession(
           callbacks.onMessagesSet(historyMessages)
 
           const cpMsg = [...historyMessages].reverse().find(m => m.richContent?.type === 'code_preview')
-          callbacks.onCodePreviewData(cpMsg?.richContent?.data ?? null)
+          {
+            // 防雷 incident 2026-05-17：跳過 polling cap stripped data（_stripped=true）
+            // 讓 useStrippedMessageHydration lazy fetch full 後再 fire 給 ChatPreviewPanel
+            // 否則 WebContainer mount 空 files → boot 卡死「啟動環境...」
+            const cpData = cpMsg?.richContent?.data
+            const isStripped = (cpData as { _stripped?: boolean } | undefined)?._stripped === true
+            callbacks.onCodePreviewData(cpData && !isStripped ? cpData : null)
+          }
 
           const lastAiMessage = historyMessages.filter(m => m.role === 'assistant').pop()
           if (lastAiMessage?.stage) {
@@ -307,7 +321,12 @@ export function useChatSession(
       callbacks.onMessagesSet(formattedMessages)
 
       const cpMsg = [...formattedMessages].reverse().find(m => m.richContent?.type === 'code_preview')
-      callbacks.onCodePreviewData(cpMsg?.richContent?.data ?? null)
+      {
+        // 防雷 incident 2026-05-17：跳過 polling cap stripped data，讓 hydration hook 補
+        const cpData = cpMsg?.richContent?.data
+        const isStripped = (cpData as { _stripped?: boolean } | undefined)?._stripped === true
+        callbacks.onCodePreviewData(cpData && !isStripped ? cpData : null)
+      }
 
       setSessionInfo({
         ...sessionInfo,

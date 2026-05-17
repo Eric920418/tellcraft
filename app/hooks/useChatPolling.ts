@@ -107,7 +107,13 @@ export function useChatPolling(
           const hasCodePreview = formattedMessages.some(m => m.richContent?.type === 'code_preview')
           if (hasCodePreview) {
             const cpMsg = [...formattedMessages].reverse().find(m => m.richContent?.type === 'code_preview')
-            if (cpMsg?.richContent?.data) callbacksRef.current.onCodePreviewData(cpMsg.richContent.data)
+            // 防雷 incident 2026-05-17：polling response cap 對超大 code_preview 會 strip data 為 _stripped marker
+            // 直接 fire 給 ChatPreviewPanel 會讓 WebContainer mount 空 files → boot 卡死「啟動環境...」
+            // 跳過 stripped data — useStrippedMessageHydration hook 會 lazy fetch full 後再 fire
+            const isStripped = (cpMsg?.richContent?.data as { _stripped?: boolean } | undefined)?._stripped === true
+            if (cpMsg?.richContent?.data && !isStripped) {
+              callbacksRef.current.onCodePreviewData(cpMsg.richContent.data)
+            }
             callbacksRef.current.onStreamingPreview(null)
             callbacksRef.current.onFastBuildChunks(0)
           }
