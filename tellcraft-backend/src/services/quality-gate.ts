@@ -544,20 +544,27 @@ function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[
   ]
 
   // ========================================================
-  // Layer 0：真實 WCAG luminance ratio 計算（P1 升級）
+  // Layer 0：真實 WCAG luminance ratio 計算（R9 治本 Layer 4 升級版）
   // 找 element 上同時存在的 bg-* + text-* class 配對，算 ratio。
-  // - ratio < 3.0 → critical（即使 large text 也不過）
-  // - ratio < 4.5 且非 large text → warning（normal text 不過 AA）
-  // - large text / UI 閾值放寬到 3.0
+  // - 按鈕 context（<button>/role=button/btn class）內 ratio < 4.5 → critical（必擋部署）
+  // - 普通 context ratio < 3.0 → critical
+  // - 普通 context ratio < 4.5 非 large text → warning
+  // - 移除 PER_FILE_CAP=3 沉默吞噬，改成 (bg,fg) pair dedup（同對只報一次）
   // 不解析 parent inherited bg（首版限制）
+  // 注意：Layer 3 deployer auto-swap 已先處理 button context，QG 觸發 = 真實罕見漏網
   // ========================================================
   const classNameMatcher = /className\s*=\s*(["'])([^"']+?)\1/g
+  // R9: 偵測按鈕 context 用於 severity 升級
+  const BUTTON_LINE_RE = /<(button|Button)\b|<(a|Link)\b[^>]*?\b(btn|cta|button|link-button)\b|role=(["'])button\4/
   for (const { path, content } of allFiles) {
     const lines = content.split('\n')
-    let perFileFlagged = 0
-    const PER_FILE_CAP = 3
-    for (let i = 0; i < lines.length && perFileFlagged < PER_FILE_CAP; i++) {
+    // R9: 同 (bg,fg) pair 一個 file 只報一次（取代 PER_FILE_CAP=3 沉默 cap）
+    const reportedPairs = new Set<string>()
+    for (let i = 0; i < lines.length; i++) {
       const matches = [...lines[i].matchAll(classNameMatcher)]
+      // R9: 判斷此 line 是否在 button context（看本行 + 前 2 行 + 後 1 行 window）
+      const contextWindow = lines.slice(Math.max(0, i - 2), Math.min(lines.length, i + 2)).join(' ')
+      const inButtonContext = BUTTON_LINE_RE.test(contextWindow)
       for (const m of matches) {
         const className = m[2]
         const { bg, text } = extractBgAndText(className)
@@ -576,10 +583,28 @@ function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[
         }
 
         const large = isLargeText(className)
+        // R9: button context 強制 4.5 閾值（不分 large text）
+        const buttonFailsCritical = inButtonContext && ratio < 4.5
         const failsCritical = ratio < 3.0
         const failsAA = !large && ratio < 4.5
 
-        if (failsCritical) {
+        // R9: dedup (bg,fg) pair 一個 file 只報一次
+        const pairKey = `${bg[0]}__${text[0]}`
+        if (reportedPairs.has(pairKey)) continue
+
+        if (buttonFailsCritical) {
+          issues.push({
+            id: `contrast-${++issueCounter}`,
+            category: 'a11y',
+            severity: 'critical',
+            rule: 'contrast-button-aa',
+            file: path,
+            line: i + 1,
+            message: `按鈕對比度僅 ${ratio.toFixed(2)}:1（${bg[0]} + ${text[0]}），按鈕內文字必須 ≥ 4.5:1（R9 治本：Layer 3 應已 auto-swap，這條觸發表示漏網）`,
+            suggestion: `用 text-on-${bg[0].replace('bg-', '')} 配對 token，或改用 bg-slate-900 + text-white`,
+          })
+          reportedPairs.add(pairKey)
+        } else if (failsCritical) {
           issues.push({
             id: `contrast-${++issueCounter}`,
             category: 'a11y',
@@ -588,10 +613,9 @@ function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[
             file: path,
             line: i + 1,
             message: `對比度僅 ${ratio.toFixed(2)}:1（${bg[0]} + ${text[0]}），低於 WCAG 最低門檻 3:1`,
-            suggestion: `提高對比度到 ≥ 4.5:1（normal text）或 ≥ 3:1（large/UI）。建議用更深 bg + 更亮 text，例如 bg-slate-900 + text-white`,
+            suggestion: `提高對比度到 ≥ 4.5:1（normal text）或 ≥ 3:1（large/UI）。建議用更深 bg + 更亮 text`,
           })
-          perFileFlagged++
-          break
+          reportedPairs.add(pairKey)
         } else if (failsAA) {
           issues.push({
             id: `contrast-${++issueCounter}`,
@@ -603,8 +627,7 @@ function checkColorContrast(code: GeneratedCode, moodId?: string): QualityIssue[
             message: `對比度 ${ratio.toFixed(2)}:1（${bg[0]} + ${text[0]}），未達 WCAG AA normal text 4.5:1（可能誤報若實際是 large text）`,
             suggestion: `若該文字是 body/UI label，提升對比度到 4.5:1；若是 ≥18px heading 可放寬到 3:1`,
           })
-          perFileFlagged++
-          break
+          reportedPairs.add(pairKey)
         }
       }
     }
