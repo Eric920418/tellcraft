@@ -1772,7 +1772,31 @@ ${getMoodSummary(designSystem.mood)}（完整風格指引已在生成指令中�
 - 禁止使用 bg-[var(--color-primary)] 這種 arbitrary value 語法
 - 禁止使用 Tailwind 默認顏色（bg-blue-500 等）
 - 對比配對：亮底（background/surface-1/2/3）→ text-foreground（深色）；深底（slate-950/black）→ text-white（白色）
-- 半透明白色卡片（bg-white/50 以上）→ 偏亮 → 用深色文字；bg-white/10 以下 → 依底層顏色決定文字色`
+- 半透明白色卡片（bg-white/50 以上）→ 偏亮 → 用深色文字；bg-white/10 以下 → 依底層顏色決定文字色
+
+## ⚠️ 按鈕/CTA 對比度硬規則（WCAG AA 必達 ≥ 4.5:1，違反 = 用戶看不清按鈕文字）
+**按鈕（<button>, <a class="btn|cta|...">, role="button"）的 bg-* + text-* 必須使用配對 token**：
+
+| 按鈕底色 | 文字色（**唯一允許**） |
+|---------|----------------------|
+| bg-primary | text-on-primary |
+| bg-secondary | text-on-secondary |
+| bg-accent | text-on-accent |
+${designSystem.colorPalette.buttonContrast?.onDestructive ? `| bg-destructive | text-on-destructive |\n` : ''}\
+${designSystem.colorPalette.buttonContrast?.onSuccess ? `| bg-success | text-on-success |\n` : ''}
+
+**❌ 禁止**：
+- bg-primary + text-white（white 對中飽和色 ratio 經常 < 4.5）
+- bg-accent + text-white（amber/yellow 系幾乎都不夠）
+- colored section（bg-primary/accent）內放 bg-white text-white 子按鈕
+
+**✅ 正確範例**：
+\`\`\`tsx
+<button className="bg-primary text-on-primary px-6 py-3 rounded-full">立即預約</button>
+<a className="btn bg-accent text-on-accent">查看商品</a>
+\`\`\`
+
+理由：on-primary 等 token 由系統 deterministic 計算（WCAG AA 保證），LLM 自己選 text-white 是 R9 incident 根因。`
 }
 
 /**
@@ -1835,7 +1859,14 @@ ${getMoodSummary(designSystem.mood)}` : ''}
 - 禁止 bg-[var(--color-primary)] arbitrary value 語法
 - 禁止 Tailwind 默認顏色（bg-blue-500 等）
 - 對比配對：亮底（background/surface-1/2/3）→ text-foreground；深底（slate-950/black）→ text-white
-- 半透明白色卡片（bg-white/50 以上）→ 用深色文字；bg-white/10 以下 → 依底層顏色決定`
+- 半透明白色卡片（bg-white/50 以上）→ 用深色文字；bg-white/10 以下 → 依底層顏色決定
+
+## ⚠️ 按鈕對比度硬規則（WCAG AA ≥ 4.5:1）
+按鈕（<button>, <a class="btn|cta">, role="button"）bg-* 必須配對應 text-on-* token：
+- bg-primary → **text-on-primary**（禁 text-white）
+- bg-secondary → **text-on-secondary**
+- bg-accent → **text-on-accent**（黃/橘配 white 對比不足）
+on-* token 由系統 deterministic 算 WCAG AA 保證，LLM 自選 text-white 是 R9 incident 根因`
 }
 
 export function buildCompactDesignPrompt(
@@ -1865,7 +1896,8 @@ export function buildCompactDesignPrompt(
 
   lines.push(
     '- 使用既有 Design System token；不要改色盤、字體家族、間距尺度。',
-    '- 只輸出實際修改的檔案。'
+    '- 只輸出實際修改的檔案。',
+    '- ⚠️ 按鈕對比硬規則：bg-primary 配 text-on-primary（禁 text-white），bg-accent 配 text-on-accent。R9 incident 治本'
   )
 
   return lines.join('\n')
