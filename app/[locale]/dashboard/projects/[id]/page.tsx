@@ -8,7 +8,8 @@ import { useTranslations } from 'next-intl'
 import { StatusBadge, MiniStatsCard } from '@/app/components/dashboard'
 import { VersionHistory } from '@/app/components/dashboard/VersionHistory'
 import { getProjectDetail } from '@/app/actions'
-import { startProjectIteration, deleteProject } from '@/app/lib/vps-api'
+import { startProjectIteration, deleteProject, purchaseBuyout, type CheckoutCurrency } from '@/app/lib/vps-api'
+import { useLocale } from 'next-intl'
 import { useAuth } from '@/app/hooks/useAuth'
 
 interface ProjectDetail {
@@ -73,6 +74,8 @@ export default function ProjectDetailPage() {
   const router = useRouter()
   const t = useTranslations('dashboard')
   const tc = useTranslations('common')
+  const locale = useLocale()
+  const buyoutCurrency: CheckoutCurrency = locale === 'zh' ? 'twd' : 'usd'
   const { token } = useAuth()
   const [data, setData] = useState<ProjectDetail | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -149,9 +152,34 @@ export default function ProjectDetailPage() {
     setIsDownloading(deploymentId)
     try {
       const res = await fetch(
-        `/api/projects/${projectId}/deployments/${deploymentId}/download-code`,
+        `/api/projects/${projectId}/deployments/${deploymentId}/download-code?locale=${locale}`,
         { headers: { Authorization: `Bearer ${token}` } }
       )
+      // 精細模式買斷 gate（W3 第 3 件）：未付買斷費 → 402 + tier/price → 跳買斷 checkout
+      if (res.status === 402) {
+        const errPayload = await res.json().catch(() => ({} as { error?: string; data?: { orderId?: string } }))
+        const orderId = errPayload?.data?.orderId
+        if (orderId) {
+          try {
+            const buyoutRes = await purchaseBuyout({
+              orderId,
+              currency: buyoutCurrency,
+              locale,
+              token,
+            })
+            if (buyoutRes.success && buyoutRes.data?.checkoutUrl) {
+              window.location.href = buyoutRes.data.checkoutUrl
+              return
+            }
+            setError(buyoutRes.error || 'Buyout failed')
+          } catch (buyoutErr) {
+            setError(buyoutErr instanceof Error ? buyoutErr.message : String(buyoutErr))
+          }
+        } else {
+          setError(errPayload?.error || 'precision_buyout_required')
+        }
+        return
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         setError(err.error || t('downloadFailed'))

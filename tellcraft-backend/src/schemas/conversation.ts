@@ -9,6 +9,7 @@ export const sendMessageSchema = z.object({
   mode: z.enum(['fast', 'fine', 'clone']).optional(),
   locale: z.enum(['zh', 'en']).optional(),
   imageUrls: z.array(imageUrlItem).max(5).optional(),
+  precisionOrderId: z.string().uuid().optional(),  // 精細模式訂單綁定（從 /pay/success 跳轉帶來）
 }).passthrough()
 
 export const replyMessageSchema = z.object({

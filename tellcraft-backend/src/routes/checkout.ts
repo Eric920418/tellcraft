@@ -12,8 +12,10 @@
 import { Router, Request, Response } from 'express'
 import { requireAuth } from '../middleware/auth'
 import { createLogger } from '../lib/logger'
+import { queryMany } from '../db/client'
 import {
   createPrecisionCheckoutSession,
+  createBuyoutCheckoutSession,
   getCheckoutSessionStatus,
   cancelCheckoutSession,
   TIER_CONFIG,
@@ -198,6 +200,114 @@ router.post('/precision/cancel', requireAuth, async (req: Request, res: Response
     res.status(500).json({
       success: false,
       error: err instanceof Error ? err.message : '取消失敗',
+    })
+  }
+})
+
+// ============================================================
+// POST /api/checkout/buyout — 對既有訂單發起代碼買斷付款（W3 第 3 件）
+// Body: { orderId, currency?, locale? }
+// ============================================================
+
+router.post('/buyout', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { orderId, currency: rawCurrency, locale } = req.body as {
+      orderId?: string
+      currency?: string
+      locale?: string
+    }
+    if (!orderId) {
+      res.status(400).json({ success: false, error: '缺少 orderId' })
+      return
+    }
+    const currency: Currency = isValidCurrency(rawCurrency) ? rawCurrency : localeToCurrency(locale)
+
+    const appUrl = process.env.APP_URL || 'https://tellcraft.com'
+    const localePrefix = locale && locale !== 'en' ? `/${locale}` : ''
+    const successUrl = `${appUrl}${localePrefix}/dashboard/orders?buyout_success=1&session_id={CHECKOUT_SESSION_ID}`
+    const cancelUrl = `${appUrl}${localePrefix}/dashboard/orders?buyout_cancel=1`
+
+    const result = await createBuyoutCheckoutSession({
+      userId: req.user!.id,
+      userEmail: req.user!.email ?? null,
+      orderId,
+      currency,
+      successUrl,
+      cancelUrl,
+    })
+
+    logger.info({ userId: req.user!.id, orderId, currency, isMock: result.isMock }, '建立代碼買斷 checkout session')
+
+    res.json({
+      success: true,
+      data: {
+        sessionId: result.sessionId,
+        checkoutUrl: result.checkoutUrl,
+        amountCents: result.amountCents,
+        currency: result.currency,
+        isMock: result.isMock,
+      },
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '買斷 checkout 建立失敗'
+    logger.error({ err }, '建立買斷 checkout 失敗')
+    res.status(500).json({ success: false, error: msg })
+  }
+})
+
+// ============================================================
+// GET /api/checkout/orders — 用戶查自己的精細模式訂單列表（plan W3）
+// ============================================================
+
+router.get('/orders', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const orders = await queryMany<{
+      id: string
+      tier: string
+      amount_cents: number
+      base_amount_cents: number
+      currency: string
+      addons: unknown
+      status: string
+      iterations_total: number
+      iterations_used: number
+      warranty_until: string | null
+      refund_deadline: string | null
+      delivered_at: string | null
+      exported_buyout: boolean
+      cancellation_reason: string | null
+      project_id: string | null
+      project_name: string | null
+      project_vercel_url: string | null
+      created_at: string
+    }>(
+      `SELECT
+         po.id, po.tier, po.amount_cents, po.base_amount_cents, po.currency,
+         po.addons, po.status,
+         po.iterations_total, po.iterations_used,
+         po.warranty_until, po.refund_deadline, po.delivered_at,
+         po.exported_buyout, po.cancellation_reason,
+         po.project_id,
+         p.name AS project_name,
+         p.vercel_url AS project_vercel_url,
+         po.created_at
+       FROM precision_orders po
+       LEFT JOIN projects p ON p.id = po.project_id
+       WHERE po.user_id = $1
+       ORDER BY po.created_at DESC
+       LIMIT 100`,
+      [req.user!.id]
+    )
+
+    res.json({
+      success: true,
+      data: { orders },
+    })
+  } catch (err) {
+    logger.error({ err, userId: req.user?.id }, '查詢精細模式訂單失敗')
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : '查詢失敗',
     })
   }
 })

@@ -23,6 +23,7 @@ import { parseIterationIntent, type IterationTier } from './iteration-intent'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
 import { getEnv } from '../lib/env'
 import { syncDesignSystemAfterIteration } from './design-system-sync'
+import { triggerPreviewDeploy } from '../workers/preview-deploy-worker'
 
 const MAX_ITERATIONS_PER_SESSION = 50
 
@@ -274,6 +275,54 @@ function detectRepeatedComplaint(
 // 迭代修改
 // ============================================================
 
+// 精細模式訂單配額查詢（plan: strip-golden-seal W3）
+// 用 project_id 反查訂單 → 配額 + 用量。fail-open（查無視為無 quota 限制）
+// ⚠️ 若未來新增 iteration 的 LangGraph subgraph，必須在 subgraph node 鏡像此查詢邏輯，
+//    否則 R5.1 案例重演（雙路徑漏改）
+async function getPrecisionOrderQuota(projectId: string): Promise<{
+  orderId: string
+  iterationsTotal: number
+  iterationsUsed: number
+  tier: string
+} | null> {
+  try {
+    const row = await db.queryOne<{
+      id: string
+      iterations_total: number
+      iterations_used: number
+      tier: string
+    }>(
+      `SELECT id, iterations_total, iterations_used, tier
+       FROM precision_orders
+       WHERE project_id = $1 AND status IN ('paid', 'in_progress', 'delivered')
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [projectId]
+    )
+    if (!row) return null
+    return {
+      orderId: row.id,
+      iterationsTotal: row.iterations_total,
+      iterationsUsed: row.iterations_used,
+      tier: row.tier,
+    }
+  } catch (err) {
+    logger.warn({ err, projectId }, 'precision_orders quota 查詢失敗（fail-open）')
+    return null
+  }
+}
+
+async function incrementPrecisionOrderIteration(orderId: string): Promise<void> {
+  try {
+    await db.query(
+      `UPDATE precision_orders SET iterations_used = iterations_used + 1 WHERE id = $1`,
+      [orderId]
+    )
+  } catch (err) {
+    logger.warn({ err, orderId }, 'precision_orders iterations_used +1 失敗（不阻擋流程）')
+  }
+}
+
 export async function executeIteration(input: {
   conversationId: string
   projectId: string
@@ -293,7 +342,33 @@ export async function executeIteration(input: {
     return
   }
 
-  // 0. 安全閥：迭代次數上限
+  // 0a. 精細模式訂單配額檢查（必須在 MAX_ITERATIONS_PER_SESSION 之前，
+  //     避免 starter 3 次配額被 50 次 hard cap 覆蓋）
+  const precisionOrder = await getPrecisionOrderQuota(projectId)
+  if (precisionOrder && precisionOrder.iterationsUsed >= precisionOrder.iterationsTotal) {
+    const isChinese = state.locale !== 'en'
+    await sendMessage(conversationId, io, {
+      content: isChinese
+        ? `已用完此訂單的 ${precisionOrder.iterationsTotal} 次迭代額度。可加購迭代包或升級維護訂閱（無限次）繼續微調。`
+        : `Used all ${precisionOrder.iterationsTotal} iterations for this order. Purchase an iteration pack or upgrade to maintenance subscription (unlimited).`,
+      stage: 'info',
+      richContent: {
+        type: 'iteration_limit_paywall',
+        data: {
+          tier: precisionOrder.tier,
+          iterationsTotal: precisionOrder.iterationsTotal,
+          iterationsUsed: precisionOrder.iterationsUsed,
+          orderId: precisionOrder.orderId,
+        },
+      },
+      quickReplies: [
+        { label: isChinese ? '部署目前版本' : 'Deploy current version', value: '部署', style: 'primary' as const },
+      ],
+    })
+    return
+  }
+
+  // 0b. 安全閥：迭代次數上限（既有 hard cap，所有用戶通用）
   if ((state.iterationCount || 0) >= MAX_ITERATIONS_PER_SESSION) {
     const isChinese = state.locale !== 'en'
     await sendMessage(conversationId, io, {
@@ -609,6 +684,8 @@ ${enrichedFeedback}`
         state.lastIterationImageUrls = undefined
         recordIterationHistory(state, userFeedback, changedFiles)
         recordRejectedToMemory(state.userId, userFeedback)  // T1: Design Memory
+        // 精細模式訂單計次 +1（fullstack 分支）
+        if (precisionOrder) await incrementPrecisionOrderIteration(precisionOrder.orderId)
 
         // 跳到預覽發送（下方共用邏輯）
         // updatedCode, changedFiles, deletedPaths 已設定
@@ -670,6 +747,8 @@ ${enrichedFeedback}`
       state.lastIterationFeedback = undefined
       state.lastIterationImageUrls = undefined
       recordRejectedToMemory(state.userId, userFeedback)  // T1: Design Memory
+      // 精細模式訂單計次 +1（frontend 分支）
+      if (precisionOrder) await incrementPrecisionOrderIteration(precisionOrder.orderId)
 
       changedFiles = result.pages.map(p => p.path)
       if (result.components) {
@@ -867,6 +946,10 @@ ${enrichedFeedback}`
     state.waitingForReply = false
     state.uiuxCodeGenerationStartedAt = undefined
     await saveFlowState(redis, conversationId, state)
+
+    // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
+    triggerPreviewDeploy(input.conversationId, state.projectId, updatedCode, tailwindConfig, redis, io)
+      .catch(err => logger.warn({ err: (err as Error).message }, 'iteration triggerPreviewDeploy 失敗'))
   } catch (err) {
     logger.error({ err }, 'executeIteration 異常')
     await redis.del(`streaming:preview:${conversationId}`).catch(() => {})

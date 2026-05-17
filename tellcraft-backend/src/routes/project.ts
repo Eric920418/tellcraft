@@ -8,6 +8,7 @@ import { createProjectSchema, templateOverridesSchema, batchDeleteSchema, emailC
 import { parseTellcraftDesignMd } from '../services/design-md-importer'
 import { freezeDesignSystem } from '../services/design-system-freeze'
 import { getEnv } from '../lib/env'
+import { TIER_CONFIG, type PrecisionTier, type Currency } from '../services/stripe-service'
 
 // Phase I: BullMQ queue + Redis client（在 index.ts 注入後 endpoint 才能用）
 let orchestratorQueue: Queue | null = null
@@ -36,6 +37,45 @@ import { getProjectLimit } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('project')
+
+// 精細模式買斷 gate（plan: strip-golden-seal W3 第 3 件）
+// 用戶 project 若來自精細模式訂單且未付買斷費 → 拒絕下載，回 402 + buyoutPrice 給前端引導付款
+// 對既有 creator/pro/business 訂閱用戶（非精細模式）完全無影響
+async function checkPrecisionBuyoutAllowed(
+  projectId: string,
+  localeHint: string | undefined
+): Promise<{ allowed: true } | {
+  allowed: false
+  payload: { error: string; data: { tier: PrecisionTier; orderId: string; buyoutPriceCents: number; currency: Currency } }
+}> {
+  const order = await db.queryOne<{ id: string; tier: string; exported_buyout: boolean }>(
+    `SELECT id, tier, exported_buyout
+     FROM precision_orders
+     WHERE project_id = $1 AND status IN ('paid', 'in_progress', 'delivered')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [projectId]
+  )
+  // 沒有對應精細模式訂單 → 走原有 requirePlan 邏輯，允許
+  if (!order) return { allowed: true }
+  if (order.exported_buyout) return { allowed: true }
+
+  const currency: Currency = localeHint === 'zh' ? 'twd' : 'usd'
+  const tierKey = order.tier as PrecisionTier
+  const config = TIER_CONFIG[tierKey]
+  return {
+    allowed: false,
+    payload: {
+      error: 'precision_buyout_required',
+      data: {
+        tier: tierKey,
+        orderId: order.id,
+        buyoutPriceCents: config?.buyoutPrice[currency] ?? 0,
+        currency,
+      },
+    },
+  }
+}
 
 const router: RouterType = Router()
 
@@ -1270,6 +1310,12 @@ router.get('/:id/download-code', requireAuth, requirePlan('creator', 'pro', 'bus
       return res.status(404).json({ error: 'Project not found' })
     }
 
+    // 精細模式買斷 gate（W3 第 3 件）
+    const buyoutCheck = await checkPrecisionBuyoutAllowed(id, (req.query.locale as string | undefined))
+    if (!buyoutCheck.allowed) {
+      return res.status(402).json(buyoutCheck.payload)
+    }
+
     const { files } = await buildDownloadBundle(id)
 
     const asciiName = project.name.replace(/[^a-z0-9-]/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'project'
@@ -1420,6 +1466,11 @@ router.get('/:id/versions/:versionNumber/download-code', requireAuth, requirePla
       return res.status(404).json({ error: 'Project not found' })
     }
 
+    const buyoutCheck = await checkPrecisionBuyoutAllowed(id, (req.query.locale as string | undefined))
+    if (!buyoutCheck.allowed) {
+      return res.status(402).json(buyoutCheck.payload)
+    }
+
     const generation = await db.queryOne<{ code_snapshot: unknown }>(
       'SELECT code_snapshot FROM generations WHERE project_id = $1 AND version_number = $2',
       [id, Number(versionNumber)]
@@ -1468,6 +1519,11 @@ router.get('/:id/deployments/:deploymentId/download-code', requireAuth, requireP
     )
     if (!project || project.user_id !== userId) {
       return res.status(404).json({ error: 'Project not found' })
+    }
+
+    const buyoutCheck = await checkPrecisionBuyoutAllowed(id, (req.query.locale as string | undefined))
+    if (!buyoutCheck.allowed) {
+      return res.status(402).json(buyoutCheck.payload)
     }
 
     const deploy = await db.queryOne<{ code_snapshot: unknown; url: string | null }>(

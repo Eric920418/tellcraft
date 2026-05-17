@@ -121,6 +121,7 @@ interface ProcessMessageData {
   mode?: 'fast' | 'fine' | 'clone'
   locale?: 'zh' | 'en'
   imageUrls?: string[]
+  precisionOrderId?: string  // 從 /pay/success 跳轉帶入，第一次寫進 FlowState 之後從 state 讀
 }
 
 // Re-export ContinueFlowData for external use
@@ -356,9 +357,17 @@ async function handleProcessMessage(
   redis: Redis,
   io: IoEmitter
 ) {
-  const { projectId, conversationId, userId, message, mode, locale } = data
+  const { projectId, conversationId, userId, message, mode, locale, precisionOrderId } = data
   const isAutoRepairMsg = message.trim().startsWith('__auto_repair_preview__:')
   const existingState = await getFlowState(redis, conversationId)
+
+  // 精細模式訂單綁定（第 0 件）：每次 message 都帶 precisionOrderId（前端 ChatSection 保持），
+  // 第一次寫入 FlowState，後續已存在不覆寫（避免用戶 URL 亂改）
+  if (precisionOrderId && existingState && !existingState.precisionOrderId) {
+    existingState.precisionOrderId = precisionOrderId
+    await saveFlowState(redis, conversationId, existingState)
+    logger.info({ conversationId, precisionOrderId }, '綁定精細模式訂單到 FlowState')
+  }
 
   if (!isAutoRepairMsg) {
     // Step 1: Prefilter（零 LLM 成本防禦）

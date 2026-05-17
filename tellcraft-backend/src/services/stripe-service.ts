@@ -321,6 +321,105 @@ export async function createPrecisionCheckoutSession(input: CreateCheckoutInput)
 }
 
 // ============================================================
+// 買斷 Checkout（W3 第 3 件 — 對既有訂單加購 exported_buyout=true）
+// ============================================================
+
+export interface CreateBuyoutInput {
+  userId: string
+  userEmail: string | null
+  orderId: string         // 既有 precision_orders.id
+  currency: Currency
+  successUrl: string
+  cancelUrl: string
+}
+
+export interface CreateBuyoutResult {
+  sessionId: string
+  checkoutUrl: string
+  amountCents: number
+  currency: Currency
+  isMock: boolean
+}
+
+export async function createBuyoutCheckoutSession(input: CreateBuyoutInput): Promise<CreateBuyoutResult> {
+  // 查訂單拿 tier
+  const order = await queryOne<{ id: string; tier: string; user_id: string; exported_buyout: boolean; status: string }>(
+    `SELECT id, tier, user_id, exported_buyout, status
+     FROM precision_orders
+     WHERE id = $1`,
+    [input.orderId]
+  )
+  if (!order) throw new Error(`Order not found: ${input.orderId}`)
+  if (order.user_id !== input.userId) throw new Error('Order does not belong to user')
+  if (order.exported_buyout) throw new Error('Order already bought out')
+  if (!['paid', 'in_progress', 'delivered'].includes(order.status)) {
+    throw new Error(`Cannot buyout order in status: ${order.status}`)
+  }
+
+  const config = TIER_CONFIG[order.tier as PrecisionTier]
+  if (!config) throw new Error(`Unknown tier: ${order.tier}`)
+
+  const buyoutAmount = config.buyoutPrice[input.currency]
+  const stripe = await getStripeClient()
+
+  // ── Mock 模式（沒 SDK / 沒 SECRET）── 立即標記 exported_buyout=true，回 mock URL
+  if (!stripe) {
+    await query(
+      `UPDATE precision_orders SET exported_buyout = true WHERE id = $1`,
+      [input.orderId]
+    )
+    const mockSessionId = `mock_buyout_${input.orderId.replace(/-/g, '').slice(0, 16)}`
+    const mockUrl = input.successUrl.replace('{CHECKOUT_SESSION_ID}', mockSessionId)
+    logger.info({ orderId: input.orderId, currency: input.currency }, 'Mock 買斷立即完成')
+    return {
+      sessionId: mockSessionId,
+      checkoutUrl: mockUrl,
+      amountCents: buyoutAmount,
+      currency: input.currency,
+      isMock: true,
+    }
+  }
+
+  // ── 真實 Stripe Checkout（買斷無 Price ID，固定用 price_data 動態）──
+  const session = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    payment_method_types: ['card'],
+    line_items: [
+      {
+        price_data: {
+          currency: input.currency,
+          product_data: {
+            name: `Code Buyout - ${order.tier}`,
+          },
+          unit_amount: buyoutAmount,
+        },
+        quantity: 1,
+      },
+    ],
+    customer_email: input.userEmail ?? undefined,
+    success_url: input.successUrl,
+    cancel_url: input.cancelUrl,
+    metadata: {
+      type: 'buyout',         // ← webhook handler 用此分流
+      orderId: input.orderId,
+      userId: input.userId,
+      tier: order.tier,
+      currency: input.currency,
+    },
+  })
+
+  if (!session.url) throw new Error('Stripe buyout checkout 缺 url')
+
+  return {
+    sessionId: session.id,
+    checkoutUrl: session.url,
+    amountCents: buyoutAmount,
+    currency: input.currency,
+    isMock: false,
+  }
+}
+
+// ============================================================
 // Checkout 狀態查詢（success 頁 polling 用）
 // ============================================================
 
@@ -491,8 +590,10 @@ export interface CheckoutSessionObject {
 }
 
 /**
- * checkout.session.completed — 付款成功，pending → paid
- * 同時把 stripe_customer_id 寫回 users 表（之後託管月費/維護訂閱共用）
+ * checkout.session.completed — 付款成功
+ * 兩種類型用 metadata.type 區分：
+ * - 一般訂單：pending → paid（+ refund_deadline + customer_id 寫回 users）
+ * - 買斷加購（metadata.type='buyout'）：UPDATE exported_buyout=true（不動 status）
  */
 export async function handleCheckoutCompleted(session: CheckoutSessionObject): Promise<string | null> {
   const sessionId = session.id
@@ -500,7 +601,26 @@ export async function handleCheckoutCompleted(session: CheckoutSessionObject): P
   const customerId = session.customer ?? null
   const orderIdFromMeta = session.metadata?.orderId ?? null
   const userIdFromMeta = session.metadata?.userId ?? null
+  const type = session.metadata?.type ?? null
 
+  // ── 買斷加購（W3 第 3 件）──
+  if (type === 'buyout' && orderIdFromMeta) {
+    const result = await query<{ id: string }>(
+      `UPDATE precision_orders
+       SET exported_buyout = true
+       WHERE id = $1 AND exported_buyout = false
+       RETURNING id`,
+      [orderIdFromMeta]
+    )
+    if (result.rowCount === 0) {
+      logger.info({ orderId: orderIdFromMeta, sessionId }, '買斷 webhook：訂單已是 bought out 或不存在')
+    } else {
+      logger.info({ orderId: orderIdFromMeta, sessionId }, '精細模式代碼買斷完成（via webhook）')
+    }
+    return orderIdFromMeta
+  }
+
+  // ── 一般精細模式訂單付款 ──
   const result = await query<{ id: string; user_id: string }>(
     `UPDATE precision_orders
      SET status = 'paid',

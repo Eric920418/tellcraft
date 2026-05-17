@@ -98,6 +98,10 @@ function HomeContent() {
     }
   }, [searchParams])
 
+  // 精細模式付款完成跳回 chat 時帶 ?orderId=（/pay/success → router.push(?orderId=...)）
+  // 傳給 ChatSection，每次 sendMessage 都帶到 backend；後端只第一次寫入 FlowState
+  const precisionOrderId = searchParams.get('orderId') || undefined
+
   // 瀏覽器返回鍵監聯
   useEffect(() => {
     const handlePopState = () => {
@@ -368,6 +372,7 @@ function HomeContent() {
           onBack={handleBackToHome}
           buildMode={buildMode}
           initialImages={heroImages}
+          precisionOrderId={precisionOrderId}
         />
       </ErrorBoundary>
 

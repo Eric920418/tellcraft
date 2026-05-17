@@ -23,6 +23,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: '/dashboard', labelKey: 'overview', icon: '◐' },
   { href: '/dashboard/projects', labelKey: 'projects', icon: '□' },
+  { href: '/dashboard/orders', labelKey: 'orders', icon: '◐' },
   { href: '/dashboard/conversations', labelKey: 'conversations', icon: '◇' },
   { href: '/dashboard/account', labelKey: 'account', icon: '◎' },
   // 管理員專用
