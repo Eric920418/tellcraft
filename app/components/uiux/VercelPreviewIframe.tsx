@@ -15,7 +15,7 @@
  * 主視窗 listener 用 VERCEL_PREVIEW_ORIGIN_REGEX 白名單驗 e.origin（見 usePreviewDeployment.ts）
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PreviewStatus } from '@/app/hooks/usePreviewDeployment'
 
 export interface VercelPreviewIframeProps {
@@ -50,11 +50,12 @@ export default function VercelPreviewIframe({
     ? lkgUrl
     : null
 
-  // iframe src 直接帶（不從 about:blank useEffect navigate）— 避免 chrome 跨 origin navigation policy
-  const iframeSrc = useMemo(() => {
-    if (!displayUrl) return undefined
-    return `${displayUrl}${displayUrl.includes('?') ? '&' : '?'}_t=${Date.now()}_a=${loadAttempt}`
-  }, [displayUrl, loadAttempt])
+  // iframe src 不帶任何 query buster — 避免 vercel app 內 Next.js router 抹掉 unknown query 觸發第二次 SPA navigation，
+  // 跨 origin iframe 第二次 navigation 會被 chrome 擋進 chrome-error 狀態（R7 incident: onLoad 成功後 frame crash）
+  const iframeSrc = displayUrl ?? undefined
+
+  // 用 React key 強制 re-mount iframe（vs 改 src）— 完全重建 DOM element 規避 chrome 跨 origin navigation policy
+  const iframeKey = `${displayUrl ?? 'empty'}-${loadAttempt}`
 
   // displayUrl 改變時 reset error state（讓 onLoad 重新判定）
   useEffect(() => {
@@ -65,6 +66,7 @@ export default function VercelPreviewIframe({
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#fff' }}>
       {iframeSrc && (
         <iframe
+          key={iframeKey}
           ref={iframeRef}
           title="Preview"
           src={iframeSrc}
