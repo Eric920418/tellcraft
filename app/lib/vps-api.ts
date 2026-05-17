@@ -145,6 +145,7 @@ export async function sendMessage(input: {
   locale?: string
   token?: string
   imageUrls?: string[]
+  precisionOrderId?: string  // 精細模式訂單 ID（從 /pay/success URL 帶過來，後端寫入 FlowState）
 }): Promise<ApiResponse<{ messageId: string; jobId: string }>> {
   return apiRequest(`/api/conversation/${input.conversationId}/message`, {
     method: 'POST',
@@ -158,6 +159,7 @@ export async function sendMessage(input: {
       mode: input.mode,
       locale: input.locale,
       imageUrls: input.imageUrls,
+      precisionOrderId: input.precisionOrderId,
     }),
   })
 }
@@ -223,6 +225,29 @@ export async function getConversationMessages(input: {
   const query = params.toString() ? `?${params.toString()}` : ''
 
   return apiRequest(`/api/conversation/${input.conversationId}/messages${query}`, {
+    method: 'GET',
+    headers: input.token
+      ? { Authorization: `Bearer ${input.token}` }
+      : undefined,
+  })
+}
+
+/**
+ * Lazy fetch — 取單條 message 的完整 richContent.data
+ *
+ * 配合 backend incident 2026-05-17 fix：polling response 對超大 message（>150KB）會把
+ * richContent.data 替換成 `{ _stripped: true, _reason, _originalSize }` 防 freeze。
+ * 前端偵測 _stripped 後用此 endpoint 補 full data。
+ */
+export async function getMessageRichData(input: {
+  conversationId: string
+  messageId: string
+  token?: string
+}): Promise<ApiResponse<{
+  messageId: string
+  richContent: { type?: string; data?: Record<string, unknown> }
+}>> {
+  return apiRequest(`/api/conversation/${input.conversationId}/messages/${input.messageId}/rich-data`, {
     method: 'GET',
     headers: input.token
       ? { Authorization: `Bearer ${input.token}` }
@@ -2158,6 +2183,7 @@ export const vpsApi = {
   sendMessage,
   replyToConversation,
   getConversationMessages,
+  getMessageRichData,
   createProject,
   getProjects,
   getProject,
@@ -2616,6 +2642,54 @@ export async function cancelCheckout(input: {
     body: JSON.stringify({
       session_id: input.sessionId,
       reason: input.reason,
+    }),
+  })
+}
+
+// 精細模式訂單記錄（dashboard 頁用）
+export interface PrecisionOrderRow {
+  id: string
+  tier: PrecisionTier
+  amount_cents: number
+  base_amount_cents: number
+  currency: CheckoutCurrency
+  addons: unknown
+  status: 'pending' | 'paid' | 'in_progress' | 'delivered' | 'refunded' | 'cancelled' | 'failed'
+  iterations_total: number
+  iterations_used: number
+  warranty_until: string | null
+  refund_deadline: string | null
+  delivered_at: string | null
+  exported_buyout: boolean
+  cancellation_reason: string | null
+  project_id: string | null
+  project_name: string | null
+  project_vercel_url: string | null
+  created_at: string
+}
+
+export async function getMyOrders(input: {
+  token: string
+}): Promise<ApiResponse<{ orders: PrecisionOrderRow[] }>> {
+  return apiRequest('/api/checkout/orders', {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+// 買斷 checkout（plan W3 第 3 件）— body 帶 orderId，後端創 Stripe buyout session
+export async function purchaseBuyout(input: {
+  orderId: string
+  currency: CheckoutCurrency
+  locale: string
+  token: string
+}): Promise<ApiResponse<{ checkoutUrl: string; sessionId: string; isMock: boolean }>> {
+  return apiRequest('/api/checkout/buyout', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      orderId: input.orderId,
+      currency: input.currency,
+      locale: input.locale,
     }),
   })
 }

@@ -21,6 +21,7 @@ import { useCodePreviewEditor } from '@/app/hooks/useCodePreviewEditor'
 import { useLoginPrompt } from '@/app/hooks/useLoginPrompt'
 import { useChatSession } from '@/app/hooks/useChatSession'
 import { useChatPolling } from '@/app/hooks/useChatPolling'
+import { useStrippedMessageHydration } from '@/app/hooks/useStrippedMessageHydration'
 import { useCompletionAlert } from '@/app/hooks/useCompletionAlert'
 import { useTabSync } from '@/app/hooks/useTabSync'
 import { useWebContainerPreloader } from '@/app/hooks/useWebContainerPreloader'
@@ -52,6 +53,7 @@ export default function ChatSection({
   onBack,
   buildMode,
   initialImages,
+  precisionOrderId,
 }: {
   isActive: boolean
   initialMessage: string
@@ -59,6 +61,7 @@ export default function ChatSection({
   onBack: () => void
   buildMode?: 'fast' | 'fine' | 'clone'
   initialImages?: File[]
+  precisionOrderId?: string  // 從 URL ?orderId= 帶入，每次 sendMessage 都帶到 backend（後端只第一次寫入 state）
 }) {
   const tChat = useTranslations('chat')
   const tStage = useTranslations('stage')
@@ -264,6 +267,22 @@ export default function ChatSection({
     pollingCallbacks,
   )
   pollingRef.current = polling
+
+  // 防雷 incident 2026-05-17：偵測 polling response 被 cap strip 的 message，自動 lazy fetch detail
+  // 避免大 code_preview message 被 strip 後 preview panel 一片黑
+  useStrippedMessageHydration(
+    session.sessionInfo?.conversationId,
+    messages,
+    (msgId, fullRichContent) => {
+      setMessages(prev => prev.map(m =>
+        m.id === msgId ? { ...m, richContent: fullRichContent } : m
+      ))
+      // 如果是 code_preview hydrated，順便 forward 給 preview panel handler
+      if (fullRichContent?.type === 'code_preview' && fullRichContent.data) {
+        pollingCallbacks.onCodePreviewData(fullRichContent.data as Record<string, unknown>)
+      }
+    },
+  )
 
   // ── 打字機動畫目標 ──
   const [typewriterMessageId, setTypewriterMessageId] = useState<string | null>(null)
@@ -512,6 +531,7 @@ export default function ChatSection({
         locale,
         token: token || undefined,
         imageUrls: options?.imageUrls,
+        precisionOrderId,
       })
     }
 
@@ -685,6 +705,7 @@ export default function ChatSection({
         locale,
         token: token || undefined,
         imageUrls,
+        precisionOrderId,
       })
     }
 
