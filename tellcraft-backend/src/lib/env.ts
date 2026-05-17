@@ -110,6 +110,11 @@ const envSchema = z.object({
   // open-design 差集風格範本（Phase 1）— 整合 nexu-io/open-design 跟 awesome-design-md 的差集（~15 個 bergside/awesome-design-skills 來源）。用戶選擇立刻啟用，48h 內密集監控 telemetry
   ENABLE_OPEN_DESIGN_STYLES: z.stringbool().default(true),       // kill switch：iteration_aesthetic_complaint 突增或 score_delta 顯著惡化時設 false 立即關閉注入
   OPEN_DESIGN_STYLE_MAX_INJECT_COUNT: z.coerce.number().default(1), // 單次 generateVariants prompt dynamic block 最多注入 N 個 style hint（≥2 易造成選擇爆炸）
+  // Vercel preview iframe 替換 WebContainer（2026-05-17 incident 治本）— phase 完成 enqueue quickPreviewDeploy → Vercel target='preview' → iframe src
+  ENABLE_VERCEL_PREVIEW: z.stringbool().default(false),          // master kill switch；false 走既有 WebContainer，true 走 Vercel preview iframe
+  PREVIEW_DEPLOY_RATE_LIMIT_PER_HOUR: z.coerce.number().default(10), // 每 conversation 每小時最多 N 次 preview deploy（防炸 Vercel 配額）
+  PREVIEW_DEPLOY_DEBOUNCE_MS: z.coerce.number().default(30000),  // 連續 enqueue 30 秒內 dedup（同對話多次 phase 完成只跑最後一次）
+  PREVIEW_DEPLOY_TIMEOUT_MS: z.coerce.number().default(240000),  // Vercel build polling 上限 4 分鐘，超時標 failed
   // T9: 金絲雀放量百分比（0-100，default 0；> 0 時優先於 ENABLE_*=true 的硬開關）
   ENABLE_UI_EVALUATOR_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
   ENABLE_DESIGN_QUALITY_REPORT_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),

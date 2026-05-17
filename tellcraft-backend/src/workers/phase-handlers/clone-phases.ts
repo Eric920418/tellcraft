@@ -11,6 +11,7 @@
 import type Redis from 'ioredis'
 import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state'
 import { sendMessage, saveFlowState } from '../orchestrator-utils'
+import { triggerPreviewDeploy } from '../preview-deploy-worker'
 import {
   extractPageForClone, generateSectionCode, assembleSections, toSectionMetas,
   analyzeCloneImages, generatePageFromImage, assembleImagePages, mergeImageDesignSystems,
@@ -607,6 +608,10 @@ async function finalizeMergedCode(
   state.waitingForReply = true
   state.uiuxCodePhase = 'complete'
   await saveFlowState(redis, conversationId, state)
+
+  // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
+  triggerPreviewDeploy(conversationId, state.projectId, currentCode, '', redis)
+    .catch(err => logger.warn({ err: (err as Error).message }, 'clone triggerPreviewDeploy 失敗'))
 
   // 最終預覽推送
   await sendMessage(conversationId, io, {

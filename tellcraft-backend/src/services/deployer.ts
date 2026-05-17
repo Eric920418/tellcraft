@@ -92,17 +92,17 @@ interface GeneratedCode {
   styles: string
 }
 
-interface VercelFile {
+export interface VercelFile {
   file: string
   data: string
 }
 
-interface VercelProject {
+export interface VercelProject {
   id: string
   name: string
 }
 
-interface VercelDeployment {
+export interface VercelDeployment {
   id: string
   url: string
   state: string
@@ -2284,7 +2284,7 @@ function injectImageCreditsIntoLayout(files: VercelFile[]): void {
 /**
  * 建立 Vercel Project
  */
-async function createVercelProject(name: string): Promise<VercelProject | null> {
+export async function createVercelProject(name: string): Promise<VercelProject | null> {
   const token = getEnv().VERCEL_ACCESS_TOKEN!
   const teamId = getEnv().VERCEL_TEAM_ID
 
@@ -2363,7 +2363,11 @@ async function disableDeploymentProtection(projectName: string): Promise<void> {
 /**
  * 部署檔案到 Vercel
  */
-async function deployFilesToVercel(projectName: string, files: VercelFile[]): Promise<VercelDeployment | null> {
+export async function deployFilesToVercel(
+  projectName: string,
+  files: VercelFile[],
+  target: 'production' | 'preview' = 'production',  // 預設 production 保向後相容；preview-deployer.ts 傳 'preview'
+): Promise<VercelDeployment | null> {
   const token = getEnv().VERCEL_ACCESS_TOKEN!
   const teamId = getEnv().VERCEL_TEAM_ID
 
@@ -2387,7 +2391,7 @@ async function deployFilesToVercel(projectName: string, files: VercelFile[]): Pr
       body: JSON.stringify({
         name: projectName,
         files: vercelFiles,
-        target: 'production',
+        target,
         projectSettings: {
           framework: 'nextjs',
         },
@@ -2396,13 +2400,13 @@ async function deployFilesToVercel(projectName: string, files: VercelFile[]): Pr
 
     if (!response.ok) {
       const errorText = await response.text()
-      logger.error({ errorText }, '部署失敗')
+      logger.error({ errorText, target }, '部署失敗')
       return null
     }
 
     return await response.json() as VercelDeployment
   } catch (err) {
-    logger.error({ err }, '部署錯誤')
+    logger.error({ err, target }, '部署錯誤')
     return null
   }
 }
@@ -2410,7 +2414,7 @@ async function deployFilesToVercel(projectName: string, files: VercelFile[]): Pr
 /**
  * 等待部署完成
  */
-async function waitForDeploymentReady(deploymentId: string, maxWaitMs = 300000): Promise<VercelDeployment | null> {
+export async function waitForDeploymentReady(deploymentId: string, maxWaitMs = 300000): Promise<VercelDeployment | null> {
   const token = getEnv().VERCEL_ACCESS_TOKEN!
   const teamId = getEnv().VERCEL_TEAM_ID
   const startTime = Date.now()
@@ -3979,7 +3983,7 @@ async function runDeploymentSmokeTest(
   return results.filter((r): r is SmokeFailure => r !== null)
 }
 
-async function injectVercelEnvVars(
+export async function injectVercelEnvVars(
   projectName: string,
   envVars: Record<string, string>
 ): Promise<void> {

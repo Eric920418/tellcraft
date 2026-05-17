@@ -6,6 +6,7 @@
 import Redis from 'ioredis'
 import * as db from '../../db/client'
 import { sanitizeForPreview } from '../../services/code-verify'
+import { triggerPreviewDeploy } from '../preview-deploy-worker'
 import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state'
 import {
   generateStructure, generateAnimations, generateRwd, generateAnimationsAndRwd,
@@ -1099,6 +1100,11 @@ export async function runFastBuildPipeline(params: {
   state.uiuxCodeGenerationStartedAt = undefined
   state.fastBuildPendingFinish = undefined
   await saveFlowState(redis, conversationId, state)
+
+  // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
+  const fbTwConfig = designSystem ? generateTailwindConfig(designSystem) : ''
+  triggerPreviewDeploy(conversationId, state.projectId, currentCode, fbTwConfig, redis)
+    .catch(err => logger.warn({ err: (err as Error).message }, 'fast-build triggerPreviewDeploy 失敗'))
 
   // Credit 扣除（≤1 頁的情況在這裡扣，>1 頁首批已扣）
   if ((state.fastBuildCurrentBatchIndex || 0) === 0) {

@@ -18,6 +18,7 @@ import { runFormulation, generateDraftBatch, sanitizeFeatureContent, type Formul
 import type { ClarifyItem } from '../../services/bdd-session'
 import { createLogger } from '../../lib/logger'
 import { sanitizeForPreview } from '../../services/code-verify'
+import { triggerPreviewDeploy } from '../preview-deploy-worker'
 import { ensureNeonSchemaFresh } from '../../services/neon-service'
 import { deriveSchemaFromBdd } from '../../services/schema-derivation'
 
@@ -595,6 +596,10 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     const tailwindConfig = state.uiuxDesignSystem
       ? generateTailwindConfig(state.uiuxDesignSystem)
       : ''
+
+    // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
+    triggerPreviewDeploy(conversationId, projectId, state.uiuxGeneratedCode, tailwindConfig, redis)
+      .catch(err => logger.warn({ err: (err as Error).message }, 'coder triggerPreviewDeploy 失敗'))
 
     // 查詢 Neon 連線字串
     const neonRow = await db.queryOne<{ neon_connection_string: string | null }>(

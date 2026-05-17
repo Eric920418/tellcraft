@@ -16,6 +16,7 @@ import * as fsPromises from 'fs/promises'
 import { Emitter } from '@socket.io/redis-emitter'
 
 import { createOrchestratorWorker } from './workers/orchestrator'
+import { createPreviewDeployWorker, getPreviewDeployQueue } from './workers/preview-deploy-worker'
 import { testConnection, closePool } from './db/client'
 import { scanAndRecoverStuckFlowStates } from './services/flowstate-recovery'
 import { runStartupCodeRepair } from './services/code-repair'
@@ -69,6 +70,11 @@ const emitter = new Emitter(emitterRedis)
 // ============================================================
 
 const orchestratorWorker = createOrchestratorWorker(workerRedis, generalRedis, emitter)
+
+// Preview deploy worker（替換 WebContainer → Vercel preview iframe）— 進程內 singleton
+// Phase handlers 用 getPreviewDeployQueue() + enqueuePreviewDeploy() 觸發
+const previewDeployWorker = createPreviewDeployWorker(workerRedis, emitter)
+getPreviewDeployQueue(workerRedis)  // init singleton 讓 phase handlers 能 import 拿到
 
 const queueEvents = new QueueEvents('orchestrator', { connection: eventsRedis })
 queueEvents.on('stalled', ({ jobId }) => {
@@ -207,7 +213,8 @@ async function shutdown() {
 
   // 關閉 Worker（等待進行中 jobs 完成）
   await orchestratorWorker.close()
-  logger.info('Worker 已關閉')
+  await previewDeployWorker.close()
+  logger.info('Worker 已關閉（orchestrator + preview-deploy）')
 
   // 關閉 QueueEvents
   await queueEvents.close()

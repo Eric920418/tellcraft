@@ -431,6 +431,79 @@ router.post('/:id/reply', optionalAuth, validateBody(replyMessageSchema), async 
  * polling response 對超大 message strip richContent.data 後，前端用此 endpoint 拿 detail
  * 防 incident 2026-05-17：避免每次 polling 都拉 500KB+ payload freeze 前端
  */
+/**
+ * 取最後一次 preview deployment（給 chat 載入時 init iframe src）
+ * Phase 1 (Vercel preview 替換 WebContainer)：useStrippedMessageHydration / useChatSession 用此 endpoint
+ * 拿最後一次 ready preview URL 直接餵 iframe；若無，前端等 socket 推 preview:ready
+ */
+router.get('/:id/preview/latest', optionalAuth, async (req, res) => {
+  try {
+    const { id: conversationId } = req.params
+    const conversation = await db.getConversation(conversationId)
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+
+    // 所有權驗證
+    const project = await db.queryOne<{ user_id: string }>(
+      'SELECT user_id FROM projects WHERE id = $1',
+      [conversation.project_id]
+    )
+    if (project && req.user && project.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    // 拿最新一條 preview_deployments（含 building / failed 都返回 — 前端可顯示對應狀態）
+    const latest = await db.queryOne<{
+      vercel_deployment_id: string
+      url: string
+      status: 'building' | 'ready' | 'failed'
+      error_message: string | null
+      created_at: string
+    }>(
+      `SELECT vercel_deployment_id, url, status, error_message, created_at
+       FROM preview_deployments
+       WHERE conversation_id = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [conversationId]
+    )
+
+    if (!latest) {
+      return res.json({ status: 'none', url: null, lkgUrl: null })
+    }
+
+    // 失敗或 building 時提供 fallback URL（上一次成功的 preview 或 production URL）
+    let lkgUrl: string | null = null
+    if (latest.status !== 'ready') {
+      const lkg = await db.queryOne<{ url: string }>(
+        `SELECT url FROM preview_deployments
+         WHERE conversation_id = $1 AND status = 'ready'
+         ORDER BY created_at DESC LIMIT 1`,
+        [conversationId]
+      )
+      if (lkg?.url) {
+        lkgUrl = lkg.url
+      } else {
+        const prod = await db.queryOne<{ vercel_url: string | null }>(
+          `SELECT vercel_url FROM projects WHERE id = $1`,
+          [conversation.project_id]
+        )
+        lkgUrl = prod?.vercel_url ?? null
+      }
+    }
+
+    return res.json({
+      status: latest.status,
+      url: latest.url,
+      deploymentId: latest.vercel_deployment_id,
+      error: latest.error_message,
+      lkgUrl,
+      createdAt: latest.created_at,
+    })
+  } catch (error) {
+    logger.error({ err: error }, '取得 preview/latest 失敗')
+    return res.status(500).json({ error: 'Failed to fetch preview' })
+  }
+})
+
 router.get('/:id/messages/:msgId/rich-data', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId, msgId } = req.params
