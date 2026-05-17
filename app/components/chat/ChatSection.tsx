@@ -300,72 +300,15 @@ export default function ChatSection({
   }, [messages, session])
 
   // ── Layout mode tracking ──
-  // 注意：不要把 fastBuildChunks 放進依賴，它太容易抖動（polling 每次 code_preview 都會歸零再恢復）
-  // 會導致 layout split → default → split 反覆切換，每次觸發 SplitLayout 重新掛載和進場動畫 → 黑屏
+  // 2026-05-17 重構：永遠 default（chat 全寬），preview 改 inline 卡片在訊息內顯示
+  // 原因：Vercel preview iframe 在 chrome 158+ 第三方 cookie + vercel.live toolbar 衝突下結構性失敗
+  // → 改 inline 卡片「在新分頁開啟」，右側 SplitLayout panel 不再需要
   useEffect(() => {
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-    let targetMode: 'default' | 'split' = 'default'
-
-    if (!isMobile) {
-      // 排除 pending 消息（客戶端臨時生成的佔位消息，不代表後端實際狀態）
-      const confirmedMessages = messages.filter(m => !m.pending)
-      const hasUiuxMessage = confirmedMessages.some(m =>
-        m.stage?.startsWith('uiux') || m.richContent?.type === 'template_picker'
-      )
-      const hasGenerationMessage = confirmedMessages.some(m => {
-        const stage = m.stage || ''
-        return stage === 'fast_generating'
-          || stage === 'generating'
-          || stage === 'uiux_pipeline_progress'
-          || stage === 'uiux_structure_generating'
-          || stage === 'uiux_animation_generating'
-          || stage === 'uiux_rwd_generating'
-          || stage === 'uiux_quality_gate_running'
-          || stage === 'uiux_quality_gate_fixing'
-      })
-      // 只用穩定的信號判斷（不用 fastBuildChunks，它在 phase 切換時歸零再回升）
-      const hasPreviewSignals = !!streamingPreview || !!codePreviewData
-      const shouldForceSplit = hasUiuxMessage || hasGenerationMessage || hasPreviewSignals
-
-      // 防止從 split 回退到 default（一旦進入 split，只有明確無生成信號才回退）
-      // 這避免 phase 切換間隙的短暫信號丟失導致 layout 抖動
-      if (shouldForceSplit) {
-        targetMode = 'split'
-      } else if (layoutModeRef.current === 'split') {
-        // 已經在 split 模式，檢查是否真的應該回退
-        const hasCodePreview = confirmedMessages.some(m => m.richContent?.type === 'code_preview')
-        if (hasCodePreview || hasGenerationMessage) {
-          // 有代碼預覽或生成消息歷史 → 保持 split
-          targetMode = 'split'
-        } else {
-          const lastHintMessage = [...confirmedMessages].reverse().find(m => m.layoutHint)
-          if (lastHintMessage?.layoutHint === 'split') {
-            targetMode = 'split'
-          } else {
-            const hasClarifyMessage = confirmedMessages.some(m =>
-              m.stage === 'clarify_question' || m.stage === 'prd_discovery_complete' || m.stage === 'prd_discovery_continue'
-            )
-            if (hasClarifyMessage && !hasUiuxMessage) targetMode = 'split'
-          }
-        }
-      } else {
-        const lastHintMessage = [...confirmedMessages].reverse().find(m => m.layoutHint)
-        if (lastHintMessage?.layoutHint) {
-          targetMode = lastHintMessage.layoutHint === 'split' ? 'split' : 'default'
-        } else {
-          const hasClarifyMessage = confirmedMessages.some(m =>
-            m.stage === 'clarify_question' || m.stage === 'prd_discovery_complete' || m.stage === 'prd_discovery_continue'
-          )
-          if (hasClarifyMessage && !hasUiuxMessage) targetMode = 'split'
-        }
-      }
+    if (layoutModeRef.current !== 'default') {
+      layoutModeRef.current = 'default'
+      setLayoutMode('default')
     }
-
-    if (targetMode !== layoutModeRef.current) {
-      layoutModeRef.current = targetMode
-      setLayoutMode(targetMode)
-    }
-  }, [messages, streamingPreview, codePreviewData])
+  }, [])
 
   // ── Template loading ──
   useEffect(() => {

@@ -7,6 +7,8 @@ import remarkGfm from 'remark-gfm'
 import dynamic from 'next/dynamic'
 import TemplatePicker from '@/app/components/uiux/TemplatePicker'
 import QuickReplies from '@/app/components/QuickReplies'
+import IterationLimitPaywall from '@/app/components/chat/IterationLimitPaywall'
+import ChatInlinePreviewCard from '@/app/components/chat/ChatInlinePreviewCard'
 import type { ElementInfo } from '@/app/components/uiux/PreviewPanel'
 import type { DesignVariant } from '@/app/components/uiux/VariantPicker'
 import type { TemplateCardData } from '@/app/lib/templates'
@@ -442,6 +444,17 @@ export const ChatMessageItem = React.memo(function ChatMessageItem({
                 {(message.richContent.data as { host?: string }).host}
               </div>
             </div>
+          )}
+
+          {message.richContent?.type === 'iteration_limit_paywall' && (
+            <IterationLimitPaywall data={message.richContent.data as Parameters<typeof IterationLimitPaywall>[0]['data']} />
+          )}
+
+          {message.richContent?.type === 'vercel_preview_card' && (
+            <ChatInlinePreviewCard
+              conversationId={sessionInfo?.conversationId}
+              projectName={(message.richContent.data as { projectName?: string })?.projectName}
+            />
           )}
 
           {message.richContent?.type === 'clone_progress' && (() => {

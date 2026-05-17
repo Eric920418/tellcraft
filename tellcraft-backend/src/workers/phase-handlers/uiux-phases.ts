@@ -1768,7 +1768,7 @@ export async function executeFullCodePipeline(
 
   // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
   const previewTwConfig = state.uiuxDesignSystem ? generateTailwindConfig(state.uiuxDesignSystem) : ''
-  triggerPreviewDeploy(conversationId, state.projectId, currentCode, previewTwConfig, redis)
+  triggerPreviewDeploy(conversationId, state.projectId, currentCode, previewTwConfig, redis, io)
     .catch(err => logger.warn({ err: (err as Error).message }, 'triggerPreviewDeploy 失敗（不阻塞）'))
 
   // Credit 扣除：UIUX 完整管線額外成本（base 已在入口扣除）

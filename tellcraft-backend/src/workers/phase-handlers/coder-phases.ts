@@ -598,7 +598,7 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
       : ''
 
     // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
-    triggerPreviewDeploy(conversationId, projectId, state.uiuxGeneratedCode, tailwindConfig, redis)
+    triggerPreviewDeploy(conversationId, projectId, state.uiuxGeneratedCode, tailwindConfig, redis, io)
       .catch(err => logger.warn({ err: (err as Error).message }, 'coder triggerPreviewDeploy 失敗'))
 
     // 查詢 Neon 連線字串

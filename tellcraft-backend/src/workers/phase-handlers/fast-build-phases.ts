@@ -1103,7 +1103,7 @@ export async function runFastBuildPipeline(params: {
 
   // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
   const fbTwConfig = designSystem ? generateTailwindConfig(designSystem) : ''
-  triggerPreviewDeploy(conversationId, state.projectId, currentCode, fbTwConfig, redis)
+  triggerPreviewDeploy(conversationId, state.projectId, currentCode, fbTwConfig, redis, io)
     .catch(err => logger.warn({ err: (err as Error).message }, 'fast-build triggerPreviewDeploy 失敗'))
 
   // Credit 扣除（≤1 頁的情況在這裡扣，>1 頁首批已扣）

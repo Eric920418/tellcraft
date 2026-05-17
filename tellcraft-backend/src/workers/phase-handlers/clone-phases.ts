@@ -610,7 +610,7 @@ async function finalizeMergedCode(
   await saveFlowState(redis, conversationId, state)
 
   // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
-  triggerPreviewDeploy(conversationId, state.projectId, currentCode, '', redis)
+  triggerPreviewDeploy(conversationId, state.projectId, currentCode, '', redis, io)
     .catch(err => logger.warn({ err: (err as Error).message }, 'clone triggerPreviewDeploy 失敗'))
 
   // 最終預覽推送

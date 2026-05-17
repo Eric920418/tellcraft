@@ -34,6 +34,8 @@ export interface Message {
       | 'domain_search_result' | 'domain_progress' | 'domain_dns_instructions' | 'domain_registrant_form' | 'domain_complete_result'
       | 'db_schema_preview' | 'db_provision_result'
       | 'clone_progress'
+      | 'iteration_limit_paywall'
+      | 'vercel_preview_card'
     data: Record<string, unknown>
   }
   quickReplies?: { label: string; value: string; style?: 'primary' | 'secondary' | 'ghost' }[]

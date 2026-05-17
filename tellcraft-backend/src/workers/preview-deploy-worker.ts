@@ -20,7 +20,8 @@ import { createLogger } from '../lib/logger'
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { quickPreviewDeploy, findLkgPreviewUrl } from '../services/preview-deployer'
-import type { GeneratedCode } from '../types/flow-state'
+import type { GeneratedCode, IoEmitter } from '../types/flow-state'
+import { sendMessage } from './orchestrator-utils'
 
 const logger = createLogger('preview-deploy-worker')
 
@@ -252,6 +253,7 @@ export async function triggerPreviewDeploy(
   code: GeneratedCode,
   tailwindConfig: string,
   generalRedis: Redis,
+  io?: IoEmitter,
 ): Promise<void> {
   if (!getEnv().ENABLE_VERCEL_PREVIEW) return
   if (!projectId) return
@@ -262,6 +264,24 @@ export async function triggerPreviewDeploy(
     const result = await enqueuePreviewDeploy(generalRedis, queue, data)
     if (!result.enqueued) {
       logger.info({ conversationId, reason: result.reason }, 'preview deploy 未 enqueue')
+      return
+    }
+
+    // Inline preview 卡片注入 chat — 用戶在對話內看到「正在部署預覽 → 預覽已就緒 + 新分頁開啟按鈕」
+    // 卡片實際 URL 由前端 ChatInlinePreviewCard 從 usePreviewDeployment hook 拿，避免歷史 message stale URL
+    if (io) {
+      try {
+        await sendMessage(conversationId, io, {
+          content: '已啟動預覽部署',
+          stage: 'preview_card',
+          richContent: {
+            type: 'vercel_preview_card',
+            data: { projectName: data.projectName, enqueuedAt: new Date().toISOString() },
+          },
+        })
+      } catch (err) {
+        logger.warn({ err: (err as Error).message, conversationId }, '注入 vercel_preview_card chat 失敗（不阻塞）')
+      }
     }
   } catch (err) {
     logger.warn({ err: (err as Error).message, conversationId }, 'triggerPreviewDeploy 異常（不阻塞主流程）')
