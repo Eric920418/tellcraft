@@ -10,6 +10,7 @@ import * as fsPromises from 'fs/promises'
 import { getAnthropicClient, MODEL, trackLlmUsage } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { autoSwapButtonContrast } from './deployer-fixes/contrast-auto-swap'
+import { unifyDynamicSlugs } from './deployer-fixes/unify-dynamic-slugs'
 import type { DesignSystem } from './uiux-generation'
 import * as db from '../db/client'
 import { createLogger } from '../lib/logger'
@@ -1049,6 +1050,56 @@ export function safeMotionProps<T extends Record<string, unknown>>(props: T) {
     }
   }
 
+  // ── 修復 9.5: Dynamic Slug Unification（解 Next.js "id !== productId" build error） ──
+  // 同 parent path 同 position 的 [xxx] slug 必須統一名稱（Next.js 編譯硬限制）
+  // L3 fixBuildErrors LLM 修不下來（沒全域視角），這層 deterministic 0 LLM 兜底
+  // 解 conversation b2252efc 案例：app/admin/products/[productId] vs app/admin/products/[id] 衝突
+  {
+    const pageCount = sanitized.pages.length
+    const merged = [
+      ...sanitized.pages.map(p => ({ path: p.path, content: p.content })),
+      ...sanitized.components.map(c => ({ path: c.path, content: c.content })),
+    ]
+    const slugResult = unifyDynamicSlugs(merged)
+    if (slugResult.conflicts.length > 0) {
+      // 按原順序回寫（index 對應）pages + components
+      sanitized.pages = sanitized.pages.map((p, i) => ({
+        ...p,
+        path: slugResult.files[i].path,
+        content: slugResult.files[i].content,
+      }))
+      sanitized.components = sanitized.components.map((c, i) => ({
+        ...c,
+        path: slugResult.files[pageCount + i].path,
+        content: slugResult.files[pageCount + i].content,
+      }))
+      for (const c of slugResult.conflicts) {
+        fixes.push(
+          `✓ Dynamic slug unified: ${c.parentPath}/[${c.originalSlugs.join('|')}] → [${c.chosenSlug}]`
+        )
+      }
+      // Rename 後可能產生新 path 重複（[productId] 跟 [id] 兩個檔 rename 後同 path），用既有 dedup 兜底
+      sanitized.pages = deduplicateRouteConflicts(sanitized.pages)
+      sanitized.components = deduplicateRouteConflicts(sanitized.components)
+      // Telemetry fire-and-forget（給週報追蹤觸發頻率）
+      void recordTelemetry({
+        skillName: 'deployer',
+        eventType: 'deployer_layer_trigger',
+        patternKey: 'dynamic_slug_unified',
+        severity: 'info',
+        outcome: 'success',
+        payload: {
+          conflictCount: slugResult.conflicts.length,
+          conflicts: slugResult.conflicts.slice(0, 5).map(c => ({
+            parentPath: c.parentPath,
+            originalSlugs: c.originalSlugs,
+            chosenSlug: c.chosenSlug,
+          })),
+        },
+      }).catch(() => {})
+    }
+  }
+
   // ── 修復 10: Page → Action 契約檢查（warning only） ──
   // page 呼叫 xxxAction({}) 不帶 action 需要的 input.x → runtime SQL NULL filter
   // → 0 rows 漏資料。不阻斷部署（auto-fix 風險高），只記錄 telemetry 供週報追蹤。
@@ -1816,10 +1867,18 @@ export async function executeDeployment(
     // 6. 更新 DB（95-100%）
     await onProgress({ percent: 95, step: '更新專案狀態...' })
 
-    // 寫入 deployments 表
+    // 寫入 deployments 表（CTE 內查最新 generation_id，建立 deploy↔code 鐵釘關聯）
+    // 該欄位讓 rollback 時可從 generations.code_snapshot + design_system_snapshot 還原 DB/state
     const deploymentRow = await db.queryOne<{ id: string }>(
-      `INSERT INTO deployments (project_id, vercel_deployment_id, url, status)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
+      `WITH latest_gen AS (
+         SELECT id FROM generations
+         WHERE project_id = $1
+         ORDER BY version_number DESC NULLS LAST, created_at DESC
+         LIMIT 1
+       )
+       INSERT INTO deployments (project_id, vercel_deployment_id, url, status, generation_id)
+       VALUES ($1, $2, $3, $4, (SELECT id FROM latest_gen))
+       RETURNING id`,
       [projectId, deployment.id, deploymentUrl, finalStatus === 'READY' ? 'success' : 'deploying']
     )
 
@@ -2550,6 +2609,7 @@ export interface DeploymentRecord {
   url: string
   status: string
   created_at: string
+  generation_id: string | null
 }
 
 /**
@@ -2559,7 +2619,7 @@ export async function listProjectDeployments(
   projectId: string
 ): Promise<DeploymentRecord[]> {
   const result = await db.queryMany<DeploymentRecord>(
-    `SELECT id, vercel_deployment_id, url, status, created_at
+    `SELECT id, vercel_deployment_id, url, status, created_at, generation_id
      FROM deployments
      WHERE project_id = $1 AND status = 'success'
      ORDER BY created_at DESC

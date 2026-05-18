@@ -302,6 +302,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - **`handleCodePhaseRedo` 需要快照** `uiuxStructureCode/uiuxAnimationCode`，否則 redo 在已修改代碼上重做
 - **`verifyBuildLocally` 修復結果必須同步回 DB**，否則預覽和部署代碼分岔
 - **WebContainer**：preload 後禁止 `mount()`（清除 node_modules），用 `writeFilesToContainer()` 逐檔寫入；`restart()` 例外。生成期間 early return `AIGenerationWaitingScene`，只有 fast build streaming 即時渲染。`handleUiuxCodeGenerating` 用 `stage: 'uiux_pipeline_progress'`（非 `'info'`）。增量寫入經 `deduplicateRouteConflicts → stripRouteGroups → sanitizeFileContent → injectEditBridge`
+- `[TEST]` **Dynamic slug unification**：`deployer-fixes/unify-dynamic-slugs.ts` 偵測同 `(parent, position)` 多 slug 名衝突（如 `app/products/[productId]` vs `app/products/[id]`），rename 統一成最常見 slug（tie 時優先 `id`）+ destructure aliasing 改 content（`const { id: productId } = await params` 保下游 ref）。Catch-all `[...x]` / Optional `[[x]]` 跳過。整合在 `sanitizeCodeForDeploy` Fix 9.5（修復 10 之前）+ rename 後串 `deduplicateRouteConflicts` 兜底新重複。解 Next.js 硬限制 `id !== productId` build error（conversation b2252efc 觸發治本）
 - **Layout 禁 opacity:0**：SplitLayout/split-layout 外層不能用 `initial={{ opacity: 0 }}`（多層疊加→黑屏）。useEffect 依賴不含 `fastBuildChunks`。split→default 回退需檢查 code_preview 歷史
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 WebContainers
 
