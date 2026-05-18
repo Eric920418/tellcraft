@@ -29,6 +29,7 @@ import { EntityNonExistenceValidate } from '../lib/specformula/instruction/entit
 import { TimeControl } from '../lib/specformula/instruction/time-control'
 import type { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { createLogger } from '../lib/logger'
+import { expandFieldCandidates } from './column-name-matcher'
 
 const logger = createLogger('feature-dry-run')
 
@@ -425,8 +426,14 @@ async function validateThenAgainstDb(
       if (exp.expectedKind !== 'notnull' && exp.expectedKind !== 'null') continue
       if (SYSTEM_AUTO_FIELDS.has(exp.fieldName)) continue
 
-      const snakeName = exp.fieldName.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
-      if (!columnNames.has(snakeName)) continue  // 該 field 不在這 table 的 column
+      // 用 column-name-matcher.expandFieldCandidates 解構（含 VAR 剝尾段）
+      // 從候選中挑第一個真實存在於 table 的 column name 拿來跑 SQL
+      // 解 `category1Id` 等 VAR 命名 → 找到實際 `id` column 來 SELECT
+      const candidates = expandFieldCandidates(exp.fieldName)
+      const matchedColumn = candidates.find(c => columnNames.has(c))
+      if (!matchedColumn) continue  // 該 field 不在這 table 的 column
+
+      const snakeName = matchedColumn  // pg column name 統一用 lowercase（columnNames 也是 lowercase）
 
       const dedupKey = `${exp.scenarioName}|${exp.fieldName}|${tableName}`
       if (reportedKey.has(dedupKey)) continue

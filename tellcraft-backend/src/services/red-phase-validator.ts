@@ -29,6 +29,10 @@ import { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { createLogger } from '../lib/logger'
 import { recordTelemetryBatch, type TelemetryEvent } from './skill-telemetry'
 import { enrichError, formatHintForRedPhase } from './error-enrichment'
+import {
+  fieldMatchesAnyColumn as fieldMatchesAnyColumnShared,
+  columnExistsInTable as columnExistsInTableShared,
+} from './column-name-matcher'
 
 const logger = createLogger('red-phase-validator')
 
@@ -154,18 +158,11 @@ function toCamelCase(s: string): string {
 }
 
 /**
- * 檢查 fieldName 是否能匹配 schema 中的某個 column（考慮 camelCase ↔ snake_case）
- * 返回 true 表示可匹配
+ * 檢查 fieldName 是否能匹配 schema 中的某個 column
+ * 含 4 種解構策略（原/snake/camel/VAR 剝尾段）— 統一走 column-name-matcher helper
  */
 function fieldMatchesAnyColumn(fieldName: string, allColumns: Set<string>): boolean {
-  const lower = fieldName.toLowerCase()
-  if (allColumns.has(lower)) return true
-  if (allColumns.has(toSnakeCase(fieldName).toLowerCase())) return true
-  if (allColumns.has(toCamelCase(fieldName).toLowerCase())) return true
-
-  // 常見的 composite 欄位（如 newUserId → id on users 表）不在單表 column 中
-  // 這種情況不算 mismatch，視為 warning
-  return false
+  return fieldMatchesAnyColumnShared(fieldName, allColumns)
 }
 
 // ============================================================
@@ -366,17 +363,11 @@ function extractApiCallTableHeaders(content: string): Array<{ summary: string; h
 }
 
 /**
- * 查找 column name 在 table 的 columns 中是否存在（支援 camelCase ↔ snake_case）
+ * 查找 column name 在 table 的 columns 中是否存在
+ * 含 4 種解構策略（原/snake/camel/VAR 剝尾段）— 統一走 column-name-matcher helper
  */
 function findColumnInTable(columnName: string, table: { columns: Array<{ name: string }> }): boolean {
-  const snake = toSnakeCase(columnName).toLowerCase()
-  const camel = toCamelCase(columnName).toLowerCase()
-  const lower = columnName.toLowerCase()
-  for (const col of table.columns) {
-    const cn = col.name.toLowerCase()
-    if (cn === lower || cn === snake || cn === camel) return true
-  }
-  return false
+  return columnExistsInTableShared(columnName, table)
 }
 
 // ============================================================
@@ -521,29 +512,8 @@ export async function executeRedPhase(input: RedPhaseInput): Promise<RedPhaseRes
         // 跳過明顯的 composite key（包含 new/created/updated 前綴的）
         const isCompositeKey = /^(?:new|created|updated)/.test(key)
         if (isCompositeKey) continue
+        // fieldMatchesAnyColumn 含 VAR 剝尾段 + 單 entity prefix 解構（R5 Fix B 邏輯統一收進 helper）
         if (fieldMatchesAnyColumn(key, allColumns)) continue
-
-        // Fix B: VAR 序列化命名（<entity><seq><Field> 如 plan1Id, faq2Title, inquiry1CustomerName）
-        // 提取尾段 PascalCase field → check schema
-        // 範例：plan1Id → Id → id ✓，faq2Title → Title → title ✓
-        const seqMatch = key.match(/^[a-z]+\d+([A-Z]\w*)$/)
-        if (seqMatch) {
-          const fieldSuffix = seqMatch[1].charAt(0).toLowerCase() + seqMatch[1].slice(1)
-          if (fieldMatchesAnyColumn(fieldSuffix, allColumns)) {
-            // 是 VAR 序列化命名捕捉合法 schema column，不算 mismatch
-            continue
-          }
-        }
-
-        // Fix B: 單 entity prefix 命名（<entityField> 如 planId, inquiryStatus）
-        // 抓尾段 PascalCase field 比對
-        const camelMatch = key.match(/^[a-z]+([A-Z]\w*)$/)
-        if (camelMatch) {
-          const fieldSuffix = camelMatch[1].charAt(0).toLowerCase() + camelMatch[1].slice(1)
-          if (fieldMatchesAnyColumn(fieldSuffix, allColumns)) {
-            continue
-          }
-        }
 
         issues.push({
           featureName: displayName,

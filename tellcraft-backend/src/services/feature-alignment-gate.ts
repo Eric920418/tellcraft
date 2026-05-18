@@ -68,6 +68,10 @@ const CHECK_REPAIR_DIRECTION: Record<string, string> = {
 import { extractEntitySetupSteps } from './red-phase-validator'
 import { DatabaseSchema } from '../lib/specformula/spec/data/models'
 import { validateSemanticConsistency } from './semantic-consistency-validator'
+import {
+  fieldMatchesAnyColumn as fieldMatchesAnyColumnShared,
+  expandFieldCandidates,
+} from './column-name-matcher'
 import { createLogger } from '../lib/logger'
 import { recordTelemetry } from './skill-telemetry'
 
@@ -108,6 +112,16 @@ export interface AlignmentGateResult {
 // ============================================================
 // 工具函數
 // ============================================================
+
+/**
+ * 偵測 Create scenario — scenario name 開頭含建立類動詞（Create/Add/Submit/Register/Insert/Upload/New）
+ * 用於 Check 16 特殊處理：Create scenario 的 entity_validate 期望值來自 WHEN call table，
+ * 不該套用「entity_setup 必須提供該欄位」規則
+ */
+const CREATE_SCENARIO_PREFIX_RE = /^(create|add|submit|register|insert|upload|new)\s+/i
+export function isCreateScenario(scenarioName: string): boolean {
+  return CREATE_SCENARIO_PREFIX_RE.test(scenarioName.trim())
+}
 
 function toSnakeCase(s: string): string {
   return s.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
@@ -847,14 +861,9 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
 
         const { table } = found
         for (const header of step.headers) {
-          const snakeName = toSnakeCase(header).toLowerCase()
-          const camelName = toCamelCase(header).toLowerCase()
-          const lowerName = header.toLowerCase()
-
-          const columnExists = table.columns.some(c => {
-            const cn = c.name.toLowerCase()
-            return cn === lowerName || cn === snakeName || cn === camelName
-          })
+          // 統一走 column-name-matcher helper（含 VAR 剝尾段 + 單 entity prefix 解構）
+          // 解決 CMS 場景大量 `adminUser1Id` 等 VAR 序列化命名誤報問題（conversation b2252efc）
+          const columnExists = fieldMatchesAnyColumnShared(header, table.columns)
 
           if (!columnExists) {
             // 檢查是否在其他表中（跨表 FK 場景由 runtime 處理，非 error）
@@ -862,10 +871,7 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
             for (const schema of schemas) {
               for (const [, otherTable] of schema.getTablesByEntityName()) {
                 if (otherTable.tableName === table.tableName) continue
-                if (otherTable.columns.some(c => {
-                  const cn = c.name.toLowerCase()
-                  return cn === lowerName || cn === snakeName || cn === camelName
-                })) {
+                if (fieldMatchesAnyColumnShared(header, otherTable.columns)) {
                   inOtherTable = true
                   break
                 }
@@ -1668,6 +1674,13 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
     const reported = new Set<string>()
     for (const vstep of validateSteps) {
       if (!vstep.shouldExist) continue  // 「應該不存在」不需要對齊（沒這 entity 不需要 setup）
+
+      // Create scenario 特殊處理（conversation b2252efc 後加）：
+      // Create scenario 的 entity_validate 期望值來自「WHEN call table 跟 INSERT 結果」
+      // 不是來自 entity_setup → Check 16 對 Create scenario 不適用會 false positive
+      // 偵測：scenario name 開頭含 Create/Add/Submit/Register/Insert/Upload/New + 空格
+      if (isCreateScenario(vstep.scenarioName)) continue
+
       const entityKey = vstep.entityName.toLowerCase()
       const entitySetupHeaders = setupByEntity.get(entityKey)
       if (!entitySetupHeaders) {
@@ -1680,7 +1693,9 @@ export async function runAlignmentChecks(input: AlignmentGateInput): Promise<Ali
         if (!fieldName) continue
         if (SYSTEM_AUTO_FIELDS.has(fieldName)) continue
 
-        const fieldVariants = [fieldName, toCamelCase(fieldName), toSnakeCase(fieldName)]
+        // 統一走 column-name-matcher.expandFieldCandidates（含 VAR 剝尾段）
+        // 解決 entity_validate 含 `category1Name` 等 VAR 命名誤報「entity_setup 沒提供」
+        const fieldVariants = expandFieldCandidates(fieldName)
         if (fieldVariants.some(v => entitySetupHeaders.has(v))) continue
 
         // 檢查 data row 是否真的對該欄位有非 sentinel 期望
