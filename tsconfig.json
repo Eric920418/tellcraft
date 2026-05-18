@@ -39,6 +39,7 @@
     "node_modules",
     "prompts",
     "tellcraft-backend",
-    "sdd.os"
+    "sdd.os",
+    "extension"
   ]
 }

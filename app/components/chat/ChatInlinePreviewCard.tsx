@@ -17,6 +17,7 @@
 
 import { useState } from 'react'
 import { usePreviewDeployment, useRetryPreview } from '@/app/hooks/usePreviewDeployment'
+import { useExtensionDetect, buildEditorUrl, EXTENSION_INSTALL_URL } from '@/app/hooks/useExtensionDetect'
 
 export interface ChatInlinePreviewCardProps {
   conversationId: string | undefined
@@ -26,6 +27,7 @@ export interface ChatInlinePreviewCardProps {
 export default function ChatInlinePreviewCard({ conversationId, projectName }: ChatInlinePreviewCardProps) {
   const preview = usePreviewDeployment(conversationId)
   const retry = useRetryPreview(conversationId)
+  const extension = useExtensionDetect()  // R11 commit 7
   const [showBuildLog, setShowBuildLog] = useState(false)
   const [isRetrying, setIsRetrying] = useState(false)
 
@@ -128,6 +130,9 @@ export default function ChatInlinePreviewCard({ conversationId, projectName }: C
   }
 
   // ready 狀態 — 主要 UI
+  // R11 commit 7: extension 偵測到 → 顯示「✏️ 開啟編輯器」+ 「↗ 新分頁開啟」 兩個按鈕
+  //                沒偵測到 → 只顯示「↗ 在新分頁開啟」+ 「安裝編輯器」提示連結
+  const editorUrl = conversationId && displayUrl ? buildEditorUrl(displayUrl, conversationId) : null
   return (
     <div style={cardStyle}>
       <div style={cardHeaderStyle}>
@@ -141,15 +146,40 @@ export default function ChatInlinePreviewCard({ conversationId, projectName }: C
           </div>
         </div>
       </div>
-      <a
-        href={displayUrl!}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={primaryButtonStyle}
-      >
-        在新分頁開啟預覽
-        <span style={{ fontSize: 14 }}>↗</span>
-      </a>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Extension 安裝：「✏️ 開啟編輯器」帶 hash sentinel 觸發 overlay 自動 mount */}
+        {extension.installed && editorUrl && (
+          <a href={editorUrl} target="_blank" rel="noopener noreferrer" style={primaryButtonStyle}>
+            ✏️ 開啟編輯器
+          </a>
+        )}
+        {/* 主按鈕（沒裝 extension 是主，裝了是次） */}
+        <a
+          href={displayUrl!}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={extension.installed ? secondaryButtonStyle : primaryButtonStyle}
+        >
+          在新分頁開啟預覽
+          <span style={{ fontSize: 14 }}>↗</span>
+        </a>
+      </div>
+
+      {/* 沒裝 extension 提示安裝（不阻塞主流程，作為次要提示） */}
+      {!extension.loading && !extension.installed && (
+        <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>
+          想 inline 編輯？
+          <a
+            href={EXTENSION_INSTALL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#0f172a', textDecoration: 'underline', marginLeft: 4 }}
+          >
+            安裝 Tellcraft Editor
+          </a>
+        </div>
+      )}
     </div>
   )
 }
@@ -204,6 +234,21 @@ const primaryButtonStyle: React.CSSProperties = {
   borderRadius: 6,
   fontSize: 12,
   fontWeight: 600,
+  textDecoration: 'none',
+  width: 'fit-content',
+}
+
+const secondaryButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '8px 14px',
+  background: '#fff',
+  color: '#0f172a',
+  border: '1px solid #cbd5e1',
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: 500,
   textDecoration: 'none',
   width: 'fit-content',
 }
