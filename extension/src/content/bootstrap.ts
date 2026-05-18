@@ -14,6 +14,7 @@
  */
 
 import { parseTcHash, type ExtensionMessage } from '../shared/messages'
+import { mountOverlay } from '../overlay/Overlay'
 
 interface TcReady {
   conversationId: string
@@ -95,7 +96,8 @@ async function init() {
   // Broadcast 給 bridge-injector (MAIN world)
   window.postMessage({ type: 'tc_extension_ready', conversationId: tc.conversationId, projectId: verifyResp.payload.projectId }, window.location.origin)
 
-  // commit 5 接：mount PropertyEditor Shadow DOM overlay 在這
+  // ── commit 5: mount MiniPropertyEditor 進 Shadow DOM ──
+  mountOverlay(authResp.payload.conversationId, authResp.payload.projectId)
 }
 
 // document_idle 已保證 body 存在
