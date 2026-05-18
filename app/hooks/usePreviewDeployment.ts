@@ -202,11 +202,30 @@ export function useIsVercelPreviewEnabled(): boolean {
   return process.env.NEXT_PUBLIC_ENABLE_VERCEL_PREVIEW !== 'false'
 }
 
-/** 給其他 hook 用：retry 觸發（暫時用 reload 整個對話狀態的 hack；未來加 explicit retry endpoint） */
-export function useRetryPreview(): () => void {
-  return useCallback(() => {
-    if (typeof window !== 'undefined') {
-      window.location.reload()  // 簡化版：reload 觸發 phase handler 重生
+/**
+ * R10 治本 Layer 6：用戶 explicit retry preview deploy
+ * POST /api/conversation/:id/preview/retry → backend enqueue 完整 6 層自動修復流程
+ * bypass debounce + rate limit（用戶 explicit consent 不擋）
+ */
+export function useRetryPreview(conversationId: string | undefined): () => Promise<void> {
+  return useCallback(async () => {
+    if (!conversationId) return
+    const token = getAuthToken()
+    try {
+      const res = await fetch(`/api/vps/api/conversation/${conversationId}/preview/retry`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error('[useRetryPreview] retry failed:', data)
+        alert(data.error || '重新部署失敗')
+        return
+      }
+      // 成功 enqueue — socket.io preview:progress / preview:ready event 會更新 state
+      // 不 reload 整頁，避免打斷其他對話內容
+    } catch (err) {
+      console.error('[useRetryPreview] network error:', err)
     }
-  }, [])
+  }, [conversationId])
 }

@@ -20,7 +20,7 @@ import * as fsPromises from 'fs/promises'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { createAdapter } from '@socket.io/redis-adapter'
 import { testConnection, closePool } from './db/client'
-import conversationRoutes, { setOrchestratorQueue, setRedisClient } from './routes/conversation'
+import conversationRoutes, { setOrchestratorQueue, setRedisClient, setPreviewDeployQueue } from './routes/conversation'
 import projectRoutes from './routes/project'
 import healthRoutes from './routes/health'
 import authRoutes from './routes/auth'
@@ -390,6 +390,10 @@ const orchestratorQueue = new Queue('orchestrator', {
 // 設置隊列到路由
 setOrchestratorQueue(orchestratorQueue)
 setRedisClient(generalRedis)
+// R10：retry endpoint 用 preview-deploy queue
+import('./workers/preview-deploy-worker').then(({ getPreviewDeployQueue }) => {
+  setPreviewDeployQueue(getPreviewDeployQueue(generalRedis))
+})
 
 // Phase I: 注入 project routes 的 queue + redis（給 import-design endpoint 用）
 import('./routes/project').then(({ setProjectOrchestratorQueue, setProjectRedisClient }) => {

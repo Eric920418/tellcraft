@@ -187,6 +187,7 @@ export async function enqueuePreviewDeploy(
   generalRedis: Redis,
   queue: Queue<PreviewDeployJobData>,
   data: PreviewDeployJobData,
+  options: { bypassRateLimit?: boolean; bypassDebounce?: boolean } = {},
 ): Promise<{ enqueued: boolean; reason?: string }> {
   if (!getEnv().ENABLE_VERCEL_PREVIEW) {
     return { enqueued: false, reason: 'flag_off' }
@@ -195,30 +196,39 @@ export async function enqueuePreviewDeploy(
   const { conversationId } = data
 
   // Rate limit：Redis token bucket（簡化版用 sliding window count）
-  const rateLimitKey = `preview-deploy:ratelimit:${conversationId}`
-  const limitPerHour = getEnv().PREVIEW_DEPLOY_RATE_LIMIT_PER_HOUR
-  try {
-    const count = await generalRedis.incr(rateLimitKey)
-    if (count === 1) await generalRedis.expire(rateLimitKey, 3600)
-    if (count > limitPerHour) {
-      logger.warn({ conversationId, count, limit: limitPerHour }, 'preview deploy rate limited')
-      return { enqueued: false, reason: 'rate_limited' }
+  // bypassRateLimit: 用戶 explicit retry 時不擋
+  if (!options.bypassRateLimit) {
+    const rateLimitKey = `preview-deploy:ratelimit:${conversationId}`
+    const limitPerHour = getEnv().PREVIEW_DEPLOY_RATE_LIMIT_PER_HOUR
+    try {
+      const count = await generalRedis.incr(rateLimitKey)
+      if (count === 1) await generalRedis.expire(rateLimitKey, 3600)
+      if (count > limitPerHour) {
+        logger.warn({ conversationId, count, limit: limitPerHour }, 'preview deploy rate limited')
+        return { enqueued: false, reason: 'rate_limited' }
+      }
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'rate limit check failed, allowing')
     }
-  } catch (err) {
-    logger.warn({ err: (err as Error).message }, 'rate limit check failed, allowing')
   }
 
   // Debounce: jobId dedup — 同 conversationId 在 debounce 窗內只一個 active job
-  // BullMQ 機制：相同 jobId 的 job add 會被忽略；用 delay 排到未來。
-  // 先用 timestamp bucketed jobId（每 debounce 窗口一個 bucket）
+  // bypassDebounce: 用戶 explicit retry 用唯一 jobId（含 timestamp + random）立即執行不延遲
   const debounceMs = getEnv().PREVIEW_DEPLOY_DEBOUNCE_MS
-  const bucket = Math.floor(Date.now() / debounceMs)
-  const jobId = `preview-deploy:${conversationId}:${bucket}`
+  let jobId: string
+  let delay = debounceMs
+  if (options.bypassDebounce) {
+    jobId = `preview-deploy:${conversationId}:retry:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+    delay = 0  // 立即跑
+  } else {
+    const bucket = Math.floor(Date.now() / debounceMs)
+    jobId = `preview-deploy:${conversationId}:${bucket}`
+  }
 
   try {
     await queue.add('deploy', data, {
       jobId,
-      delay: debounceMs,  // 排 debounce ms 後執行 — 同窗口內後續 enqueue jobId 衝突自然 dedup
+      delay,
     })
     return { enqueued: true }
   } catch (err) {

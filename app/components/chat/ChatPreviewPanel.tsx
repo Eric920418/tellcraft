@@ -158,7 +158,7 @@ export default function ChatPreviewPanel({
   // ── Phase 3: Vercel preview hook（flag-on 時用，替換 WebContainer）──
   const isVercelPreview = useIsVercelPreviewEnabled()
   const vercelPreview = usePreviewDeployment(sessionInfo?.conversationId)
-  const retryPreview = useRetryPreview()
+  const retryPreview = useRetryPreview(sessionInfo?.conversationId)
 
   // ── BDD Q&A 蓋房子場景 ──
   // 用 messages.some() 判斷是否在 BDD 階段，避免用戶回答後 latestMsg 沒 stage 導致動畫消失

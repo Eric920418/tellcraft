@@ -8,6 +8,7 @@ import { sendMessageSchema, replyMessageSchema } from '../schemas/conversation'
 import * as db from '../db/client'
 import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 import { acquireUserActiveLock, releaseUserActiveLock, USER_ACTIVE_TTL_SECONDS } from '../services/conversation-lock'
+import { enqueuePreviewDeploy } from '../workers/preview-deploy-worker'
 import { repairCodePreviewInMessages } from '../services/code-repair'
 import { createLogger } from '../lib/logger'
 
@@ -18,6 +19,7 @@ const router: RouterType = Router()
 // BullMQ 隊列（在 index.ts 中初始化後傳入）
 let orchestratorQueue: Queue
 let redisClient: Redis
+let previewDeployQueue: Queue | null = null  // R10：retry endpoint 用
 
 export function setOrchestratorQueue(queue: Queue) {
   orchestratorQueue = queue
@@ -25,6 +27,11 @@ export function setOrchestratorQueue(queue: Queue) {
 
 export function setRedisClient(redis: Redis) {
   redisClient = redis
+}
+
+/** R10：retry endpoint 需要直接 enqueue preview-deploy job */
+export function setPreviewDeployQueue(queue: Queue) {
+  previewDeployQueue = queue
 }
 
 // ============================================================
@@ -436,6 +443,87 @@ router.post('/:id/reply', optionalAuth, validateBody(replyMessageSchema), async 
  * Phase 1 (Vercel preview 替換 WebContainer)：useStrippedMessageHydration / useChatSession 用此 endpoint
  * 拿最後一次 ready preview URL 直接餵 iframe；若無，前端等 socket 推 preview:ready
  */
+// ============================================================
+// R10 治本 Layer 6：用戶 explicit retry preview deploy
+// 觸發完整 6 層自動修復重跑（bypass debounce + rate limit）
+// ============================================================
+router.post('/:id/preview/retry', optionalAuth, async (req, res) => {
+  try {
+    const { id: conversationId } = req.params
+    const conversation = await db.getConversation(conversationId)
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+
+    // 所有權驗證（同 preview/latest pattern）
+    const project = await db.queryOne<{ user_id: string; name: string; neon_connection_string: string | null }>(
+      'SELECT user_id, name, neon_connection_string FROM projects WHERE id = $1',
+      [conversation.project_id]
+    )
+    if (!project) return res.status(404).json({ error: 'Project not found' })
+    if (req.user && project.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' })
+    }
+
+    if (!redisClient || !previewDeployQueue) {
+      return res.status(503).json({ error: 'Service not ready' })
+    }
+
+    // 從 FlowState (Redis) 拿當前 uiuxGeneratedCode + tailwindConfig
+    const stateKey = `flowstate:${conversationId}`
+    const stateRaw = await redisClient.get(stateKey)
+    if (!stateRaw) {
+      return res.status(404).json({ error: 'FlowState not found (對話可能已過期，請重新生成)' })
+    }
+    const state = JSON.parse(stateRaw) as {
+      uiuxGeneratedCode?: { pages: unknown[]; components: unknown[]; styles: string }
+      uiuxDesignSystem?: unknown
+    }
+    if (!state.uiuxGeneratedCode || state.uiuxGeneratedCode.pages.length === 0) {
+      return res.status(400).json({ error: '無生成代碼可重試（請先完成設計生成）' })
+    }
+
+    // tailwindConfig 從 design system 算（generateTailwindConfig 既有 helper）
+    const { generateTailwindConfig } = await import('../services/uiux-generation')
+    const tailwindConfig = state.uiuxDesignSystem
+      ? generateTailwindConfig(state.uiuxDesignSystem as Parameters<typeof generateTailwindConfig>[0])
+      : ''
+
+    const jobData = {
+      conversationId,
+      projectId: conversation.project_id,
+      projectName: project.name,
+      code: state.uiuxGeneratedCode as Parameters<typeof enqueuePreviewDeploy>[2]['code'],
+      tailwindConfig,
+      neonConnectionString: project.neon_connection_string ?? undefined,
+    }
+
+    const result = await enqueuePreviewDeploy(redisClient, previewDeployQueue, jobData, {
+      bypassRateLimit: true,
+      bypassDebounce: true,
+    })
+
+    if (!result.enqueued) {
+      return res.status(500).json({ error: `Enqueue failed: ${result.reason}` })
+    }
+
+    // R10 telemetry: 用戶 explicit retry
+    void (await import('../services/skill-telemetry')).recordTelemetry({
+      skillName: 'uiux',
+      eventType: 'preview_user_manual_retry',
+      patternKey: 'user_retry_button',
+      severity: 'info',
+      outcome: 'success',
+      userId: req.user?.id ?? null,
+      conversationId,
+      payload: {},
+    }).catch(() => {})
+
+    return res.json({ enqueued: true })
+  } catch (error) {
+    logger.error({ err: error }, 'preview retry 失敗')
+    return res.status(500).json({ error: 'Failed to retry preview' })
+  }
+})
+
 router.get('/:id/preview/latest', optionalAuth, async (req, res) => {
   try {
     const { id: conversationId } = req.params
