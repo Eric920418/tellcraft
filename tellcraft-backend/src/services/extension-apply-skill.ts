@@ -24,6 +24,7 @@ import { z } from 'zod'
 import * as db from '../db/client'
 import { getFlowState, saveFlowState } from '../workers/orchestrator-utils'
 import { createLogger } from '../lib/logger'
+import { recordTelemetry } from './skill-telemetry'
 import type Redis from 'ioredis'
 import type { IoEmitter } from '../types/flow-state'
 
@@ -75,17 +76,20 @@ export async function applyExtensionUpdate(
 ): Promise<ApplyUpdateResult> {
   const state = await getFlowState(redis, input.conversationId)
   if (!state) {
+    recordApplyFailed(input.conversationId, 'flowstate-missing')
     return { ok: false, reason: 'flowstate-missing', message: 'FlowState 不存在（對話可能過期）' }
   }
 
   const code = state.uiuxGeneratedCode
   if (!code || code.pages.length === 0) {
+    recordApplyFailed(input.conversationId, 'no-code')
     return { ok: false, reason: 'no-code', message: '無 uiuxGeneratedCode 可改' }
   }
 
   // 驗證 op whitelist
   for (const u of input.updates) {
     if (u.kind === 'style' && (!u.key || !SAFE_STYLE_KEYS.has(u.key))) {
+      recordApplyFailed(input.conversationId, 'invalid-op')
       return { ok: false, reason: 'invalid-op', message: `style key ${u.key} not whitelisted` }
     }
   }
@@ -101,6 +105,7 @@ export async function applyExtensionUpdate(
       modifiedFiles += result.fileCount
     } else if (textUpdates[0].value.trim() !== input.originalText.trim()) {
       // 用戶確實要改 text 但找不到 unique match → fail
+      recordApplyFailed(input.conversationId, 'text-not-unique')
       return {
         ok: false,
         reason: 'text-not-unique',
@@ -156,11 +161,37 @@ export async function applyExtensionUpdate(
     redeployTriggered,
   }, '✓ extension apply-update 完成')
 
+  // R11 commit 8 telemetry：apply 成功
+  void recordTelemetry({
+    skillName: 'uiux',
+    eventType: 'extension_update_applied',
+    patternKey: modifiedFiles > 0 ? 'text-unique' : 'style-only',
+    severity: 'info',
+    outcome: 'success',
+    userId: null,
+    conversationId: input.conversationId,
+    payload: { modifiedFiles, redeployTriggered, opCount: input.updates.length },
+  }).catch(() => {})
+
   return {
     ok: true,
     modifiedFiles,
     redeployTriggered,
   }
+}
+
+// R11 commit 8: 共用 fail telemetry helper
+function recordApplyFailed(conversationId: string, reason: string) {
+  void recordTelemetry({
+    skillName: 'uiux',
+    eventType: 'extension_apply_failed',
+    patternKey: reason,
+    severity: 'warning',
+    outcome: 'failed',
+    userId: null,
+    conversationId,
+    payload: { reason },
+  }).catch(() => {})
 }
 
 // ──────────────────────────────────────────────────────────

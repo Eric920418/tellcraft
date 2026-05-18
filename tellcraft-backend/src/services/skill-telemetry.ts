@@ -90,6 +90,13 @@ export type EventType =
   | 'preview_heavy_fallback_triggered'  // L5 verifyBuildLocally 啟動
   | 'preview_heavy_fallback_success'    // L5 修復後 quickPreviewDeploy 成功
   | 'preview_user_manual_retry'         // 用戶按 retry 按鈕（L6 UX 兜底）
+  // R11 治本：Chrome Extension MV3 編輯器（2026-05-18 commit 8）
+  | 'extension_installed'              // chrome.runtime.onInstalled (first install 或 update)
+  | 'extension_auth_exchanged'         // scoped JWT 換成功（首次 + 50min renew）
+  | 'extension_preview_verified'       // verify-preview pass（host 屬該 conversation）
+  | 'extension_element_selected'       // 用戶 click 元素 (5s debounce 避免高頻噪音)
+  | 'extension_update_applied'         // /apply-update 成功（含 reason: 'text-unique' / 'style-only'）
+  | 'extension_apply_failed'           // /apply-update 失敗（含 reason: 'text-not-unique' / 'invalid-op' / ...）
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
@@ -958,6 +965,7 @@ export function findStructuralFailureCandidates(
     'contrast_qg_residual',  // R9 加：QG 觸發 = Layer 3 deployer auto-swap 漏網（high signal）
     'contrast_auto_swap_unsafe',  // R9 加：swap 後仍 unsafe（mid-saturation 色找不到 safe fg）
     'preview_auto_fix_give_up',  // R10 加：L3+L4 N 輪用盡仍失敗（high signal Layer 5 開了沒救到）
+    'extension_apply_failed',  // R11 加：extension /apply-update 失敗（reason 含 text-not-unique / invalid-op）
   ])
 
   return topPatterns
@@ -981,6 +989,8 @@ export function findStructuralFailureCandidates(
         ? `Mid-saturation color (e.g. bg-yellow-400) 找不到 ≥ 4.5 fg — 考慮 darken/lighten base 或加 ring fallback`
         : row.event_type === 'preview_auto_fix_give_up'
         ? `R10 L3+L4 LLM 修不動 — 分析 patternKey 看哪類 build error LLM 失敗最多，加 fixBuildErrors prompt few-shot 或補 deterministic fix`
+        : row.event_type === 'extension_apply_failed'
+        ? `R11 extension /apply-update 失敗 — 分析 patternKey: text-not-unique 高頻 → 升級 Babel AST patch (commit 8+) 處理重複字串；invalid-op 高頻 → 擴展 SAFE_STYLE_KEYS 白名單`
         : `規格驗證/對齊重複失敗 — 看是否需要新 deterministic feature fix`,
     }))
     .sort((a, b) => b.count - a.count)
