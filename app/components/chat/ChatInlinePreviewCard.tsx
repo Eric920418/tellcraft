@@ -166,18 +166,48 @@ export default function ChatInlinePreviewCard({ conversationId, projectName }: C
         </a>
       </div>
 
-      {/* 沒裝 extension 提示安裝（不阻塞主流程，作為次要提示） */}
+      {/* 沒裝 extension：升級提示卡片，吸引用戶去裝（賣點 sell） */}
       {!extension.loading && !extension.installed && (
-        <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8', lineHeight: 1.5 }}>
-          想 inline 編輯？
-          <a
-            href={EXTENSION_INSTALL_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: '#0f172a', textDecoration: 'underline', marginLeft: 4 }}
-          >
-            安裝 Tellcraft Editor
-          </a>
+        <div
+          style={{
+            marginTop: 12,
+            padding: 10,
+            background: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)',
+            border: '1px solid #ddd6fe',
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+          }}
+        >
+          <div style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>✨</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>
+              想點擊網頁元素直接編輯？
+            </div>
+            <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.5, marginBottom: 8 }}>
+              安裝 Tellcraft Editor Chrome 擴充功能，新分頁打開預覽可即時修改文字、顏色，自動同步回網站
+            </div>
+            <a
+              href={EXTENSION_INSTALL_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '5px 10px',
+                background: '#0f172a',
+                color: '#fff',
+                borderRadius: 4,
+                fontSize: 11,
+                fontWeight: 500,
+                textDecoration: 'none',
+              }}
+            >
+              加入 Chrome — 免費 ↗
+            </a>
+          </div>
         </div>
       )}
     </div>
