@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "Tellcraft Editor",
+  "short_name": "Tellcraft",
+  "version": "0.1.0",
+  "description": "在 Vercel preview 頁面內 inline 編輯 Tellcraft 生成的網站（點擊元素改文字/顏色/間距/字體）。配合 tellcraft.com chat 使用",
+  "permissions": [
+    "storage",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://*.vercel.app/*",
+    "https://tellcraft.com/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.vercel.app/*"],
+      "js": ["content/bootstrap.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.vercel.app/*"],
+      "js": ["content/bridge-injector.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://tellcraft.com/*", "http://localhost:3000/*"],
+      "js": ["content/tellcraft-detector.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content/bridge-injector.js"],
+      "matches": ["https://*.vercel.app/*"]
+    }
+  ]
+}
