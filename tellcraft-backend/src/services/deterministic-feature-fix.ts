@@ -16,6 +16,7 @@ import {
   type AlignmentIssue,
   type EntitySetupWithData,
 } from './feature-alignment-gate'
+import { hasExplicitNullIntent, extractNullExpectationFields } from './semantic-consistency-validator'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('deterministic-feature-fix')
@@ -1500,5 +1501,221 @@ export function autoFillCrossScenarioVarReference(
   }
 
   return { content: workingContent, fixedRefs, skipped }
+}
+
+// ============================================================
+// Helper: autoFixNullIntentScenarioConflict（2026-05-18 b2252efc 治本）
+//
+// 偵測 scenario name 暗示某欄位 null 但 DataTable expected 給具體值 → 改 `&isNull`
+// LLM 寫 BDD 時 scenario name 寫對了但 DataTable expected 偷懶用 VAR ref 或 UUID 字面值
+// SpecFormula real test 發現 DB 是 null 不等於 expected UUID → fail loop 4 輪 LLM 修不下來
+// （這是 spec 矛盾，不是 code 問題）
+//
+// 涵蓋兩種 DataTable：
+//   1. entity_validate: `應該存在一個 X, with table:`
+//   2. response_validate: `X(STATUS)回應, with table:`
+// ============================================================
+
+/**
+ * 把 markdown table line `| a | b | c |` 第 columnIndex 個 cell 改成 newValue
+ * 保留 leading whitespace
+ */
+function replaceTableCell(line: string, columnIndex: number, newValue: string): string {
+  const leadingMatch = line.match(/^(\s*)/)
+  const leading = leadingMatch ? leadingMatch[1] : ''
+  const trimmed = line.trim()
+  if (!trimmed.startsWith('|')) return line
+
+  // 分割：parts[0] = '', parts[1..N] = cells, parts[N+1] = ''
+  const parts = trimmed.split('|')
+  if (parts.length < 3) return line
+  const cells = parts.slice(1, -1).map(s => s.trim())
+  if (columnIndex < 0 || columnIndex >= cells.length) return line
+
+  cells[columnIndex] = newValue
+  return leading + '| ' + cells.join(' | ') + ' |'
+}
+
+/** 判斷 cell value 是否已是 null sentinel（無需改） */
+function isNullSentinel(cell: string): boolean {
+  const lower = cell.trim().toLowerCase()
+  return cell.trim() === '_' || lower === '&isnull' || lower === '$null' || lower === 'null'
+}
+
+/**
+ * mentioned field 對 DataTable header 的 match 規則（比 fieldMatchesAnyColumn 嚴格）
+ * - 相等 lower-case + 去 _
+ * - 加 'Id' / '_id' 後綴後相等（category → categoryId / category_id）
+ *
+ * **禁止剝尾段**：foreignKeyId 不該 match header `id`（那是 column-name-matcher
+ * 解 VAR 序列化的場景，跟「scenario name 提到的業務 field」是不同問題）
+ */
+function mentionedFieldMatchesHeader(mentioned: string, header: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/_/g, '')
+  const m = norm(mentioned)
+  const h = norm(header)
+  if (!m || !h) return false
+  if (m === h) return true
+  if (m + 'id' === h) return true
+  return false
+}
+
+/**
+ * Inline parse response_validate steps（`{Summary}(STATUS)回應, with table:`）
+ * 仿 extractEntityValidateSteps 但用不同 regex
+ */
+interface ResponseValidateStep {
+  scenarioName: string
+  summary: string
+  status: number
+  rawHeaders: string[]
+  dataRows: Array<{ line: number; cells: string[] }>
+}
+
+function extractResponseValidateStepsLocal(content: string): ResponseValidateStep[] {
+  const lines = content.split('\n')
+  const results: ResponseValidateStep[] = []
+  let currentScenarioName = ''
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim()
+    const scMatch = trimmed.match(/^(?:Scenario:|Scenario Outline:|Example:)\s*(.+)$/)
+    if (scMatch) { currentScenarioName = scMatch[1].trim(); continue }
+
+    // `{Summary}(STATUS)回應, with table:`
+    const m = trimmed.match(/^(?:Given|When|Then|And|But)\s+(.+?)\((\d{3})\)\s*回應\s*[,，]\s*with\s+table:/i)
+    if (!m) continue
+    const summary = m[1].trim()
+    const status = parseInt(m[2], 10)
+
+    const tableLines: Array<{ line: number; text: string }> = []
+    for (let j = i + 1; j < lines.length; j++) {
+      const tl = lines[j].trim()
+      if (tl.startsWith('|')) tableLines.push({ line: j + 1, text: tl })
+      else break
+    }
+    if (tableLines.length < 1) continue
+
+    // Use the same splitDataTableRow logic
+    const splitRow = (text: string): string[] => {
+      const parts = text.split('|')
+      return parts.slice(1, -1).map(s => s.trim())
+    }
+    const rawHeaders = splitRow(tableLines[0].text)
+    const dataRows = tableLines.slice(1).map(({ line, text }) => ({
+      line,
+      cells: splitRow(text),
+    }))
+
+    results.push({
+      scenarioName: currentScenarioName,
+      summary,
+      status,
+      rawHeaders,
+      dataRows,
+    })
+  }
+  return results
+}
+
+export interface NullIntentFix {
+  scenario: string
+  field: string
+  entity: string                       // entity name (entity_validate) 或 summary (response_validate)
+  validateType: 'entity' | 'response'
+  oldValue: string
+}
+
+/**
+ * 主入口：deterministic 0 LLM 修 「Scenario name 暗示 null 但 DataTable expected 非 null」
+ */
+export function autoFixNullIntentScenarioConflict(
+  content: string,
+): { content: string; fixed: NullIntentFix[] } {
+  const fixed: NullIntentFix[] = []
+  const lines = content.split('\n')
+
+  // ---- 處理 entity_validate ----
+  const entitySteps = extractEntityValidateSteps(content)
+  for (const step of entitySteps) {
+    if (!step.shouldExist) continue  // 「應該不存在」沒 expected 需要修
+    if (!step.scenarioName) continue
+    if (!hasExplicitNullIntent(step.scenarioName)) continue
+
+    const mentionedFields = extractNullExpectationFields(step.scenarioName)
+    if (mentionedFields.length === 0) continue
+
+    for (let hi = 0; hi < step.rawHeaders.length; hi++) {
+      const header = step.rawHeaders[hi].replace(/^[><]/, '').trim()
+      if (!header) continue
+
+      const matched = mentionedFields.some(f => mentionedFieldMatchesHeader(f, header))
+      if (!matched) continue
+
+      for (const row of step.dataRows) {
+        const cell = (row.cells[hi] || '').trim()
+        if (!cell || isNullSentinel(cell)) continue
+        const newLine = replaceTableCell(lines[row.line - 1], hi, '&isNull')
+        if (newLine !== lines[row.line - 1]) {
+          lines[row.line - 1] = newLine
+          fixed.push({
+            scenario: step.scenarioName,
+            field: header,
+            entity: step.entityName,
+            validateType: 'entity',
+            oldValue: cell,
+          })
+        }
+      }
+    }
+  }
+
+  // ---- 處理 response_validate ----
+  // 注意：response_validate 順序在前面 mutate 之後可能 line number 跑掉
+  // 但我們是用 step.dataRows[].line（1-based）對 lines[line-1] mutate，
+  // 而 mutate 只改 cell 內容不改行數，line 仍正確
+  const intermediateContent = lines.join('\n')
+  const responseSteps = extractResponseValidateStepsLocal(intermediateContent)
+  for (const step of responseSteps) {
+    if (!step.scenarioName) continue
+    if (step.status < 200 || step.status >= 300) continue  // 只處理成功回應
+    if (!hasExplicitNullIntent(step.scenarioName)) continue
+
+    const mentionedFields = extractNullExpectationFields(step.scenarioName)
+    if (mentionedFields.length === 0) continue
+
+    for (let hi = 0; hi < step.rawHeaders.length; hi++) {
+      const header = step.rawHeaders[hi].replace(/^[><]/, '').trim()
+      if (!header) continue
+
+      const matched = mentionedFields.some(f => mentionedFieldMatchesHeader(f, header))
+      if (!matched) continue
+
+      for (const row of step.dataRows) {
+        const cell = (row.cells[hi] || '').trim()
+        if (!cell || isNullSentinel(cell)) continue
+        const newLine = replaceTableCell(lines[row.line - 1], hi, '&isNull')
+        if (newLine !== lines[row.line - 1]) {
+          lines[row.line - 1] = newLine
+          fixed.push({
+            scenario: step.scenarioName,
+            field: header,
+            entity: step.summary,
+            validateType: 'response',
+            oldValue: cell,
+          })
+        }
+      }
+    }
+  }
+
+  if (fixed.length > 0) {
+    logger.info(
+      { fixedCount: fixed.length, samples: fixed.slice(0, 5) },
+      'autoFixNullIntentScenarioConflict 修補完成',
+    )
+  }
+
+  return { content: lines.join('\n'), fixed }
 }
 

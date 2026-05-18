@@ -21,7 +21,7 @@ export interface ActionsFixResult {
   fixedActionsYml: string | null  // null 代表無變動
   fixedFeatures: Map<string, string>  // featureName → fixed content（無變動的不放）
   changes: Array<{
-    type: 'method_set' | 'path_set' | 'var_in_call_table_removed' | 'empty_table_literal_removed' | 'unique_constraint_deduped'
+    type: 'method_set' | 'path_set' | 'var_in_call_table_removed' | 'empty_table_literal_removed' | 'unique_constraint_deduped' | 'null_intent_scenario_conflict_fixed'
     target: string  // action name 或 feature name
     detail: string
   }>
@@ -298,6 +298,35 @@ export function autoFixActionsAndFeatures(
       // 寫回 fixedFeatures map
       for (const [name, content] of dedupResult.fixedFeatures) {
         fixedFeatures.set(name, content)
+      }
+    }
+  }
+
+  // 4. autoFixNullIntentScenarioConflict（2026-05-18 b2252efc 治本）
+  // 偵測「scenario name 暗示 null 但 DataTable expected 給具體值」→ 改 &isNull
+  // entity_validate + response_validate 兩種 DataTable 都處理
+  // lazy require 避免循環依賴
+  {
+    const { autoFixNullIntentScenarioConflict } = require('./deterministic-feature-fix') as typeof import('./deterministic-feature-fix')
+    for (const f of features) {
+      const key = f.name || f.actionName
+      const currentContent = fixedFeatures.get(key) ?? f.content
+      const result = autoFixNullIntentScenarioConflict(currentContent)
+      if (result.fixed.length > 0) {
+        fixedFeatures.set(key, result.content)
+        // group by scenario+entity 統計
+        const byTarget = new Map<string, number>()
+        for (const fix of result.fixed) {
+          const k = `${fix.validateType}:${fix.scenario}/${fix.entity}.${fix.field}`
+          byTarget.set(k, (byTarget.get(k) ?? 0) + 1)
+        }
+        for (const [target, count] of byTarget) {
+          allChanges.push({
+            type: 'null_intent_scenario_conflict_fixed',
+            target: key,
+            detail: `forced \`&isNull\` for ${target}${count > 1 ? ` (×${count})` : ''}`,
+          })
+        }
       }
     }
   }

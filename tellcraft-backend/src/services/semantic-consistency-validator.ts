@@ -170,6 +170,14 @@ const NULL_INTENT_PATTERNS = [
   /([\w_\u4e00-\u9fa5]+)?\s*(?:unset|clear(?:ed)?|reset\s+to\s+null|remov(?:ed|e)\s+(?:reference|association|link))/i,
   // NEW: 「取消選擇 / 取消關聯 / 脫勾 / 取消分類 / 解除群組連結」— 允許中間插入業務詞
   /(?:取消|移除|解除|脫勾|解綁)[\s\u4e00-\u9fa5]{0,6}?(?:選擇|關聯|關連|連結|連接|綁定|分類|標籤|指派|群組|類別)/i,
+  // NEW (2026-05-18 b2252efc): 英文「has no <noun>」/「has no <noun> assigned/attached/associated/linked/set」
+  // case: "Successfully retrieve an article that has no category assigned"
+  /\bhas\s+no\s+\w[\w\s]{0,40}?(?:\s+(?:assigned|attached|associated|linked|set|selected|configured))?\b/i,
+  // NEW (2026-05-18 b2252efc): 英文「returns null」/「return null」
+  // case: "A published article without a category returns null categoryId"
+  /\breturns?\s+null\b/i,
+  // NEW (2026-05-18 b2252efc): 英文「without a/an/the <noun>」+ 同句後續含 null signal
+  /\bwithout\s+(?:a|an|the)?\s*\w[\w\s]{0,30}?\b.*\b(?:null|none|no\s+\w+)\b/i,
 ]
 
 /**
@@ -186,7 +194,7 @@ export function hasExplicitNullIntent(scenarioName: string): boolean {
 
   // Pattern 2: 含 null 關鍵詞 + 動作詞（雙條件降低 false positive）
   const hasNullKeyword = /\bnull\b|（\s*null\s*）|\(\s*null\s*\)|未分類|未選|無關聯|無選擇/i.test(scenarioName)
-  const hasActionVerb = /應|設|清|改|變|置|歸|should|must|become|turn|set|clear|reset|unset/i.test(scenarioName)
+  const hasActionVerb = /應|設|清|改|變|置|歸|should|must|become|turn|set|clear|reset|unset|returns?|has\s+no|without/i.test(scenarioName)
   if (hasNullKeyword && hasActionVerb) return true
 
   return false
@@ -223,7 +231,7 @@ function clauseHasNullVerb(clause: string): boolean {
  * v2: clause-aware 抽取 — 只從含 null-verb 的 clause 抽欄位，避免
  * 「clear A while updating B」誤把 B 當 null candidate
  */
-function extractNullExpectationFields(scenarioName: string): string[] {
+export function extractNullExpectationFields(scenarioName: string): string[] {
   const candidates = new Set<string>()
 
   // 只有在有「null 意圖」時才嘗試提取
