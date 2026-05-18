@@ -202,19 +202,39 @@ const NULL_INTENT_PATTERNS = [
 //（JS regex 的 \b 對中文字元邊界不可靠 — 「非」是 non-word char 對 \b 行為與英文不同）
 const NEGATION_PATTERNS = /(?:\bnon[-\s]?null\b|\bnot[-\s]?null\b|\bnever[-\s]?null\b|非\s*null|非空|具體值)/i
 
+const NULL_KEYWORD_RE = /\bnull\b|（\s*null\s*）|\(\s*null\s*\)|未分類|未選|無關聯|無選擇/i
+const ACTION_VERB_RE = /應|設|清|改|變|置|歸|should|must|become|turn|set|clear|reset|unset|returns?|has\s+no|without/i
+
+function clauseHasUnnegatedNullIntent(clause: string): boolean {
+  // 該 clause 被 negation 蓋掉（如「is non-null」）→ 視為「應有值」不算 null intent
+  if (NEGATION_PATTERNS.test(clause)) return false
+  // NULL_INTENT_PATTERNS 命中
+  if (NULL_INTENT_PATTERNS.some(p => p.test(clause))) return true
+  // 含 null keyword + action verb 雙條件
+  if (NULL_KEYWORD_RE.test(clause) && ACTION_VERB_RE.test(clause)) return true
+  return false
+}
+
+/**
+ * Clause-level Negation 判斷（P1 fix 2026-05-19）：
+ * 原本「任一 negation 命中就早退」會誤殺「createdAt is non-null but updatedAt is null after clear」
+ * 這類混雜 scenario — 真實該修的 updatedAt 被忽略。
+ *
+ * 改成切 clauses 逐句判斷：任一 clause 含「未被 negation 蓋住的」null intent → return true
+ */
 export function hasExplicitNullIntent(scenarioName: string): boolean {
   if (!scenarioName) return false
 
-  // Negation pre-check：明確反向語意（"non-null" / "not null" / "非空"）→ 早退
-  if (NEGATION_PATTERNS.test(scenarioName)) return false
+  // 切 clauses（用 while/and/but 等連接詞）
+  const clauses = scenarioName.split(CLAUSE_SEPARATORS)
 
-  // Pattern 1: 任何 NULL_INTENT_PATTERNS 命中
-  if (NULL_INTENT_PATTERNS.some(p => p.test(scenarioName))) return true
+  // 任一 clause 有 unnegated null intent → true
+  for (const clause of clauses) {
+    if (clauseHasUnnegatedNullIntent(clause)) return true
+  }
 
-  // Pattern 2: 含 null 關鍵詞 + 動作詞（雙條件降低 false positive）
-  const hasNullKeyword = /\bnull\b|（\s*null\s*）|\(\s*null\s*\)|未分類|未選|無關聯|無選擇/i.test(scenarioName)
-  const hasActionVerb = /應|設|清|改|變|置|歸|should|must|become|turn|set|clear|reset|unset|returns?|has\s+no|without/i.test(scenarioName)
-  if (hasNullKeyword && hasActionVerb) return true
+  // 整句若沒切到（單 clause）— 整句判斷
+  if (clauses.length === 1 && clauseHasUnnegatedNullIntent(scenarioName)) return true
 
   return false
 }

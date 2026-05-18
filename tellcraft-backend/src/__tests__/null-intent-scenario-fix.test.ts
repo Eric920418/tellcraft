@@ -75,6 +75,34 @@ describe('hasExplicitNullIntent — Negation pre-check（R6 false positive 修�
   })
 })
 
+describe('hasExplicitNullIntent — P1 clause-level negation（混雜 scenario）', () => {
+  it('混雜 scenario：含 negation clause + null intent clause → 仍 return true', () => {
+    // 「createdAt is non-null but updatedAt is null after clear」
+    // 第一 clause 含 negation，第二 clause 含真實 null intent
+    // 原 R6 整句 negation 命中 → 早退 → updatedAt 不被修 (false positive miss)
+    // P1 clause-level 切後第二 clause unnegated → return true
+    expect(hasExplicitNullIntent('createdAt is non-null but updatedAt is null after clear')).toBe(true)
+  })
+
+  it('純 negation scenario → 仍 return false', () => {
+    expect(hasExplicitNullIntent('returns a non-null publishedAt value')).toBe(false)
+  })
+
+  it('「A while B」連接詞切 clause 後分別判斷', () => {
+    // A clause unnegated null intent + B clause negation → return true
+    expect(hasExplicitNullIntent('clear categoryId while keeping publishedAt non-null')).toBe(true)
+  })
+
+  it('中文「並且」連接詞', () => {
+    expect(hasExplicitNullIntent('categoryId 應設為 null 並且 createdAt 應為非空')).toBe(true)
+  })
+
+  it('純 negation 含連接詞 → 仍 false', () => {
+    // 兩 clauses 都是 negation
+    expect(hasExplicitNullIntent('createdAt is non-null and updatedAt is not null')).toBe(false)
+  })
+})
+
 describe('autoFixNullIntentScenarioConflict — false positive regression', () => {
   it('「returns a non-null publishedAt value」不該被改成 &isNull', () => {
     const content = `Feature: Get Public Article

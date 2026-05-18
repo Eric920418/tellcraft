@@ -1091,6 +1091,45 @@ Then 表用 \`$notnull\` / \`$null\` / 具體字面值期望某欄位 X 時：
 - 期望 \`$null\` → entity_setup 該欄位必須留空或不出現該 header
 - **違反後果**：DB column 預設 null → response 也是 null → response_validate 永遠失敗
 
+## ⚠️ Null intent Scenario name ↔ DataTable expected 一致性（P2，2026-05-19 b2252efc 治本）
+
+Scenario name 暗示某欄位 null 時（常見句型），對應的 DataTable expected 值**必須是 \`&isNull\`** 不能是具體 UUID/字串/VAR ref。
+
+**Null intent 句型清單**（命中以下任一 → 該欄位 expected 必須 \`&isNull\`）：
+- 英文：\`set to null\` / \`has no X assigned\` / \`returns null X\` / \`without X\` + null signal / \`should become null\` / \`reset to null\`
+- 中文：\`應為 null\` / \`應設為 null\` / \`清空為...\` / \`未分類\` / \`設為無\`
+
+**範例**：
+
+✅ 正確（scenario name 暗示 null → expected \`&isNull\`）：
+\`\`\`gherkin
+Example: Articles under the deleted category have their category_id set to null
+  And 應該存在一個 Article, with table:
+    | id            | categoryId |
+    | $Article1.id  | &isNull    |
+\`\`\`
+
+❌ 錯誤（scenario name 說 null 但 expected 給 VAR）：
+\`\`\`gherkin
+Example: Articles under the deleted category have their category_id set to null
+  And 應該存在一個 Article, with table:
+    | id            | categoryId     |
+    | $Article1.id  | $Category1.id  |
+\`\`\`
+（矛盾：name 說 null 但 expected 是 UUID）
+
+**反向（negation）特殊處理** — scenario name 含 \`non-null\` / \`not null\` / \`非 null\` / \`非空\` 時**反過來**：expected 必須給具體值不能 \`&isNull\`：
+
+✅ 正確：
+\`\`\`gherkin
+Example: A published article returns a non-null publishedAt value
+  Then GetPublicArticle(200)回應, with table:
+    | id            | publishedAt              |
+    | $Article1.id  | 2026-01-01T00:00:00.000Z |
+\`\`\`
+
+**違反後果**：deterministic fix 強制改 \`&isNull\` 或反向強制具體值，但浪費 1-2 輪 LLM call；本層規則從源頭避免。
+
 ## Array 類型參數（如拖曳排序、批次操作）
 
 如果 action 需要接收多個 ID（如 orderedItemIds），在 DataTable 中用**逗號分隔 $variable**：
@@ -1593,12 +1632,8 @@ export async function fixMultipleFeatures(
         usage: { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 },
       }
     }
-
-    // 對留下來繼續修的 features increment attempt counter（後續呼叫時會被 cap 擋）
-    const { incrementFeatureAttempt } = await import('../lib/fix-attempt-cache')
-    await Promise.all(
-      features.map(f => incrementFeatureAttempt(trackingContext.conversationId!, f.name || f.actionName)),
-    )
+    // 注意（P0 fix 2026-05-19）：increment 移到 LLM batch 成功後才呼叫，
+    // 不在入口無條件 +1 — 避免 API rate limit / budget exceeded 時誤算計數
   }
 
   // L31.I：累計每個 batch 的 usage（給 cost guardrail 用）
@@ -1831,8 +1866,19 @@ ${decisions}` : ''}
 
   // ── 主邏輯：≤3 個直接修，>3 個分批 ──
 
+  // P0 fix: LLM 真實 call 成功後才 increment per-feature counter（不在入口無條件 +1）
+  // 避免 API rate limit / budget exceeded 時誤算 → 合法重試被 R7 cap 誤擋
+  const incrementOnSuccess = async (batch: FeatureFixInput[]) => {
+    if (!trackingContext?.conversationId) return
+    const { incrementFeatureAttempt } = await import('../lib/fix-attempt-cache')
+    await Promise.all(
+      batch.map(f => incrementFeatureAttempt(trackingContext.conversationId!, f.name || f.actionName)),
+    )
+  }
+
   if (features.length <= BATCH_SIZE) {
     const r = await fixFeatureBatch(features, '修復')
+    if (r.success) await incrementOnSuccess(features)
     return { ...r, usage: cumulativeUsage }
   }
 
@@ -1853,6 +1899,8 @@ ${decisions}` : ''}
       allFixed.push(...result.fixedFeatures)
       if (result.updatedSchemaSql) latestSchemaSql = result.updatedSchemaSql
       if (result.updatedEntityMapping) latestEntityMapping = result.updatedEntityMapping
+      // P0 fix: 只在 LLM 真實成功後 increment（API fail / budget exceeded 不算）
+      await incrementOnSuccess(batch)
     } else {
       logger.warn({ batchLabel, failedCount: batch.length }, '批次修復失敗，保留原始 Features')
       allFixed.push(...batch.map(f => ({ name: f.name, actionName: f.actionName, content: f.content })))
