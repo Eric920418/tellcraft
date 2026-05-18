@@ -116,6 +116,12 @@ const envSchema = z.object({
   PREVIEW_DEPLOY_RATE_LIMIT_PER_HOUR: z.coerce.number().default(10), // 每 conversation 每小時最多 N 次 preview deploy（防炸 Vercel 配額）
   PREVIEW_DEPLOY_DEBOUNCE_MS: z.coerce.number().default(30000),  // 連續 enqueue 30 秒內 dedup（同對話多次 phase 完成只跑最後一次）
   PREVIEW_DEPLOY_TIMEOUT_MS: z.coerce.number().default(240000),  // Vercel build polling 上限 4 分鐘，超時標 failed
+  // R10 治本（2026-05-18 incident）— preview-deploy 失敗時 100% 自動修復不能讓終端用戶看到失敗
+  ENABLE_PREVIEW_AUTO_FIX: z.stringbool().default(true),         // L3+L4 kill switch；false 時 preview failed 直接 give up（原 lean 行為）
+  MAX_PREVIEW_AUTO_FIX_ROUNDS: z.coerce.number().default(2),     // LLM 修復 round 上限（每輪內部 fixBuildErrors 又 3 次 retry）
+  ENABLE_PREVIEW_HEAVY_FALLBACK: z.stringbool().default(true),   // L5 kill switch；用戶要 100% 必開（verifyBuildLocally + ignoreBuildErrors 兜底）
+  PREVIEW_AUTO_FIX_TIMEOUT_MS: z.coerce.number().default(180000),     // L3+L4 整段 timeout 3 分鐘
+  PREVIEW_HEAVY_FALLBACK_TIMEOUT_MS: z.coerce.number().default(360000), // L5 timeout 6 分鐘（含 npm install）
   // T9: 金絲雀放量百分比（0-100，default 0；> 0 時優先於 ENABLE_*=true 的硬開關）
   ENABLE_UI_EVALUATOR_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
   ENABLE_DESIGN_QUALITY_REPORT_ROLLOUT_PERCENT: z.coerce.number().min(0).max(100).default(0),
