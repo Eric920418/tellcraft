@@ -2514,7 +2514,7 @@ export async function waitForDeploymentReady(deploymentId: string, maxWaitMs = 3
  * 抓取 Vercel 部署的 build logs（失敗時用於除錯）
  * 回傳最後 50 行 stderr log，失敗時回傳空字串
  */
-async function fetchVercelBuildLogs(deploymentId: string): Promise<string> {
+export async function fetchVercelBuildLogs(deploymentId: string): Promise<string> {
   try {
     const token = getEnv().VERCEL_ACCESS_TOKEN!
     const teamId = getEnv().VERCEL_TEAM_ID

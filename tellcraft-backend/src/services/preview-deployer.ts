@@ -33,6 +33,7 @@ import {
   deployFilesToVercel,
   waitForDeploymentReady,
   injectVercelEnvVars,
+  fetchVercelBuildLogs,
   type SiteMetadata,
 } from './deployer'
 
@@ -60,6 +61,8 @@ export interface QuickPreviewDeployResult {
   codeHash: string
   cached?: boolean
   error?: string
+  /** Vercel /v7/deployments/{id}/events 抓的真實 build stderr 最後 50 行（給 LLM auto-fix 用，UX 摺疊顯示）*/
+  errorDetails?: string
 }
 
 interface PreviewDeploymentRow {
@@ -252,17 +255,30 @@ export async function quickPreviewDeploy(
     const errorMsg = ready
       ? `Vercel build ${ready.readyState}`
       : `Vercel polling timeout (${timeoutMs / 1000}s)`
+    // R10 治本：fetch 真實 build log 給下游 LLM auto-fix + UX 顯示
+    let errorDetails = ''
+    if (ready && ready.readyState === 'ERROR') {
+      try {
+        errorDetails = await fetchVercelBuildLogs(deployment.id)
+      } catch (err) {
+        logger.warn({ err, deploymentId: deployment.id }, 'fetchVercelBuildLogs 失敗 fail-soft')
+      }
+    }
     logger.warn({
       conversationId: input.conversationId,
       deploymentId: deployment.id,
       readyState: ready?.readyState,
+      hasBuildLog: !!errorDetails,
     }, errorMsg)
 
-    // 更新狀態為 failed
+    // 更新狀態為 failed（error_message 含真實 build log 前 4000 字）
+    const combinedError = errorDetails
+      ? `${errorMsg}\n\n--- Build Log ---\n${errorDetails.slice(0, 4000)}`
+      : errorMsg
     await db.query(
       `UPDATE preview_deployments SET status = 'failed', error_message = $1
        WHERE vercel_deployment_id = $2`,
-      [errorMsg, deployment.id],
+      [combinedError, deployment.id],
     )
 
     return {
@@ -271,6 +287,7 @@ export async function quickPreviewDeploy(
       deploymentId: deployment.id,
       codeHash,
       error: errorMsg,
+      errorDetails,
     }
   }
 
