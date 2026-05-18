@@ -61,6 +61,93 @@ function verifyToken(token: string): JWTPayload | null {
 }
 
 // ============================================================
+// Chrome Extension scoped JWT（R11 治本）
+// ============================================================
+
+export interface ExtensionJWTPayload {
+  sub: string  // userId
+  scope: 'extension'
+  conversationId: string
+  projectId: string
+  iat: number
+  exp: number
+}
+
+/**
+ * 簽 1 小時短期 scoped JWT，綁定特定 conversation/project
+ * 即使 token 洩漏也只能改該對話
+ */
+export function signExtensionToken(payload: {
+  userId: string
+  conversationId: string
+  projectId: string
+}): { token: string; expiresAt: number } {
+  const expiresIn = 3600  // 1 hour
+  const token = jwt.sign(
+    {
+      sub: payload.userId,
+      scope: 'extension',
+      conversationId: payload.conversationId,
+      projectId: payload.projectId,
+    },
+    JWT_SECRET,
+    { expiresIn }
+  )
+  return { token, expiresAt: Date.now() + expiresIn * 1000 }
+}
+
+/**
+ * 驗證 extension scope JWT — 失敗回 401
+ * 用在所有 /api/extension/* endpoints
+ */
+export async function requireExtensionAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const authHeader = req.headers.authorization
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Missing extension auth header' })
+      return
+    }
+    const token = authHeader.replace('Bearer ', '')
+    let payload: ExtensionJWTPayload
+    try {
+      payload = jwt.verify(token, JWT_SECRET) as ExtensionJWTPayload
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired extension token' })
+      return
+    }
+    if (payload.scope !== 'extension') {
+      res.status(403).json({ error: 'Token scope mismatch — extension scope required' })
+      return
+    }
+    // 載入用戶（驗證帳號仍有效）
+    const user = await getUser(payload.sub)
+    if (!user) {
+      res.status(401).json({ error: 'User not found' })
+      return
+    }
+    req.user = {
+      id: user.id,
+      email: user.email,
+      plan: user.plan,
+      subscriptionStatus: user.subscription_status,
+    }
+    // 附加 extension scope info 給 endpoint 用
+    ;(req as Request & { extension?: { conversationId: string; projectId: string } }).extension = {
+      conversationId: payload.conversationId,
+      projectId: payload.projectId,
+    }
+    next()
+  } catch (err) {
+    logger.error({ err }, 'requireExtensionAuth 失敗')
+    res.status(500).json({ error: 'Extension auth failed' })
+  }
+}
+
+// ============================================================
 // 認證中間件
 // ============================================================
 

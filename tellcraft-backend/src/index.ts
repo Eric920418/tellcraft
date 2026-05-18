@@ -33,6 +33,7 @@ import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
 import domainRoutes from './routes/domain'
 import checkoutRoutes from './routes/checkout'
+import extensionRoutes from './routes/extension'
 import stripeWebhookRoutes from './routes/stripe-webhook'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
@@ -460,6 +461,7 @@ app.use('/api/operations', operationsRoutes)
 app.use('/api/upload', uploadRoutes)
 app.use('/api/domain', domainRoutes)
 app.use('/api/checkout', checkoutRoutes)
+app.use('/api/extension', extensionRoutes)  // R11: Chrome Extension MV3
 app.use('/uploads/tellcraft', (req, res, next) => {
   if (!/\.(jpe?g|png|webp|gif|svg)$/i.test(req.path)) {
     res.status(403).json({ error: 'Forbidden file type' })
