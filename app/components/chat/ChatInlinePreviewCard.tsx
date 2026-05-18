@@ -15,7 +15,8 @@
  * Props：簡化 — conversationId 即可，UI 狀態由 hook 提供
  */
 
-import { usePreviewDeployment } from '@/app/hooks/usePreviewDeployment'
+import { useState } from 'react'
+import { usePreviewDeployment, useRetryPreview } from '@/app/hooks/usePreviewDeployment'
 
 export interface ChatInlinePreviewCardProps {
   conversationId: string | undefined
@@ -24,6 +25,14 @@ export interface ChatInlinePreviewCardProps {
 
 export default function ChatInlinePreviewCard({ conversationId, projectName }: ChatInlinePreviewCardProps) {
   const preview = usePreviewDeployment(conversationId)
+  const retry = useRetryPreview(conversationId)
+  const [showBuildLog, setShowBuildLog] = useState(false)
+  const [isRetrying, setIsRetrying] = useState(false)
+
+  const handleRetry = async () => {
+    setIsRetrying(true)
+    try { await retry() } finally { setIsRetrying(false) }
+  }
 
   const displayUrl = preview.status === 'ready' && preview.url
     ? preview.url
@@ -63,21 +72,57 @@ export default function ChatInlinePreviewCard({ conversationId, projectName }: C
     )
   }
 
-  // failed 狀態
+  // failed 狀態 — R10 治本 Layer 6 UX 升級
+  // backend 已嘗試 6 層自動修復（L1-L5），這裡顯示給用戶代表「真的修不動」極端 case
   if (preview.status === 'failed') {
+    const buildLogPreview = preview.errorDetails
+      ? preview.errorDetails.split('\n').slice(0, 20).join('\n')
+      : null
     return (
       <div style={{ ...cardStyle, borderColor: '#fecaca', background: 'linear-gradient(135deg, #fff5f5 0%, #ffeaea 100%)' }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: '#991b1b', marginBottom: 6 }}>
-          預覽部署失敗
+          系統已嘗試多輪自動修復但仍有問題
         </div>
         <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10, wordBreak: 'break-word' }}>
-          {preview.error || 'Unknown error'}
+          {preview.error || '部署失敗'}
         </div>
-        {preview.lkgUrl && (
-          <a href={preview.lkgUrl} target="_blank" rel="noopener noreferrer" style={secondaryLinkStyle}>
-            ↗ 看上次成功版本
-          </a>
+
+        {/* 摺疊顯示 build log 前 20 行 — debug actionable */}
+        {buildLogPreview && (
+          <div style={{ marginBottom: 10 }}>
+            <button
+              onClick={() => setShowBuildLog(!showBuildLog)}
+              style={{ fontSize: 11, color: '#0f172a', background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+            >
+              {showBuildLog ? '▾ 隱藏錯誤訊息' : '▸ 顯示錯誤訊息（給開發者 debug）'}
+            </button>
+            {showBuildLog && (
+              <pre style={{ fontSize: 10, color: '#7f1d1d', background: '#fef2f2', padding: 8, borderRadius: 4, marginTop: 6, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {buildLogPreview}
+              </pre>
+            )}
+          </div>
         )}
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            onClick={handleRetry}
+            disabled={isRetrying}
+            style={{
+              ...primaryButtonStyle,
+              padding: '6px 12px', fontSize: 11,
+              background: isRetrying ? '#94a3b8' : '#0f172a',
+              cursor: isRetrying ? 'wait' : 'pointer',
+            }}
+          >
+            {isRetrying ? '部署中...' : '🔄 重新部署（完整修復模式）'}
+          </button>
+          {preview.lkgUrl && (
+            <a href={preview.lkgUrl} target="_blank" rel="noopener noreferrer" style={{ ...secondaryLinkStyle, marginTop: 6 }}>
+              ↗ 看上次成功版本
+            </a>
+          )}
+        </div>
       </div>
     )
   }

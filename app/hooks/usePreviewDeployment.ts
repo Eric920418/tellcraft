@@ -28,6 +28,8 @@ export interface PreviewDeploymentState {
   progressPercent: number
   progressStep: string
   error: string | null
+  /** R10：失敗時 backend 抓 Vercel build log 帶過來，UX 摺疊面板顯示前 20 行給用戶 / 開發者 debug */
+  errorDetails: string | null
   lkgUrl: string | null
   deploymentId: string | null
 }
@@ -39,6 +41,7 @@ const DEFAULT_STATE: PreviewDeploymentState = {
   progressPercent: 0,
   progressStep: '',
   error: null,
+  errorDetails: null,
   lkgUrl: null,
   deploymentId: null,
 }
@@ -68,6 +71,8 @@ interface PreviewReadyEvent {
 interface PreviewFailedEvent {
   conversationId: string
   error: string
+  /** R10：backend 抓的 Vercel build log（前 4000 字）*/
+  errorDetails?: string
   lkgUrl: string | null
 }
 
@@ -99,6 +104,7 @@ export function usePreviewDeployment(conversationId: string | undefined): Previe
           progressPercent: data.status === 'ready' ? 100 : data.status === 'building' ? 30 : 0,
           progressStep: data.status === 'ready' ? '預覽就緒' : data.status === 'building' ? '部署中...' : '',
           error: data.error ?? null,
+          errorDetails: null,  // 初次 fetch 無 errorDetails，socket event 才會帶
           lkgUrl: data.lkgUrl,
           deploymentId: data.deploymentId ?? null,
         })
@@ -154,6 +160,7 @@ export function usePreviewDeployment(conversationId: string | undefined): Previe
         ...prev,
         status: 'failed',
         error: event.error,
+        errorDetails: event.errorDetails ?? null,
         lkgUrl: event.lkgUrl,
         progressPercent: 0,
         progressStep: '',
