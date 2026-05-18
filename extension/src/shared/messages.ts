@@ -33,7 +33,8 @@ export type ExtensionMessage =
 export interface ApplyUpdatePayload {
   conversationId: string
   elementId: string
-  domPath: string  // tagName + nth-child chain，給 backend AST patch 定位用
+  domPath: string  // tagName + nth-child chain，給 backend AST patch 定位用（commit 8+ 升級）
+  originalText?: string  // R11 commit 6 MVP: regex unique match 用，commit 8+ AST 升級後可移除
   updates: Array<{
     kind: 'text' | 'className' | 'style' | 'attr'
     key?: string  // for style/attr: 屬性名

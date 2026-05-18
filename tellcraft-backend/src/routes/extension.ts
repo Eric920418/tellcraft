@@ -17,9 +17,19 @@ import { validateBody } from '../middleware/validate'
 import { createLogger } from '../lib/logger'
 import jwt from 'jsonwebtoken'
 import { getEnv } from '../lib/env'
+import type Redis from 'ioredis'
+import type { IoEmitter } from '../types/flow-state'
+import { applyExtensionUpdate, applyUpdateInputSchema } from '../services/extension-apply-skill'
 
 const logger = createLogger('extension-routes')
 const router: RouterType = Router()
+
+// Redis + IoEmitter 由 index.ts 注入（commit 6 用於 applyExtensionUpdate trigger preview deploy）
+let redisClient: Redis | null = null
+let ioEmitter: IoEmitter | null = null
+
+export function setExtensionRedis(redis: Redis) { redisClient = redis }
+export function setExtensionIo(io: IoEmitter) { ioEmitter = io }
 
 // ============================================================
 // POST /api/extension/auth/exchange
@@ -143,8 +153,43 @@ router.get('/verify-preview', requireExtensionAuth, async (req: Request, res) =>
 // ============================================================
 // 此 commit 只 stub — commit 6 接 extension-apply-skill.ts
 
-router.post('/apply-update', requireExtensionAuth, async (_req, res) => {
-  return res.status(501).json({ error: 'apply-update not implemented (commit 6 will接)' })
+router.post('/apply-update', requireExtensionAuth, async (req: Request, res) => {
+  try {
+    if (!redisClient) {
+      return res.status(503).json({ error: 'Redis not initialized' })
+    }
+    // 驗證 input shape
+    const parsed = applyUpdateInputSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', issues: parsed.error.flatten() })
+    }
+    const input = parsed.data
+
+    // scoped token 的 conversationId 必須跟 body 一致
+    const extReq = req as Request & { extension?: { conversationId: string; projectId: string } }
+    if (extReq.extension?.conversationId !== input.conversationId) {
+      return res.status(403).json({ error: 'Token conversation mismatch' })
+    }
+
+    const result = await applyExtensionUpdate(input, redisClient, ioEmitter ?? undefined)
+    if (!result.ok) {
+      logger.warn({ conversationId: input.conversationId, reason: result.reason, message: result.message }, 'apply-update 失敗')
+      return res.status(422).json({
+        ok: false,
+        reason: result.reason,
+        error: result.message ?? 'Apply update failed',
+      })
+    }
+
+    return res.json({
+      ok: true,
+      modifiedFiles: result.modifiedFiles ?? 0,
+      redeployTriggered: result.redeployTriggered ?? false,
+    })
+  } catch (err) {
+    logger.error({ err }, 'apply-update 異常')
+    return res.status(500).json({ error: 'Apply update internal error' })
+  }
 })
 
 export default router

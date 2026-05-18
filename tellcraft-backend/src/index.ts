@@ -33,7 +33,7 @@ import operationsRoutes from './routes/operations'
 import uploadRoutes from './routes/upload'
 import domainRoutes from './routes/domain'
 import checkoutRoutes from './routes/checkout'
-import extensionRoutes from './routes/extension'
+import extensionRoutes, { setExtensionRedis, setExtensionIo } from './routes/extension'
 import stripeWebhookRoutes from './routes/stripe-webhook'
 import lineBotRoutes from './routes/line-bot'
 import { initLineBotHandler } from './services/line-bot-handler'
@@ -395,6 +395,10 @@ setRedisClient(generalRedis)
 import('./workers/preview-deploy-worker').then(({ getPreviewDeployQueue }) => {
   setPreviewDeployQueue(getPreviewDeployQueue(generalRedis))
 })
+
+// R11 commit 6：extension apply-update endpoint 用 redis + io
+setExtensionRedis(generalRedis)
+setExtensionIo(io)
 
 // Phase I: 注入 project routes 的 queue + redis（給 import-design endpoint 用）
 import('./routes/project').then(({ setProjectOrchestratorQueue, setProjectRedisClient }) => {

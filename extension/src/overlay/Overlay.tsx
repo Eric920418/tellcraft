@@ -77,7 +77,7 @@ function Overlay({ conversationId, projectId }: OverlayProps) {
       }
     }
 
-    // 2. 800ms debounce 後 backend commit (commit 6 接，本 commit 只 console.log)
+    // 2. 800ms debounce 後 backend commit (R11 commit 6)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(async () => {
       setIsSaving(true)
@@ -88,10 +88,13 @@ function Overlay({ conversationId, projectId }: OverlayProps) {
           payload: {
             conversationId,
             elementId: selected.id,
-            domPath: '',  // commit 6 補：tagName + nth-child chain
+            domPath: selected.tagName,  // commit 8+ 升級為完整 nth-child chain
             updates: updates.map(u => ({ kind: u.kind, key: u.key, value: u.value })),
           },
         }
+        // 帶上 originalText 給 backend regex unique match
+        ;(msg.payload as { originalText?: string }).originalText = selected.text
+
         const response = await new Promise<ExtensionMessage>(resolve => {
           chrome.runtime.sendMessage(msg, r => resolve(r))
         })

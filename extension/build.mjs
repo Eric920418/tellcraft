@@ -55,7 +55,7 @@ const sharedOptions = {
   logLevel: 'info',
   define: {
     'process.env.NODE_ENV': watch ? '"development"' : '"production"',
-    'process.env.TELLCRAFT_API_URL': JSON.stringify(
+    '__TELLCRAFT_API_URL__': JSON.stringify(
       process.env.TELLCRAFT_API_URL || 'https://tellcraft.com'
     ),
     // 把 EDIT_BRIDGE_SCRIPT 內嵌進 bridge-injector.js

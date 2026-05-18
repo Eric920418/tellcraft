@@ -91,6 +91,30 @@ async function callAuthExchange(conversationId: string): Promise<
   }
 }
 
+async function callApplyUpdate(payload: import('./shared/messages').ApplyUpdatePayload): Promise<
+  | { ok: true; deploymentId?: string; modifiedFiles?: number; redeployTriggered?: boolean }
+  | { ok: false; error: string }
+> {
+  const scoped = await getScopedToken()
+  if (!scoped) {
+    return { ok: false, error: 'No scoped token (call AUTH_REQUEST first)' }
+  }
+  try {
+    const res = await fetch(`${TELLCRAFT_API_URL}/api/vps/api/extension/apply-update`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${scoped}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return { ok: false, error: body.error ?? `HTTP ${res.status}` }
+    }
+    return { ok: true, modifiedFiles: body.modifiedFiles, redeployTriggered: body.redeployTriggered }
+  } catch (err) {
+    return { ok: false, error: `Network error: ${(err as Error).message}` }
+  }
+}
+
 async function callVerifyPreview(host: string, conversationId: string): Promise<
   | { ok: true; projectId: string }
   | { ok: false; error: string }
@@ -169,9 +193,16 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       return true
 
     case 'APPLY_UPDATE':
-      console.log('[Tellcraft BG] APPLY_UPDATE stub (commit 6 will implement)', message.payload)
-      sendResponse({ type: 'APPLY_UPDATE_RESPONSE', payload: { ok: false, error: 'apply-update not implemented yet' } })
-      return false
+      callApplyUpdate(message.payload).then(result => {
+        if (result.ok) {
+          console.log('[Tellcraft BG] ✓ apply-update committed', result)
+          sendResponse({ type: 'APPLY_UPDATE_RESPONSE', payload: { ok: true, deploymentId: result.deploymentId ?? '' } })
+        } else {
+          console.warn('[Tellcraft BG] apply-update failed:', result.error)
+          sendResponse({ type: 'APPLY_UPDATE_RESPONSE', payload: { ok: false, error: result.error } })
+        }
+      })
+      return true
 
     case 'TELEMETRY':
       console.log('[Tellcraft BG] TELEMETRY stub (commit 8 will implement)', message.payload)

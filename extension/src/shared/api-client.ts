@@ -5,7 +5,9 @@
  * scoped JWT 從 chrome.storage.session 拿（commit 4 接 auth-exchange）
  */
 
-const API_BASE = (typeof process !== 'undefined' && process.env.TELLCRAFT_API_URL) || 'https://tellcraft.com'
+// API base 由 esbuild 編譯時 inline（build.mjs define）
+declare const __TELLCRAFT_API_URL__: string
+const API_BASE = typeof __TELLCRAFT_API_URL__ !== 'undefined' ? __TELLCRAFT_API_URL__ : 'https://tellcraft.com'
 
 export interface ApiResult<T> {
   ok: boolean
