@@ -15,8 +15,13 @@
 // ──────────────────────────────────────────────────────────
 
 export type ExtensionMessage =
-  | { type: 'AUTH_REQUEST'; payload: { host: string; conversationId?: string } }
+  // tellcraft.com content_script → background：用戶 token sync 給 extension
+  | { type: 'SYNC_USER_TOKEN'; payload: { token: string | null } }
+  | { type: 'SYNC_USER_TOKEN_RESPONSE'; payload: { ok: boolean } }
+  // vercel.app content_script → background：拿 scoped JWT
+  | { type: 'AUTH_REQUEST'; payload: { conversationId: string } }
   | { type: 'AUTH_RESPONSE'; payload: { ok: true; token: string; expiresAt: number; conversationId: string; projectId: string; userId: string } | { ok: false; error: string } }
+  // vercel.app content_script → background：驗證 host 屬該 conversation
   | { type: 'VERIFY_PREVIEW'; payload: { host: string; conversationId: string } }
   | { type: 'VERIFY_PREVIEW_RESPONSE'; payload: { ok: true; projectId: string } | { ok: false; error: string } }
   | { type: 'APPLY_UPDATE'; payload: ApplyUpdatePayload }
