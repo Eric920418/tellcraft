@@ -3318,7 +3318,7 @@ export default nextConfig
  * 建臨時 Next.js 專案 → npm install → next build → 失敗則 LLM 修復 → 重試（最多 3 輪）
  * 全失敗則降級為 ignoreBuildErrors 部署
  */
-async function verifyBuildLocally(
+export async function verifyBuildLocally(
   code: GeneratedCode,
   projectName: string,
   tailwindConfig: string,

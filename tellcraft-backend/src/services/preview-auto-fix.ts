@@ -25,6 +25,7 @@ import {
   parseBuildErrors,
   fixBuildErrors,
   fetchVercelBuildLogs,
+  verifyBuildLocally,
   type BuildError,
 } from './deployer'
 import {
@@ -164,24 +165,48 @@ export async function heavyFallbackVerifyLocally(
   }).catch(() => {})
 
   try {
-    // dynamic import — deployer.ts verifyBuildLocally 不是 export，需要 inline 替代或新 export
-    // 此處先用 fixBuildErrors 多輪兜底（verifyBuildLocally 需 npm install /tmp，cost 高且要 deployer 多 export）
-    // 簡化版：再跑一次 autoFixAndRedeployPreview round 3 給 fixBuildErrors 更多 budget
-    // 後續 commit 可改成真 verifyBuildLocally
-    const finalResult = await autoFixAndRedeployPreview(input, buildLog, 99)
-    if (finalResult.status === 'ready') {
+    // 真實 L5：verifyBuildLocally 跑完整 5 層防禦
+    //   - 建臨時 /tmp Next.js 專案
+    //   - npm install + next build
+    //   - 失敗則 LLM 修 3 輪
+    //   - worst case 用 ignoreBuildErrors 強制可 deploy
+    // 返回 finalCode（即使 build 沒 verify 過也有可 deploy 的代碼）
+    logger.info({ conversationId: input.conversationId }, 'L5 verifyBuildLocally 開始（含 npm install + 3 輪 LLM 修）')
+    const verifyResult = await verifyBuildLocally(
+      input.code,
+      input.projectName,
+      input.tailwindConfig || '',
+      undefined,
+      undefined,
+      undefined,
+      { conversationId: input.conversationId },
+    )
+    logger.info({
+      conversationId: input.conversationId,
+      buildVerified: verifyResult.buildVerified,
+      fixCount: verifyResult.fixes.length,
+    }, 'L5 verifyBuildLocally 完成')
+
+    // 用修復後的 finalCode 重 deploy
+    const fixedInput: QuickPreviewDeployInput = {
+      ...input,
+      code: verifyResult.finalCode,
+    }
+    const redeployResult = await quickPreviewDeploy(fixedInput)
+
+    if (redeployResult.status === 'ready') {
       void recordTelemetry({
         skillName: 'uiux',
         eventType: 'preview_heavy_fallback_success',
-        patternKey: 'verifyBuildLocally',
+        patternKey: verifyResult.buildVerified ? 'verifyBuildLocally__verified' : 'verifyBuildLocally__ignoreErrors',
         severity: 'info',
         outcome: 'repaired',
         userId: null,
         conversationId: input.conversationId,
-        payload: {},
+        payload: { buildVerified: verifyResult.buildVerified, fixCount: verifyResult.fixes.length },
       }).catch(() => {})
     }
-    return finalResult
+    return redeployResult
   } catch (err) {
     logger.error({ err, conversationId: input.conversationId }, 'L5 heavy fallback 異常 fail-soft')
     return {
