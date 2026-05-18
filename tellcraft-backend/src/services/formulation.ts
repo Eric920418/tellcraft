@@ -1551,6 +1551,56 @@ export async function fixMultipleFeatures(
     return { success: false, error: budget.errorMessage, usage: { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 } }
   }
 
+  // Per-feature attempt cap（2026-05-18 b2252efc 治本 — 71 次無收斂 safety net）
+  // R2 fingerprint cache 對 LLM 微差錯誤訊息不穩定 → 改用「同 feature 修 ≥N 次強制 skip」
+  // 不管 fingerprint 怎樣，同 conversation 同 feature 已修 ≥5 次仍失敗 → 從這 batch 移除
+  // 若全部 features 都已達上限 → return success（保留 best-effort）+ telemetry 警示
+  let strippedByCap: string[] = []
+  if (trackingContext?.conversationId) {
+    const { partitionFeaturesByAttemptCap, PER_FEATURE_MAX_ATTEMPTS } = await import('../lib/fix-attempt-cache')
+    const featureNames = features.map(f => f.name || f.actionName)
+    const partition = await partitionFeaturesByAttemptCap(trackingContext.conversationId, featureNames)
+    if (partition.skipReachedCap.length > 0) {
+      strippedByCap = partition.skipReachedCap
+      const skipSet = new Set(partition.skipReachedCap)
+      features = features.filter(f => !skipSet.has(f.name || f.actionName))
+      logger.warn(
+        { strippedCount: strippedByCap.length, strippedNames: strippedByCap.slice(0, 5), cap: PER_FEATURE_MAX_ATTEMPTS },
+        'Per-feature attempt cap: 已達上限的 features 從本 batch 移除（safety net）',
+      )
+      // Telemetry
+      const { recordTelemetry } = await import('./skill-telemetry')
+      void recordTelemetry({
+        skillName: 'feature_gate',
+        eventType: 'fix_convergence_failed',
+        patternKey: 'per_feature_attempt_cap',
+        severity: 'warning',
+        outcome: 'blocked',
+        userId: trackingContext.userId,
+        conversationId: trackingContext.conversationId,
+        payload: {
+          strippedCount: strippedByCap.length,
+          strippedNames: strippedByCap.slice(0, 10),
+          cap: PER_FEATURE_MAX_ATTEMPTS,
+        },
+      }).catch(() => {})
+    }
+    // 所有 features 都被移除 → 整批 abort（沒東西可修）
+    if (features.length === 0) {
+      return {
+        success: false,
+        error: `All ${strippedByCap.length} features reached per-feature attempt cap (${PER_FEATURE_MAX_ATTEMPTS}) — spec contradiction likely. Manual intervention required.`,
+        usage: { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 },
+      }
+    }
+
+    // 對留下來繼續修的 features increment attempt counter（後續呼叫時會被 cap 擋）
+    const { incrementFeatureAttempt } = await import('../lib/fix-attempt-cache')
+    await Promise.all(
+      features.map(f => incrementFeatureAttempt(trackingContext.conversationId!, f.name || f.actionName)),
+    )
+  }
+
   // L31.I：累計每個 batch 的 usage（給 cost guardrail 用）
   const { calculateLlmCost } = await import('../lib/anthropic')
   const cumulativeUsage: FixUsage = { inputTokens: 0, outputTokens: 0, callCount: 0, costUsd: 0 }

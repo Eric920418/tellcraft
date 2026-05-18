@@ -179,3 +179,93 @@ export async function recordBatchAttempt(
     ...remainingFingerprints.map(fp => recordAttempt(conversationId, fp, false)),
   ])
 }
+
+// ============================================================
+// Per-feature attempt counter（2026-05-18 b2252efc 治本 safety net）
+//
+// 動機：既有 fingerprint 對 LLM 微差錯誤訊息敏感（每次 hash 不同 → R2 cache miss）
+// → b2252efc 跑了 71 次 fix call / 80 分鐘沒收斂。
+//
+// 這層 safety net：**不管 fingerprint 怎樣**，同 conversation 同 feature 已修 ≥N
+// 次 → 強制 abort 該 feature 繼續修。LLM 真的修不下來的 spec 矛盾 case 直接 break。
+//
+// Redis key: `bdd-feature-attempts:<convId>:<featureName>` → INCR count
+// ============================================================
+
+const FEATURE_KEY_PREFIX = 'bdd-feature-attempts:'
+const FEATURE_MAX_ATTEMPTS = 5  // 同 feature 修 ≥5 次仍失敗 → strip
+const FEATURE_TTL_SECONDS = 3600
+
+/**
+ * 增加 feature 修復計數（每次 fixMultipleFeatures 跑完呼叫）
+ * 回新計數值
+ */
+export async function incrementFeatureAttempt(
+  conversationId: string | undefined | null,
+  featureName: string,
+): Promise<number> {
+  if (!conversationId || !_redis || !featureName) return 0
+  try {
+    const key = `${FEATURE_KEY_PREFIX}${conversationId}:${featureName}`
+    const count = await _redis.incr(key)
+    if (count === 1) {
+      // 首次設 TTL，避免 stale key 永遠累積
+      await _redis.expire(key, FEATURE_TTL_SECONDS)
+    }
+    return count
+  } catch (e) {
+    logger.warn({ err: e, featureName }, 'incrementFeatureAttempt 失敗（fail-open）')
+    return 0
+  }
+}
+
+/**
+ * 查 feature 已修幾次（不增加）
+ */
+export async function getFeatureAttemptCount(
+  conversationId: string | undefined | null,
+  featureName: string,
+): Promise<number> {
+  if (!conversationId || !_redis || !featureName) return 0
+  try {
+    const key = `${FEATURE_KEY_PREFIX}${conversationId}:${featureName}`
+    const raw = await _redis.get(key)
+    return raw ? parseInt(raw, 10) : 0
+  } catch (e) {
+    logger.warn({ err: e, featureName }, 'getFeatureAttemptCount 失敗（fail-open）')
+    return 0
+  }
+}
+
+/**
+ * 批次過濾：input 一組 feature names，回 [可繼續修, 已達上限該 skip]
+ * fixMultipleFeatures 入口用
+ */
+export async function partitionFeaturesByAttemptCap(
+  conversationId: string | undefined | null,
+  featureNames: string[],
+): Promise<{ canContinue: string[]; skipReachedCap: string[] }> {
+  if (!conversationId || !_redis || featureNames.length === 0) {
+    return { canContinue: featureNames, skipReachedCap: [] }
+  }
+  try {
+    const counts = await Promise.all(
+      featureNames.map(n => getFeatureAttemptCount(conversationId, n)),
+    )
+    const canContinue: string[] = []
+    const skipReachedCap: string[] = []
+    for (let i = 0; i < featureNames.length; i++) {
+      if (counts[i] >= FEATURE_MAX_ATTEMPTS) {
+        skipReachedCap.push(featureNames[i])
+      } else {
+        canContinue.push(featureNames[i])
+      }
+    }
+    return { canContinue, skipReachedCap }
+  } catch (e) {
+    logger.warn({ err: e }, 'partitionFeaturesByAttemptCap 失敗（fail-open）')
+    return { canContinue: featureNames, skipReachedCap: [] }
+  }
+}
+
+export const PER_FEATURE_MAX_ATTEMPTS = FEATURE_MAX_ATTEMPTS
