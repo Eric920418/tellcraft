@@ -36,6 +36,65 @@ describe('hasExplicitNullIntent — b2252efc 漏抓的英文句型', () => {
   })
 })
 
+describe('hasExplicitNullIntent — Negation pre-check（R6 false positive 修補）', () => {
+  // (2026-05-18 b2252efc 全 spec 檢測發現的盲區)
+  // 「returns a non-null X」含 null + returns 雙關鍵字但語意反向 — 不該觸發
+
+  it('「returns a non-null X」明確反向語意 → 早退', () => {
+    expect(hasExplicitNullIntent('A published article returns a non-null publishedAt value')).toBe(false)
+  })
+
+  it('「not null」明確反向語意', () => {
+    expect(hasExplicitNullIntent('Article must have a not null categoryId')).toBe(false)
+    expect(hasExplicitNullIntent('Created order should have a not-null id')).toBe(false)
+  })
+
+  it('「non null」帶空格也命中 negation', () => {
+    expect(hasExplicitNullIntent('Response includes non null timestamp')).toBe(false)
+  })
+
+  it('中文「非 null」「非空」反向語意', () => {
+    expect(hasExplicitNullIntent('已發布文章 publishedAt 應為非 null')).toBe(false)
+    expect(hasExplicitNullIntent('回應的 timestamp 應為非空值')).toBe(false)
+  })
+
+  it('「具體值」中文反向語意', () => {
+    expect(hasExplicitNullIntent('publishedAt 必須是具體值')).toBe(false)
+  })
+
+  it('Negation 跟 null intent 同句 → negation 勝出（safe default）', () => {
+    // 「不該」/ 「應該保留」+ null intent 含混場景，negation 優先（避免誤改）
+    expect(hasExplicitNullIntent('publishedAt is non-null even when category is cleared')).toBe(false)
+  })
+
+  it('正常 null intent 不被 negation 過濾誤殺', () => {
+    // 確保 negation pre-check 不過度激進
+    expect(hasExplicitNullIntent('Articles set categoryId to null after cleanup')).toBe(true)
+    expect(hasExplicitNullIntent('has no category assigned')).toBe(true)
+    expect(hasExplicitNullIntent('returns null categoryId')).toBe(true)
+  })
+})
+
+describe('autoFixNullIntentScenarioConflict — false positive regression', () => {
+  it('「returns a non-null publishedAt value」不該被改成 &isNull', () => {
+    const content = `Feature: Get Public Article
+
+Example: A published article returns a non-null publishedAt value
+  When (No Actor) GetPublicArticle, call table:
+    | id            |
+    | $Article1.id  |
+  Then GetPublicArticle(200)回應, with table:
+    | id            | publishedAt              |
+    | $Article1.id  | 2026-01-01T00:00:00.000Z |
+`
+    const result = autoFixNullIntentScenarioConflict(content)
+    expect(result.fixed.length).toBe(0)
+    // 確保 publishedAt 期望值保留時間戳，沒被改成 &isNull
+    expect(result.content).toContain('2026-01-01T00:00:00.000Z')
+    expect(result.content).not.toContain('&isNull')
+  })
+})
+
 describe('autoFixNullIntentScenarioConflict — entity_validate', () => {
   it('5 個 b2252efc 失敗 case 對應一個典型 case', () => {
     const content = `Feature: Delete Category

@@ -186,8 +186,27 @@ const NULL_INTENT_PATTERNS = [
  * 用途：hasExplicitNullIntent 為 true 但 extractNullExpectationFields 無法抽出具體英文欄位名時，
  * 觸發 actual-driven DataTable 掃描（不依賴精確欄位名）。
  */
+/**
+ * Negation pre-check：scenario name 含「非 null」「not null」「non-null」等明確
+ * 反向語意 → 表示期望「具體值」而非 null → 不該觸發 null intent 修補。
+ *
+ * Incident (2026-05-18 b2252efc 全 spec 檢測)：scenario name
+ * 「A published article returns a non-null publishedAt value」含 `null` + `returns`
+ * 同時觸發 hasNullKeyword + hasActionVerb → 原本會被誤判 null intent →
+ * autoFixNullIntentScenarioConflict 把 publishedAt 期望值改成 &isNull → 反向破壞。
+ *
+ * 必須在 hasExplicitNullIntent 開頭就過濾，因為下游 mentionedFieldMatchesHeader
+ * 對 publishedAt 是嚴格 match 命中（不像「empty list」抽不到 field）。
+ */
+// 注意：英文部分用 \b boundary 防 "nonnullable" 誤匹配；中文部分不用 \b
+//（JS regex 的 \b 對中文字元邊界不可靠 — 「非」是 non-word char 對 \b 行為與英文不同）
+const NEGATION_PATTERNS = /(?:\bnon[-\s]?null\b|\bnot[-\s]?null\b|\bnever[-\s]?null\b|非\s*null|非空|具體值)/i
+
 export function hasExplicitNullIntent(scenarioName: string): boolean {
   if (!scenarioName) return false
+
+  // Negation pre-check：明確反向語意（"non-null" / "not null" / "非空"）→ 早退
+  if (NEGATION_PATTERNS.test(scenarioName)) return false
 
   // Pattern 1: 任何 NULL_INTENT_PATTERNS 命中
   if (NULL_INTENT_PATTERNS.some(p => p.test(scenarioName))) return true
