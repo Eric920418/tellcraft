@@ -83,6 +83,13 @@ export type EventType =
   | 'contrast_auto_swapped'        // Layer 3 swap 成功（ratio 從 < 4.5 → ≥ 4.5）
   | 'contrast_auto_swap_unsafe'    // swap 後仍 < 4.5（fallback ring 後續處理）
   | 'contrast_qg_residual'         // Layer 4 QG 觸發 = Layer 3 漏網（high signal）
+  // R10 治本：preview-deploy 失敗 100% 自動修復（2026-05-18 incident，6 層架構驗證）
+  | 'preview_auto_fix_attempted'        // L3+L4 進入：fixBuildErrors 開始
+  | 'preview_auto_fix_round_success'    // 某輪 LLM 修復後重 deploy 成功
+  | 'preview_auto_fix_give_up'          // L3+L4 N 輪用盡仍 failed → 觸發 L5
+  | 'preview_heavy_fallback_triggered'  // L5 verifyBuildLocally 啟動
+  | 'preview_heavy_fallback_success'    // L5 修復後 quickPreviewDeploy 成功
+  | 'preview_user_manual_retry'         // 用戶按 retry 按鈕（L6 UX 兜底）
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'
@@ -950,6 +957,7 @@ export function findStructuralFailureCandidates(
     'first_batch_missing_nav',  // R8 加：first batch LLM 漏生 Header/Footer 元件
     'contrast_qg_residual',  // R9 加：QG 觸發 = Layer 3 deployer auto-swap 漏網（high signal）
     'contrast_auto_swap_unsafe',  // R9 加：swap 後仍 unsafe（mid-saturation 色找不到 safe fg）
+    'preview_auto_fix_give_up',  // R10 加：L3+L4 N 輪用盡仍失敗（high signal Layer 5 開了沒救到）
   ])
 
   return topPatterns
@@ -971,6 +979,8 @@ export function findStructuralFailureCandidates(
         ? `Layer 3 deployer auto-swap 漏網（Layer 4 QG 才抓到）— 看 patternKey 解析 button 偵測 regex 缺哪類 pattern`
         : row.event_type === 'contrast_auto_swap_unsafe'
         ? `Mid-saturation color (e.g. bg-yellow-400) 找不到 ≥ 4.5 fg — 考慮 darken/lighten base 或加 ring fallback`
+        : row.event_type === 'preview_auto_fix_give_up'
+        ? `R10 L3+L4 LLM 修不動 — 分析 patternKey 看哪類 build error LLM 失敗最多，加 fixBuildErrors prompt few-shot 或補 deterministic fix`
         : `規格驗證/對齊重複失敗 — 看是否需要新 deterministic feature fix`,
     }))
     .sort((a, b) => b.count - a.count)

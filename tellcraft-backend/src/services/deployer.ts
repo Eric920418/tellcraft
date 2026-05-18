@@ -146,7 +146,7 @@ export type ProgressCallback = (progress: {
 // 本地 Build 驗證 — 類型定義
 // ============================================================
 
-interface BuildError {
+export interface BuildError {
   type: 'typescript' | 'module_not_found' | 'syntax' | 'unknown'
   message: string
   file?: string
@@ -2797,7 +2797,7 @@ async function runNextBuild(dir: string): Promise<{ success: boolean; output: st
  *
  *   SyntaxError: Unexpected token ...
  */
-function parseBuildErrors(output: string): BuildError[] {
+export function parseBuildErrors(output: string): BuildError[] {
   const errors: BuildError[] = []
   const seen = new Set<string>()
 
@@ -2999,7 +2999,7 @@ function parseInstallErrors(output: string): string[] {
  * 用 LLM (Haiku) 修復 build 錯誤
  * 回傳修復後的代碼和可能的新依賴
  */
-async function fixBuildErrors(
+export async function fixBuildErrors(
   code: GeneratedCode,
   errors: BuildError[],
   buildOutput: string,

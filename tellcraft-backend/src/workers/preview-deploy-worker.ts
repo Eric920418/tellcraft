@@ -20,6 +20,7 @@ import { createLogger } from '../lib/logger'
 import { getEnv } from '../lib/env'
 import * as db from '../db/client'
 import { quickPreviewDeploy, findLkgPreviewUrl } from '../services/preview-deployer'
+import { runPreviewAutoFix } from '../services/preview-auto-fix'
 import type { GeneratedCode, IoEmitter } from '../types/flow-state'
 import { sendMessage } from './orchestrator-utils'
 
@@ -85,10 +86,11 @@ export function createPreviewDeployWorker(
 
         // 主邏輯：quickPreviewDeploy（內部含 hash dedup、Vercel deploy、polling）
         emitProgress(30, '上傳至 Vercel...')
-        const result = await quickPreviewDeploy({
+        const input = {
           conversationId, projectId, code, tailwindConfig,
           projectName, neonConnectionString,
-        })
+        }
+        let result = await quickPreviewDeploy(input)
 
         if (result.status === 'cached') {
           logger.info({ conversationId, url: result.url }, 'preview cache hit')
@@ -113,11 +115,30 @@ export function createPreviewDeployWorker(
           return { status: 'ready', url: result.url }
         }
 
-        // status === 'failed'
+        // R10 治本：status === 'failed' → 進入 6 層自動修復流程
+        // L1-L2 已在 preview-deployer.ts 抓 buildLog 寫進 result.errorDetails
+        // L3-L5 由 runPreviewAutoFix 處理（內含 N 輪 LLM 修 + L5 heavy fallback）
+        result = await runPreviewAutoFix(input, result, emitProgress)
+
+        // L3-L5 後若 ready → emit ready；仍 failed → emit failed + 真實 buildLog
+        if (result.status === 'ready') {
+          emitProgress(100, '自動修復後部署完成')
+          emitter.to(`conversation:${conversationId}`).emit('preview:ready', {
+            conversationId,
+            url: result.url,
+            deploymentId: result.deploymentId,
+            cached: false,
+            autoFixed: true,
+          })
+          return { status: 'ready', url: result.url, autoFixed: true }
+        }
+
+        // 極端 case：L3-L5 全失敗 → 走 L6 UX 顯示真實 buildLog + retry 按鈕
         const lkgUrl = await findLkgPreviewUrl(conversationId, projectId)
         emitter.to(`conversation:${conversationId}`).emit('preview:failed', {
           conversationId,
           error: result.error || 'Unknown deploy error',
+          errorDetails: result.errorDetails || '',
           lkgUrl,
         })
         return { status: 'failed', error: result.error }
