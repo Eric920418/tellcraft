@@ -13,7 +13,7 @@ type TierMeta = {
   nameKey: string
   taglineKey: string
   iterations: number
-  bulletKeys: [string, string, string]
+  bulletKeys: string[]  // 6000+ tier 多一條 bullet_human_support，放第一位
   highlighted?: boolean
 }
 
@@ -34,7 +34,7 @@ const TIERS: TierMeta[] = [
     nameKey: 'tier_standard_name',
     taglineKey: 'tier_standard_tagline',
     iterations: 8,
-    bulletKeys: ['bullet_responsive', 'bullet_seo', 'bullet_warranty'],
+    bulletKeys: ['bullet_human_support', 'bullet_responsive', 'bullet_seo', 'bullet_warranty'],
     highlighted: true,
   },
   {
@@ -44,7 +44,7 @@ const TIERS: TierMeta[] = [
     nameKey: 'tier_pro_name',
     taglineKey: 'tier_pro_tagline',
     iterations: 15,
-    bulletKeys: ['bullet_admin', 'bullet_db', 'bullet_auth'],
+    bulletKeys: ['bullet_human_support', 'bullet_admin', 'bullet_db', 'bullet_auth'],
   },
 ]
 
@@ -174,21 +174,44 @@ function PrecisionPricingSection() {
               </div>
 
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {tier.bulletKeys.map((key) => (
-                  <li
-                    key={key}
-                    style={{
-                      fontSize: 13,
-                      color: 'var(--gray-600)',
-                      paddingLeft: 18,
-                      position: 'relative',
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    <span style={{ position: 'absolute', left: 0, color: 'var(--accent)' }}>✓</span>
-                    {t(key)}
-                  </li>
-                ))}
+                {tier.bulletKeys.map((key) => {
+                  const text = t(key)
+                  // 文案以 ★ 開頭 → 視為強化差異點（如真人工程師協助），用 accent 邊框 + 加粗
+                  const isHighlighted = text.startsWith('★')
+                  if (isHighlighted) {
+                    return (
+                      <li
+                        key={key}
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--gray-800)',
+                          fontWeight: 600,
+                          padding: '6px 10px',
+                          background: 'var(--accent-muted, rgba(201, 81, 47, 0.08))',
+                          borderLeft: '3px solid var(--accent)',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {text.replace(/^★\s*/, '')}
+                      </li>
+                    )
+                  }
+                  return (
+                    <li
+                      key={key}
+                      style={{
+                        fontSize: 13,
+                        color: 'var(--gray-600)',
+                        paddingLeft: 18,
+                        position: 'relative',
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <span style={{ position: 'absolute', left: 0, color: 'var(--accent)' }}>✓</span>
+                      {text}
+                    </li>
+                  )
+                })}
               </ul>
 
               <Link

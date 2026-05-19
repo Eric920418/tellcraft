@@ -222,6 +222,24 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
                   {tierInfo.iterationsTotal} {isZh ? '次迭代' : 'iterations'}
                 </div>
               )}
+
+              {/* 人工協助 trust line — 只給 standard/pro (NT$6,000+) */}
+              {(tier === 'standard_599' || tier === 'pro_999') && (
+                <div
+                  style={{
+                    marginTop: 14,
+                    padding: '8px 12px',
+                    background: 'var(--accent-muted, rgba(201, 81, 47, 0.08))',
+                    borderLeft: '3px solid var(--accent)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--gray-800)',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {isZh ? '真人工程師 24 小時協助開發完工' : 'Real engineer 24/7 assistance until launch'}
+                </div>
+              )}
             </motion.div>
 
             {/* 加購：續費類 */}

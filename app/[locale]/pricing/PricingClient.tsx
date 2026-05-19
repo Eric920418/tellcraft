@@ -50,6 +50,7 @@ const TIERS: Tier[] = [
     highlighted: true,
     bullets: {
       zh: [
+        '★ 真人工程師 24 小時協助開發完工',
         '3-5 頁完整網站',
         '響應式 + 動畫 + 表單',
         '8 次微調迭代',
@@ -58,6 +59,7 @@ const TIERS: Tier[] = [
         'SEO 結構化資料',
       ],
       en: [
+        '★ Real engineer 24/7 assistance until launch',
         '3-5 page complete site',
         'Responsive + forms',
         '8 refinement iterations',
@@ -76,6 +78,7 @@ const TIERS: Tier[] = [
     iterations: 15,
     bullets: {
       zh: [
+        '★ 真人工程師 24 小時協助開發完工',
         '完整 SaaS / 多頁 Web App',
         '後台管理介面',
         '資料庫 + 認證',
@@ -84,6 +87,7 @@ const TIERS: Tier[] = [
         '90 天保固',
       ],
       en: [
+        '★ Real engineer 24/7 assistance until launch',
         'Full SaaS / multi-page app',
         'Admin dashboard',
         'Database + auth',
@@ -264,28 +268,50 @@ export default function PricingClient({ locale }: { locale: string }) {
               </div>
 
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {(isZh ? tier.bullets.zh : tier.bullets.en).map((bullet) => (
-                  <li
-                    key={bullet}
-                    style={{
-                      fontSize: 14,
-                      color: 'var(--gray-600)',
-                      paddingLeft: 20,
-                      position: 'relative',
-                    }}
-                  >
-                    <span
+                {(isZh ? tier.bullets.zh : tier.bullets.en).map((bullet) => {
+                  // ★ 開頭的 bullet 視為「強化差異點」（如真人工程師協助）— 不放 ✓，改加粗 + 邊框
+                  const isHighlighted = bullet.startsWith('★')
+                  if (isHighlighted) {
+                    return (
+                      <li
+                        key={bullet}
+                        style={{
+                          fontSize: 13,
+                          color: 'var(--gray-800)',
+                          fontWeight: 600,
+                          padding: '8px 12px',
+                          background: 'var(--accent-muted, rgba(201, 81, 47, 0.08))',
+                          borderLeft: '3px solid var(--accent)',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {bullet.replace(/^★\s*/, '')}
+                      </li>
+                    )
+                  }
+                  return (
+                    <li
+                      key={bullet}
                       style={{
-                        position: 'absolute',
-                        left: 0,
-                        color: 'var(--accent)',
+                        fontSize: 14,
+                        color: 'var(--gray-600)',
+                        paddingLeft: 20,
+                        position: 'relative',
                       }}
                     >
-                      ✓
-                    </span>
-                    {bullet}
-                  </li>
-                ))}
+                      <span
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          color: 'var(--accent)',
+                        }}
+                      >
+                        ✓
+                      </span>
+                      {bullet}
+                    </li>
+                  )
+                })}
               </ul>
 
               <Link
