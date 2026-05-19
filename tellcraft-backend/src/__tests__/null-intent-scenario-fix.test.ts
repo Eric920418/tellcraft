@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hasExplicitNullIntent } from '../services/semantic-consistency-validator'
+import { hasExplicitNullIntent, extractNullExpectationFields } from '../services/semantic-consistency-validator'
 import { autoFixNullIntentScenarioConflict } from '../services/deterministic-feature-fix'
 
 describe('hasExplicitNullIntent — b2252efc 漏抓的英文句型', () => {
@@ -311,5 +311,73 @@ Example: foreignKeyId is set to null after parent deletion
     const result = autoFixNullIntentScenarioConflict(content)
     // mentionedFields 抽到 'foreignKeyId' 但 DataTable 沒 foreignKeyId column → 不改
     expect(result.fixed.length).toBe(0)
+  })
+})
+
+describe('R8 extractNullExpectationFields — clauseHasNullVerb 統一治本（b2252efc 剩 2 fail）', () => {
+  it('「has no category assigned」抽出 category（之前 nullClauses=[] fallback 抽不到）', () => {
+    const fields = extractNullExpectationFields('Successfully retrieve an article that has no category assigned')
+    // 至少抽出 'category' 或 'categoryId'（中文業務術語 hint 也會展開）
+    const hasCategory = fields.some(f => f.toLowerCase().includes('categ'))
+    expect(hasCategory).toBe(true)
+  })
+
+  it('「returns null categoryId」抽出 categoryId', () => {
+    const fields = extractNullExpectationFields('A published article without a category returns null categoryId')
+    expect(fields).toContain('categoryId')
+  })
+
+  it('「set to null」原本既有 case 不破壞', () => {
+    const fields = extractNullExpectationFields('Articles set categoryId to null after cleanup')
+    expect(fields).toContain('categoryId')
+  })
+
+  it('update only clause 不誤抽（update 反向過濾保留）', () => {
+    // "clear A while updating B" — 只該抽 A，不抽 B
+    const fields = extractNullExpectationFields('clear categoryId while updating publishedAt')
+    // 應該含 categoryId（clear 的目標），不含 publishedAt（updating 的目標）
+    expect(fields).toContain('categoryId')
+    expect(fields).not.toContain('publishedAt')
+  })
+
+  it('純 negation scenario 抽出空（既有行為保留）', () => {
+    const fields = extractNullExpectationFields('returns a non-null publishedAt value')
+    expect(fields).toEqual([])
+  })
+})
+
+describe('R8 autoFixNullIntentScenarioConflict — response_validate b2252efc 真實 case', () => {
+  it('「has no category assigned」response_validate 從 VAR ref 改 &isNull', () => {
+    const content = `Feature: Get Admin Article
+
+Example: Successfully retrieve an article that has no category assigned
+  When (No Actor) GetAdminArticle, call table:
+    | id            |
+    | $Article1.id  |
+  Then GetAdminArticle(200)回應, with table:
+    | id            | title | categoryId    |
+    | $Article1.id  | Hello | $Category1.id |
+`
+    const result = autoFixNullIntentScenarioConflict(content)
+    const fix = result.fixed.find(x => x.validateType === 'response' && x.field === 'categoryId')
+    expect(fix).toBeDefined()
+    expect(fix?.oldValue).toBe('$Category1.id')
+    expect(result.content).toContain('&isNull')
+  })
+
+  it('「returns null categoryId」response_validate 從 VAR ref 改 &isNull', () => {
+    const content = `Feature: Get Public Article
+
+Example: A published article without a category returns null categoryId
+  When (No Actor) GetPublicArticle, call table:
+    | id            |
+    | $Article1.id  |
+  Then GetPublicArticle(200)回應, with table:
+    | id            | categoryId    |
+    | $Article1.id  | $Category1.id |
+`
+    const result = autoFixNullIntentScenarioConflict(content)
+    const fix = result.fixed.find(x => x.validateType === 'response' && x.field === 'categoryId')
+    expect(fix).toBeDefined()
   })
 })

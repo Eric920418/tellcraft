@@ -313,6 +313,47 @@ function stripRouteGroups(filePath: string): string {
 }
 
 /**
+ * R9 (2026-05-19 b2252efc): LLM 偶發吐全形標點到 TypeScript 代碼
+ * 偵測在「statement keyword 開頭的行」內的全形標點 → 轉半形
+ *
+ * 涵蓋：import / export / from / const / let / var / function / class / interface
+ * / type / enum / return / async / await / if / for / while / try / throw / new
+ *
+ * **不動 string literal / comment 內**（業務文案可能合法使用中文標點）
+ * 簡化策略：只動行首 statement keyword 開頭的行，多數 LLM 出錯點在這
+ *
+ * 全形 → 半形對應：（） / ， / ； / ： / ！ / ？ / 「」/ 『』
+ * 注意不轉中文句號 。（在中文字串內合法）
+ */
+const FULL_TO_HALF_PUNCT: Array<[RegExp, string]> = [
+  [/（/g, '('],
+  [/）/g, ')'],
+  [/，/g, ','],
+  [/；/g, ';'],
+  [/：/g, ':'],
+  [/！/g, '!'],
+  [/？/g, '?'],
+  [/「/g, '"'], [/」/g, '"'],
+  [/『/g, '"'], [/』/g, '"'],
+]
+const STATEMENT_KEYWORD_LINE = /^\s*(?:import|export|from|const|let|var|function|class|interface|type|enum|return|async|await|if|for|while|try|throw|new|\}|\})\b/
+function stripFullWidthPunctInCodeLines(content: string): { fixed: string; count: number } {
+  let count = 0
+  const lines = content.split('\n')
+  const fixed = lines.map(line => {
+    if (!STATEMENT_KEYWORD_LINE.test(line)) return line
+    let updated = line
+    for (const [pattern, replacement] of FULL_TO_HALF_PUNCT) {
+      const before = updated
+      updated = updated.replace(pattern, replacement)
+      if (updated !== before) count++
+    }
+    return updated
+  })
+  return { fixed: fixed.join('\n'), count }
+}
+
+/**
  * 去重路由衝突：strip route groups 後同路由的頁面只保留一份（後者覆蓋前者）
  */
 function deduplicateRouteConflicts<T extends { path: string }>(files: T[]): T[] {
@@ -399,6 +440,18 @@ export function sanitizeCodeForDeploy(code: GeneratedCode, designSystem?: Design
       if (stripped > 0) {
         file.content = lines.join('\n')
         fixes.push(`${file.path}: 移除 ${stripped} 行 LLM 誤寫的檔案路徑標頭`)
+      }
+    }
+
+    // ── 修復 0.3: 全形標點 → 半形（R9 2026-05-19 b2252efc 兩次重現） ──
+    // LLM 偶發吐全形標點到 TypeScript 代碼，esbuild 直接拒（"Expected ';' but found '（'"）
+    // b2252efc 兩次重試都是 app/page.tsx 第 1 行第 12 字符全形括號「（」
+    // 只處理 statement keyword 開頭的行，避開 string/comment 內合法的中文標點
+    if (/\.(tsx?|jsx?)$/.test(file.path)) {
+      const punctRes = stripFullWidthPunctInCodeLines(file.content)
+      if (punctRes.count > 0) {
+        file.content = punctRes.fixed
+        fixes.push(`${file.path}: 全形標點 → 半形 ${punctRes.count} 處`)
       }
     }
 

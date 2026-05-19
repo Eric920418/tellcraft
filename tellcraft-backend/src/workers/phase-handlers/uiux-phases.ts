@@ -1666,6 +1666,22 @@ export async function executeFullCodePipeline(
   let totalAutoFixed = 0
 
   for (let attempt = 0; attempt < MAX_FIX_ATTEMPTS && !report.passed; attempt++) {
+    // R10 (2026-05-19): pipeline QG 第 3 輪起 telemetry — 補打給週報追蹤
+    // 跟下方 generateAllUiuxPipeline 的 L2241 一致 pattern，本 loop MAX=3 所以 attempt>=2 = 第 3 輪
+    if (attempt >= 2) {
+      void recordTelemetry({
+        skillName: 'quality_gate',
+        eventType: 'qg_high_retry_count',
+        patternKey: `pipeline_attempt_${attempt + 1}`,
+        outcome: 'failed',
+        phase: 'uiux_pipeline_qg',
+        severity: 'warning',
+        userId: state.userId,
+        conversationId,
+        payload: { attempt: attempt + 1, totalAutoFixed, source: 'pipeline_qg' },
+      }).catch(() => {})
+    }
+
     let criticalIssues = [
       ...report.categories.a11y.issues,
       ...report.categories.performance.issues,

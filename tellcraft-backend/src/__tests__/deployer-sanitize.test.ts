@@ -1638,3 +1638,77 @@ describe('L38: extractAdminCredentialHint', () => {
   })
 })
 
+
+// ============================================================
+// R9 (Fix 0.3): 全形標點 → 半形 sanitize（b2252efc 兩次重現）
+// ============================================================
+
+describe('R9 Fix 0.3: 全形標點 → 半形', () => {
+  it('import statement 內全形括號 → 半形', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `import { motion } from 'motion/react'（）
+export default function Page() { return <div /> }`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).not.toContain('（')
+    expect(result.code.pages[0].content).not.toContain('）')
+    expect(result.fixes.some(f => f.includes('全形標點'))).toBe(true)
+  })
+
+  it('function declaration 內全形冒號 → 半形', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `function fn(x：number) { return x }`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).toContain('x:number')
+  })
+
+  it('const declaration 內全形分號 → 半形', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `const x = 1；
+const y = 2`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).toContain('const x = 1;')
+  })
+
+  it('JSX 內字串保留中文標點（非 statement keyword 行）', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `export default function Page() {
+  return <div>歡迎，請點擊（這裡）</div>
+}`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    // 字串內中文標點保留（return 開頭那行也不會誤改 string 內）
+    expect(result.code.pages[0].content).toContain('歡迎')
+  })
+
+  it('comment 內全形不轉（不在 statement keyword 行）', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `// 註解：這裡可以用全形（）
+const x = 1`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    // 註解開頭不是 statement keyword（// 不算）→ 不會被掃描
+    expect(result.code.pages[0].content).toContain('全形（）')
+  })
+
+  it('已是半形 noop', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `import { useState } from 'react'
+const x = 1`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.fixes.some(f => f.includes('全形標點'))).toBe(false)
+  })
+
+  it('app/page.tsx 第 1 行第 12 字符全形括號（b2252efc 真實場景）', () => {
+    const code = makeCode({
+      pages: [makeFile('app/page.tsx', `import { X } from（'./x'）
+export default function P() { return <X /> }`)],
+    })
+    const result = sanitizeCodeForDeploy(code)
+    expect(result.code.pages[0].content).toContain(`from('./x')`)
+    expect(result.code.pages[0].content).not.toContain('（')
+  })
+})

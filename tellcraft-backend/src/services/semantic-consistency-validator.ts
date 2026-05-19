@@ -205,10 +205,27 @@ const NEGATION_PATTERNS = /(?:\bnon[-\s]?null\b|\bnot[-\s]?null\b|\bnever[-\s]?n
 const NULL_KEYWORD_RE = /\bnull\b|（\s*null\s*）|\(\s*null\s*\)|未分類|未選|無關聯|無選擇/i
 const ACTION_VERB_RE = /應|設|清|改|變|置|歸|should|must|become|turn|set|clear|reset|unset|returns?|has\s+no|without/i
 
+/**
+ * 判斷 clause 是否含「未被 negation/update 蓋住的」null intent
+ *
+ * R8 (2026-05-19): 整合舊 `clauseHasNullVerb` 的 update 反向過濾邏輯，
+ * 成為 single source of truth — 取代 `clauseHasNullVerb`，外部 caller
+ * 統一用本函數。
+ */
 function clauseHasUnnegatedNullIntent(clause: string): boolean {
   // 該 clause 被 negation 蓋掉（如「is non-null」）→ 視為「應有值」不算 null intent
   if (NEGATION_PATTERNS.test(clause)) return false
-  // NULL_INTENT_PATTERNS 命中
+
+  // Update 早退（從原 clauseHasNullVerb 搬過來）：
+  //   含 update/change to <非 null value> 且無明確 null verb → 非 null intent
+  //   避免「clear A while updating B」中 update B 那個 clause 被誤判 null
+  if (/\b(?:updat(?:e|ing)|chang(?:e|ing)\s+to)\b/i.test(clause) && !/\bto\s+(?:null|empty|無|空)\b/i.test(clause)) {
+    if (!/\b(?:clear(?:ed|ing)?|unset|reset(?:\s+to\s+null)?|empty|null)\b/i.test(clause)) {
+      return false
+    }
+  }
+
+  // NULL_INTENT_PATTERNS 命中（含英文 has no/returns null/without 等 R6 新加的）
   if (NULL_INTENT_PATTERNS.some(p => p.test(clause))) return true
   // 含 null keyword + action verb 雙條件
   if (NULL_KEYWORD_RE.test(clause) && ACTION_VERB_RE.test(clause)) return true
@@ -250,18 +267,7 @@ export function hasExplicitNullIntent(scenarioName: string): boolean {
  */
 const CLAUSE_SEPARATORS = /\s+(?:while|and|but(?:\s+also)?|whereas|whilst|yet|然後|接著|同時|並且|並|且|而|，|,|;|；)\s+/i
 
-/** 一個 clause 是否含 null 意圖 */
-function clauseHasNullVerb(clause: string): boolean {
-  // 若 clause 含 update / change to / set to <value>（非 null）等明確「非 null」動作 → 直接視為非 null clause
-  // update / updating / set X to "..."（被引號包的字面值）
-  if (/\b(?:updat(?:e|ing)|chang(?:e|ing)\s+to)\b/i.test(clause) && !/\bto\s+(?:null|empty|無|空)\b/i.test(clause)) {
-    // 同時若 clause 包含明確 null 動詞才算曖昧；只有 update 沒有 clear → 非 null
-    if (!/\b(?:clear(?:ed|ing)?|unset|reset(?:\s+to\s+null)?|empty|null)\b/i.test(clause)) {
-      return false
-    }
-  }
-  return /\b(?:clear(?:ed|ing)?|unset|reset(?:\s+to\s+null)?|null)\b|（\s*null\s*）|\(\s*null\s*\)|清除|清空|設為\s*null|設成\s*null|歸零/i.test(clause)
-}
+// R8 (2026-05-19): clauseHasNullVerb 已整合到 clauseHasUnnegatedNullIntent（single source of truth）
 
 /**
  * 從 scenario 名稱提取可能被期望為 null 的欄位名
@@ -279,7 +285,7 @@ export function extractNullExpectationFields(scenarioName: string): string[] {
   // 切成 clauses
   const clauses = scenarioName.split(CLAUSE_SEPARATORS)
   // 只保留含 null-verb 的 clause（避免 update clause 的欄位被誤抽）
-  const nullClauses = clauses.filter(clauseHasNullVerb)
+  const nullClauses = clauses.filter(clauseHasUnnegatedNullIntent)
   // 若所有 clause 都不含 null-verb（罕見，因為 hasExplicitNullIntent=true 但分句後找不到），
   // fallback 回原句以維持既有行為（避免漏報）
   const targetText = nullClauses.length > 0 ? nullClauses.join(' ') : scenarioName
