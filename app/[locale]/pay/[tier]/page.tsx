@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import PayClient from './PayClient'
 
-const VALID_TIERS = ['starter_299', 'standard_599', 'pro_999'] as const
+// 2026-05-17：策略單一 tier，僅允許 standard_599
+// starter_299 / pro_999 仍存在於 backend TIER_CONFIG（供舊訂單查詢），但前端不再開放新購
+const VALID_TIERS = ['standard_599'] as const
 type TierId = (typeof VALID_TIERS)[number]
 
 type Props = {

@@ -60,10 +60,11 @@ export const TIER_CONFIG: Record<PrecisionTier, TierConfig> = {
   },
   standard_599: {
     tier: 'standard_599',
-    basePrice: { usd: 19900, twd: 6000 },       // $199 / NT$6,000
+    // 2026-05-17：策略單一 tier，降價統一 NT$5,000 / $159（取整自 NT$5K÷32≈$156）
+    basePrice: { usd: 15900, twd: 5000 },       // $159 / NT$5,000
     iterationsTotal: 8,
-    llmCostCapUsd: 70,                          // 原 $120
-    buyoutPrice: { usd: 29900, twd: 9000 },     // $299 / NT$9,000
+    llmCostCapUsd: 60,                          // 訂單價降 → cap 同步降（原 $70）
+    buyoutPrice: { usd: 23900, twd: 7500 },     // $239 / NT$7,500（1.5x 取整百）
     stripePriceIdUsdEnvKey: 'STRIPE_PRICE_STANDARD_USD',
     stripePriceIdTwdEnvKey: 'STRIPE_PRICE_STANDARD_TWD',
   },

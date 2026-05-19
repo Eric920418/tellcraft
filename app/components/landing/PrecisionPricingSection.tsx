@@ -17,34 +17,16 @@ type TierMeta = {
   highlighted?: boolean
 }
 
+// 2026-05-17：策略單一 tier — 砍 starter/pro，只留 standard
 const TIERS: TierMeta[] = [
   {
-    id: 'starter_299',
-    priceUSD: 99,
-    priceTWD: 3000,
-    nameKey: 'tier_starter_name',
-    taglineKey: 'tier_starter_tagline',
-    iterations: 3,
-    bulletKeys: ['bullet_responsive', 'bullet_refund', 'bullet_warranty'],
-  },
-  {
     id: 'standard_599',
-    priceUSD: 199,
-    priceTWD: 6000,
+    priceUSD: 159,
+    priceTWD: 5000,
     nameKey: 'tier_standard_name',
     taglineKey: 'tier_standard_tagline',
     iterations: 8,
     bulletKeys: ['bullet_human_support', 'bullet_responsive', 'bullet_seo', 'bullet_warranty'],
-    highlighted: true,
-  },
-  {
-    id: 'pro_999',
-    priceUSD: 399,
-    priceTWD: 12000,
-    nameKey: 'tier_pro_name',
-    taglineKey: 'tier_pro_tagline',
-    iterations: 15,
-    bulletKeys: ['bullet_human_support', 'bullet_admin', 'bullet_db', 'bullet_auth'],
   },
 ]
 
@@ -109,11 +91,12 @@ function PrecisionPricingSection() {
           </p>
         </motion.div>
 
-        {/* Cards */}
+        {/* Cards — 2026-05-17 改成單卡居中限寬 */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gridTemplateColumns: '1fr',
+            justifyItems: 'center',
             gap: 20,
             marginBottom: 40,
           }}
@@ -132,6 +115,8 @@ function PrecisionPricingSection() {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 18,
+                width: '100%',
+                maxWidth: 420,
               }}
             >
               {tier.highlighted && (

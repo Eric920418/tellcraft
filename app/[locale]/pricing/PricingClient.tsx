@@ -15,39 +15,17 @@ type Tier = {
   highlighted?: boolean
 }
 
+// 2026-05-17：策略改單一 tier，砍掉 starter ($99/NT$3,000) 跟 pro ($399/NT$12,000)
+// standard 改價 NT$5,000 / $159（NT$5,000÷32≈$156 取整）
+// id 'standard_599' 為歷史命名（DB CHECK constraint + Stripe metadata），不改
 const TIERS: Tier[] = [
   {
-    id: 'starter_299',
-    priceUSD: 99,
-    priceTWD: 3000,
-    name: { zh: '入門', en: 'Starter' },
-    tagline: { zh: 'Landing 單頁，最快上線', en: 'Single-page landing site' },
-    iterations: 3,
-    bullets: {
-      zh: [
-        '1 頁完整 Landing Page',
-        '響應式設計 + 動畫',
-        '3 次微調迭代',
-        '14 天無條件退款',
-        '90 天保固',
-      ],
-      en: [
-        '1 page polished landing',
-        'Responsive + animations',
-        '3 refinement iterations',
-        '14-day money-back',
-        '90-day warranty',
-      ],
-    },
-  },
-  {
     id: 'standard_599',
-    priceUSD: 199,
-    priceTWD: 6000,
+    priceUSD: 159,
+    priceTWD: 5000,
     name: { zh: '標準', en: 'Standard' },
     tagline: { zh: '3-5 頁中型網站，小商業首選', en: '3-5 page mid-size site' },
     iterations: 8,
-    highlighted: true,
     bullets: {
       zh: [
         '★ 真人工程師 24 小時協助開發完工',
@@ -66,34 +44,6 @@ const TIERS: Tier[] = [
         '14-day money-back',
         '90-day warranty',
         'SEO structured data',
-      ],
-    },
-  },
-  {
-    id: 'pro_999',
-    priceUSD: 399,
-    priceTWD: 12000,
-    name: { zh: '專業', en: 'Pro' },
-    tagline: { zh: '含後台 + 資料庫的 SaaS 起步包', en: 'SaaS with admin + DB' },
-    iterations: 15,
-    bullets: {
-      zh: [
-        '★ 真人工程師 24 小時協助開發完工',
-        '完整 SaaS / 多頁 Web App',
-        '後台管理介面',
-        '資料庫 + 認證',
-        '15 次微調迭代',
-        '14 天無條件退款',
-        '90 天保固',
-      ],
-      en: [
-        '★ Real engineer 24/7 assistance until launch',
-        'Full SaaS / multi-page app',
-        'Admin dashboard',
-        'Database + auth',
-        '15 refinement iterations',
-        '14-day money-back',
-        '90-day warranty',
       ],
     },
   },
@@ -118,8 +68,8 @@ export default function PricingClient({ locale }: { locale: string }) {
       precisionEyebrow: isZh ? '主打方案' : 'Featured',
       precisionTitle: isZh ? '精細模式 — 一次交付完整網站' : 'Precision Mode — End-to-end delivery',
       precisionSub: isZh
-        ? '對標自由工程師 NT$60,000-150,000 接案費，Tellcraft 一次性 NT$3,000-12,000 直接交付。'
-        : 'Replaces $2,000-$5,000 freelance gigs. One payment, complete deliverable.',
+        ? '對標自由工程師 NT$60,000+ 接案費，Tellcraft 一次性 NT$5,000 直接交付完整可上線網站。'
+        : 'Replaces $2,000+ freelance gigs. One payment of $159, complete deliverable.',
       subEyebrow: isZh ? '次要選項' : 'Alternative',
       subTitle: isZh ? '訂閱方案 — 想自己慢慢試' : 'Subscription — Build at your own pace',
       subSub: isZh
@@ -210,7 +160,9 @@ export default function PricingClient({ locale }: { locale: string }) {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            // 單卡居中限寬（2026-05-17 改成單一 tier 後不再 grid）
+            gridTemplateColumns: '1fr',
+            justifyItems: 'center',
             gap: 24,
           }}
         >
@@ -229,6 +181,8 @@ export default function PricingClient({ locale }: { locale: string }) {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 20,
+                width: '100%',
+                maxWidth: 460,  // 單卡限寬，避免在大螢幕拉成版面寬
               }}
             >
               {tier.highlighted && (
