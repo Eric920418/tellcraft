@@ -87,8 +87,23 @@ export default function PricingClient({ locale }: { locale: string }) {
 
   return (
     <main style={{ minHeight: '100vh', background: 'var(--white)', color: 'var(--gray-800)' }}>
+      {/* 返回首頁（跟 /pay/[tier] 用同一種 inline text-link 模式） */}
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px 0' }}>
+        <Link
+          href={`/${locale}`}
+          style={{
+            display: 'inline-block',
+            fontSize: 13,
+            color: 'var(--gray-500)',
+            textDecoration: 'none',
+          }}
+        >
+          ← {isZh ? '返回首頁' : 'Back to home'}
+        </Link>
+      </div>
+
       {/* ── Hero ── */}
-      <section style={{ padding: '120px 24px 60px', textAlign: 'center', maxWidth: 880, margin: '0 auto' }}>
+      <section style={{ padding: '60px 24px 60px', textAlign: 'center', maxWidth: 880, margin: '0 auto' }}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
