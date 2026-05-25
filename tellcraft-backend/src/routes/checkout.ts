@@ -275,6 +275,7 @@ router.get('/orders', requireAuth, async (req: Request, res: Response) => {
       delivered_at: string | null
       exported_buyout: boolean
       cancellation_reason: string | null
+      engineer_contacted_at: string | null
       project_id: string | null
       project_name: string | null
       project_vercel_url: string | null
@@ -286,6 +287,7 @@ router.get('/orders', requireAuth, async (req: Request, res: Response) => {
          po.iterations_total, po.iterations_used,
          po.warranty_until, po.refund_deadline, po.delivered_at,
          po.exported_buyout, po.cancellation_reason,
+         po.engineer_contacted_at,
          po.project_id,
          p.name AS project_name,
          p.vercel_url AS project_vercel_url,

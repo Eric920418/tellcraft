@@ -1235,7 +1235,11 @@
     "orderIdLabel": "Order ID",
     "buyoutSuccessToast": "Buyout successful — you can now download the full source code.",
     "buyoutCancelToast": "You cancelled the buyout payment.",
-    "buyoutLoading": "Creating buyout checkout link…"
+    "buyoutLoading": "Creating buyout checkout link…",
+    "engineerState_waiting": "Awaiting engineer pickup",
+    "engineerState_waiting_hint": "We'll reach out within 24 hours",
+    "engineerState_in_progress": "Engineer working on it",
+    "engineerState_delivered": "Delivered"
   },
   "pricing": {
     "eyebrow": "Want it done in one shot?",

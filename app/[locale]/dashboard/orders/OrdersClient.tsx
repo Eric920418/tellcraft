@@ -56,6 +56,19 @@ function daysUntil(iso: string | null): number | null {
   return Math.ceil(ms / (1000 * 60 * 60 * 24))
 }
 
+// 推導「工程師處理狀態」(W1 ops backstop)
+// 3 狀態：waiting (剛付款還沒接) / in_progress (工程師接了還沒交付) / delivered (完成)
+// 純依 timestamp，不存 enum；refunded/cancelled/failed/pending 不顯示
+type EngineerState = 'waiting' | 'in_progress' | 'delivered' | null
+
+function deriveEngineerState(order: PrecisionOrderRow): EngineerState {
+  if (order.status === 'delivered') return 'delivered'
+  if (order.status === 'paid' || order.status === 'in_progress') {
+    return order.engineer_contacted_at ? 'in_progress' : 'waiting'
+  }
+  return null  // pending/refunded/cancelled/failed → 不顯示工程師狀態
+}
+
 export default function OrdersClient({ locale }: { locale: string }) {
   const t = useTranslations('orders')
   const router = useRouter()
@@ -245,6 +258,7 @@ function OrderCard({
   const refundDays = daysUntil(order.refund_deadline)
   const isDelivered = order.status === 'delivered'
   const canBuyout = isDelivered && !order.exported_buyout
+  const engineerState = deriveEngineerState(order)
 
   return (
     <motion.div
@@ -284,6 +298,36 @@ function OrderCard({
           {formatAmount(order.amount_cents, order.currency as CheckoutCurrency)}
         </div>
       </div>
+
+      {/* 工程師處理狀態（W1 ops backstop）— 在 paid/in_progress/delivered 才顯示 */}
+      {engineerState && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: '10px 14px',
+            background:
+              engineerState === 'delivered'
+                ? 'rgba(13, 138, 79, 0.08)'
+                : 'var(--accent-muted, rgba(201, 81, 47, 0.08))',
+            borderLeft:
+              engineerState === 'delivered'
+                ? '3px solid #0d8a4f'
+                : '3px solid var(--accent)',
+            fontSize: 13,
+            color: 'var(--gray-800)',
+            lineHeight: 1.5,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            {t(`engineerState_${engineerState}`)}
+          </span>
+          {engineerState === 'waiting' && (
+            <span style={{ marginLeft: 8, color: 'var(--gray-600)', fontWeight: 400 }}>
+              {t('engineerState_waiting_hint')}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Iteration 進度條 */}
       <div style={{ marginBottom: 16 }}>

@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto'
 import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 import { query, queryOne } from '../db/client'
+import { notifyOrderPaid, notifyOrderFailed } from './slack-notify'
 
 const logger = createLogger('stripe-service')
 
@@ -628,7 +629,14 @@ export async function handleCheckoutCompleted(session: CheckoutSessionObject): P
   }
 
   // ── 一般精細模式訂單付款 ──
-  const result = await query<{ id: string; user_id: string }>(
+  // RETURNING 額外帶 tier/amount/currency 給 Slack 通知用，省一次 DB query
+  const result = await query<{
+    id: string
+    user_id: string
+    tier: string
+    amount_cents: number
+    currency: string
+  }>(
     `UPDATE precision_orders
      SET status = 'paid',
          stripe_payment_intent_id = $2,
@@ -636,7 +644,7 @@ export async function handleCheckoutCompleted(session: CheckoutSessionObject): P
          refund_deadline = NOW() + INTERVAL '14 days'
      WHERE stripe_checkout_session_id = $1
        AND status = 'pending'
-     RETURNING id, user_id`,
+     RETURNING id, user_id, tier, amount_cents, currency`,
     [sessionId, paymentIntentId, customerId]
   )
 
@@ -655,7 +663,21 @@ export async function handleCheckoutCompleted(session: CheckoutSessionObject): P
     )
   }
 
-  logger.info({ orderId: order.id, sessionId }, '精細模式訂單 paid via webhook')
+  // W1 ops backstop：Slack 通知工程師 24h 內必須聯絡客戶
+  // fire-and-forget — Slack 慢/掛不能拖死 webhook handler
+  const userRow = await queryOne<{ email: string | null }>(
+    `SELECT email FROM users WHERE id = $1`,
+    [order.user_id]
+  ).catch(() => null)
+  notifyOrderPaid({
+    orderId: order.id,
+    tier: order.tier,
+    amountCents: order.amount_cents,
+    currency: order.currency,
+    userEmail: userRow?.email ?? null,
+  })
+
+  logger.info({ orderId: order.id, sessionId }, '精細模式訂單 paid via webhook + Slack notified')
   return order.id
 }
 
@@ -678,9 +700,17 @@ export async function handleChargeRefunded(charge: ChargeRefundedObject): Promis
     return null
   }
 
-  // 用 payment_intent 反查 order
-  const orderRow = await queryOne<{ id: string; project_id: string | null; amount_cents: number }>(
-    `SELECT id, project_id, amount_cents FROM precision_orders WHERE stripe_payment_intent_id = $1`,
+  // 用 payment_intent 反查 order（同時拿 tier/currency/user_id 給 Slack 用）
+  const orderRow = await queryOne<{
+    id: string
+    project_id: string | null
+    amount_cents: number
+    tier: string
+    currency: string
+    user_id: string
+  }>(
+    `SELECT id, project_id, amount_cents, tier, currency, user_id
+     FROM precision_orders WHERE stripe_payment_intent_id = $1`,
     [paymentIntentId]
   )
   if (!orderRow) {
@@ -704,7 +734,23 @@ export async function handleChargeRefunded(charge: ChargeRefundedObject): Promis
      WHERE id = $1 AND status IN ('paid', 'in_progress', 'delivered')`,
     [orderRow.id]
   )
-  logger.info({ orderId: orderRow.id, projectId: orderRow.project_id }, '訂單退款完成（project 保留資料但凍結）')
+
+  // W1 ops backstop：退款也通知，工程師可能要解除 hosting / 取消處理中工作
+  const userRow = await queryOne<{ email: string | null }>(
+    `SELECT email FROM users WHERE id = $1`,
+    [orderRow.user_id]
+  ).catch(() => null)
+  notifyOrderFailed({
+    orderId: orderRow.id,
+    tier: orderRow.tier,
+    amountCents: orderRow.amount_cents,
+    currency: orderRow.currency,
+    userEmail: userRow?.email ?? null,
+    projectId: orderRow.project_id,
+    reason: 'refunded (全額)',
+  })
+
+  logger.info({ orderId: orderRow.id, projectId: orderRow.project_id }, '訂單退款完成（project 保留資料但凍結）+ Slack notified')
   return orderRow.id
 }
 
@@ -717,18 +763,42 @@ export interface PaymentIntentObject {
  * payment_intent.payment_failed — 信用卡被拒等扣款失敗
  */
 export async function handlePaymentFailed(intent: PaymentIntentObject): Promise<string | null> {
-  const orderRow = await queryOne<{ id: string }>(
-    `SELECT id FROM precision_orders WHERE stripe_payment_intent_id = $1`,
+  const orderRow = await queryOne<{
+    id: string
+    tier: string
+    amount_cents: number
+    currency: string
+    user_id: string
+  }>(
+    `SELECT id, tier, amount_cents, currency, user_id
+     FROM precision_orders WHERE stripe_payment_intent_id = $1`,
     [intent.id]
   )
   if (!orderRow) return null
 
+  const reason = intent.last_payment_error?.message?.slice(0, 64) ?? 'payment_failed'
   await query(
     `UPDATE precision_orders
      SET status = 'failed',
          cancellation_reason = $2
      WHERE id = $1 AND status = 'pending'`,
-    [orderRow.id, intent.last_payment_error?.message?.slice(0, 64) ?? 'payment_failed']
+    [orderRow.id, reason]
   )
+
+  // 通常付款失敗用戶看得到 Stripe Checkout 錯誤訊息，工程師不一定要介入，
+  // 但累計多次失敗 = 可能信用卡風控 / Stripe 設定問題，要 ops 注意
+  const userRow = await queryOne<{ email: string | null }>(
+    `SELECT email FROM users WHERE id = $1`,
+    [orderRow.user_id]
+  ).catch(() => null)
+  notifyOrderFailed({
+    orderId: orderRow.id,
+    tier: orderRow.tier,
+    amountCents: orderRow.amount_cents,
+    currency: orderRow.currency,
+    userEmail: userRow?.email ?? null,
+    reason,
+  })
+
   return orderRow.id
 }

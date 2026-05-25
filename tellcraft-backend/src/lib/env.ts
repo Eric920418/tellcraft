@@ -133,6 +133,13 @@ const envSchema = z.object({
   UNSPLASH_CACHE_TTL_SECONDS: z.coerce.number().default(60 * 60 * 24 * 7),  // 7 天
   UNSPLASH_API_TIMEOUT_MS: z.coerce.number().default(5000),
 
+  // 迭代 Skill 完整三層支援（Phase 1）— schema 變更直接 ALTER Neon DB
+  // detectSchemaChangeIntent 命中 → planSchemaAndCodeChange 結構化規劃 SchemaChange DSL
+  // → schemaChangesToSql 生 forward/reverse → runAlterMigration 跑 Neon ALTER → upsert code
+  // Phase 1 只跑加性變更（ADD COLUMN/INDEX/TABLE）；destructive 直接 fallback fullstack + warning
+  ENABLE_SCHEMA_ITERATION: z.stringbool().default(false),         // kill switch；false 維持既有 frontend/fullstack 二分流，零行為改動
+  SCHEMA_ITERATION_MAX_CHANGES_PER_CALL: z.coerce.number().default(10), // cost guardrail：LLM plan 內 SchemaChange[] 超過此數拒絕 + 提示用戶拆分
+
   // Determinism over Prompt（Phase 1：Template 擴充 + AST + 零 LLM 修復）
   CODER_TEMPLATE_V2: z.stringbool().default(false),              // 走 coder-templates/ registry + 4 新 template（soft_delete/count/exists_check/search）
   CODER_AST_SANITIZE: z.stringbool().default(false),             // sanitizeCodeForDeploy 的 next15-async-params / search-params-suspense / missing-hooks 改 AST
@@ -157,6 +164,11 @@ const envSchema = z.object({
   STRIPE_PRICE_STARTER_TWD: z.string().optional(),
   STRIPE_PRICE_STANDARD_TWD: z.string().optional(),
   STRIPE_PRICE_PRO_TWD: z.string().optional(),
+
+  // 24h ops backstop（W1）— 新訂單付款成功時推 Slack 通知工程師接案
+  // 沒設則 silently skip（沒 backstop 就完全靠人工監控 dashboard）
+  // 取得方法：Slack workspace → Apps → Incoming Webhooks → Add to channel → 拿 https://hooks.slack.com/services/T.../B.../xxx
+  SLACK_OPS_WEBHOOK_URL: z.string().optional(),
 })
 
 // ============================================================

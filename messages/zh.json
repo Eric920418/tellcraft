@@ -1235,7 +1235,11 @@
     "orderIdLabel": "訂單編號",
     "buyoutSuccessToast": "買斷成功，現在可以下載完整代碼。",
     "buyoutCancelToast": "你取消了買斷付款。",
-    "buyoutLoading": "建立買斷付款連結中…"
+    "buyoutLoading": "建立買斷付款連結中…",
+    "engineerState_waiting": "等待真人工程師接案",
+    "engineerState_waiting_hint": "24 小時內將主動聯絡你",
+    "engineerState_in_progress": "工程師處理中",
+    "engineerState_delivered": "已交付完成"
   },
   "pricing": {
     "eyebrow": "想一次到位？",

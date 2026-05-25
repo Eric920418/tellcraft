@@ -2662,6 +2662,8 @@ export interface PrecisionOrderRow {
   delivered_at: string | null
   exported_buyout: boolean
   cancellation_reason: string | null
+  // 工程師接案時間（W1 ops backstop）— NULL=尚未接 / 有值=工程師已聯絡
+  engineer_contacted_at: string | null
   project_id: string | null
   project_name: string | null
   project_vercel_url: string | null
