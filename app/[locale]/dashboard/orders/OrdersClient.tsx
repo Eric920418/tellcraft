@@ -73,10 +73,20 @@ export default function OrdersClient({ locale }: { locale: string }) {
     if (authLoading || !token) return
     getMyOrders({ token })
       .then((res) => {
-        if (res.success && res.data) setOrders(res.data.orders)
-        else setError(res.error ?? 'Failed to load orders')
+        if (res.success && res.data) {
+          // 防禦：backend 萬一回 shape 不對，至少給 [] 別讓 setOrders(undefined) 後 .length crash
+          // 歷史教訓：原本 backend 雙包 {success, data: {success, data: {orders}}} 導致 dashboard 整個炸
+          const list = Array.isArray(res.data.orders) ? res.data.orders : []
+          setOrders(list)
+        } else {
+          setOrders([])  // 失敗也設成 [] 而非 null，避免後續判斷踩 undefined
+          setError(res.error ?? 'Failed to load orders')
+        }
       })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => {
+        setOrders([])
+        setError(err instanceof Error ? err.message : String(err))
+      })
   }, [token, authLoading])
 
   // Toast：buyout success/cancel callback
@@ -113,7 +123,7 @@ export default function OrdersClient({ locale }: { locale: string }) {
     [token, currency, locale]
   )
 
-  const empty = orders !== null && orders.length === 0
+  const empty = Array.isArray(orders) && orders.length === 0
 
   return (
     <div style={{ padding: '40px 32px', maxWidth: 1100, margin: '0 auto' }}>
@@ -189,7 +199,7 @@ export default function OrdersClient({ locale }: { locale: string }) {
         </div>
       )}
 
-      {orders && orders.length > 0 && (
+      {Array.isArray(orders) && orders.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {orders.map((order) => (
             <OrderCard

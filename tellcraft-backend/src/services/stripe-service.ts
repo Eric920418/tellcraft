@@ -48,6 +48,12 @@ export interface TierConfig {
   stripePriceIdTwdEnvKey: 'STRIPE_PRICE_STARTER_TWD' | 'STRIPE_PRICE_STANDARD_TWD' | 'STRIPE_PRICE_PRO_TWD'
 }
 
+/**
+ * 目前對前端開放新購的 tier。2026-05-17 策略改單一 tier，starter/pro 仍保留在 TIER_CONFIG
+ * 給舊訂單 join 顯示用，但 catalog / 新 checkout endpoint 都會拒絕。
+ */
+export const ACTIVE_TIERS: ReadonlySet<PrecisionTier> = new Set(['standard_599'])
+
 export const TIER_CONFIG: Record<PrecisionTier, TierConfig> = {
   starter_299: {
     tier: 'starter_299',

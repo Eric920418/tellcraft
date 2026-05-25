@@ -18,6 +18,7 @@ import {
   createBuyoutCheckoutSession,
   getCheckoutSessionStatus,
   cancelCheckoutSession,
+  ACTIVE_TIERS,
   TIER_CONFIG,
   ADDON_CONFIG,
   type PrecisionTier,
@@ -52,23 +53,26 @@ router.get('/catalog', (req: Request, res: Response) => {
     ? queryCurrency
     : localeToCurrency(queryLocale)
 
+  // Note: 回應 shape 採「raw data on success」慣例（跟 routes/project.ts 等一致），
+  // apiRequest 會自動把它包成 {success, data}。請勿再包 {success, data} 雙層。
   res.json({
-    success: true,
-    data: {
-      currency,
-      tiers: Object.values(TIER_CONFIG).map((t) => ({
+    currency,
+    // 只回開放新購的 tier（ACTIVE_TIERS）— starter/pro 仍存在於 TIER_CONFIG
+    // 給舊訂單 join 顯示用，但 catalog 不曝光，前端只該看到能買的東西
+    tiers: Object.values(TIER_CONFIG)
+      .filter((t) => ACTIVE_TIERS.has(t.tier))
+      .map((t) => ({
         tier: t.tier,
         basePriceCents: t.basePrice[currency],
         iterationsTotal: t.iterationsTotal,
         buyoutPriceCents: t.buyoutPrice[currency],
       })),
-      addons: Object.entries(ADDON_CONFIG).map(([type, cfg]) => ({
-        type,
-        label: currency === 'twd' ? cfg.labelZh : cfg.labelEn,
-        priceCents: cfg.price[currency],
-        recurring: cfg.recurring ?? null,
-      })),
-    },
+    addons: Object.entries(ADDON_CONFIG).map(([type, cfg]) => ({
+      type,
+      label: currency === 'twd' ? cfg.labelZh : cfg.labelEn,
+      priceCents: cfg.price[currency],
+      recurring: cfg.recurring ?? null,
+    })),
   })
 })
 
@@ -88,8 +92,15 @@ router.post('/precision', requireAuth, async (req: Request, res: Response) => {
 
     if (!tier || !(tier in TIER_CONFIG)) {
       res.status(400).json({
-        success: false,
         error: `無效的檔位：${tier}。可選：${Object.keys(TIER_CONFIG).join(', ')}`,
+      })
+      return
+    }
+
+    // 防 race：即使 starter/pro 還在 TIER_CONFIG，也不接受新購（前端早 disable，但後端守底線）
+    if (!ACTIVE_TIERS.has(tier as PrecisionTier)) {
+      res.status(400).json({
+        error: `此檔位已停售：${tier}。請選擇 ${Array.from(ACTIVE_TIERS).join(', ')}`,
       })
       return
     }
@@ -103,7 +114,6 @@ router.post('/precision', requireAuth, async (req: Request, res: Response) => {
         validatedAddons.push({ type: a.type as AddonType })
       } else {
         res.status(400).json({
-          success: false,
           error: `無效的加購項目：${a.type}。可選：${Object.keys(ADDON_CONFIG).join(', ')}`,
         })
         return
@@ -133,20 +143,16 @@ router.post('/precision', requireAuth, async (req: Request, res: Response) => {
     )
 
     res.json({
-      success: true,
-      data: {
-        orderId: result.orderId,
-        sessionId: result.sessionId,
-        checkoutUrl: result.checkoutUrl,
-        amountCents: result.amountCents,
-        currency: result.currency,
-        isMock: result.isMock,
-      },
+      orderId: result.orderId,
+      sessionId: result.sessionId,
+      checkoutUrl: result.checkoutUrl,
+      amountCents: result.amountCents,
+      currency: result.currency,
+      isMock: result.isMock,
     })
   } catch (err) {
     logger.error({ err }, '建立 checkout session 失敗')
     res.status(500).json({
-      success: false,
       error: err instanceof Error ? err.message : 'Checkout 建立失敗',
     })
   }
@@ -160,20 +166,17 @@ router.get('/precision/status', requireAuth, async (req: Request, res: Response)
   try {
     const sessionId = req.query.session_id as string | undefined
     if (!sessionId) {
-      res.status(400).json({ success: false, error: '缺少 session_id 參數' })
+      res.status(400).json({ error: '缺少 session_id 參數' })
       return
     }
 
     const status = await getCheckoutSessionStatus(sessionId)
 
-    res.json({
-      success: true,
-      data: status,
-    })
+    // 直接 spread status 物件（含 orderId / status / isMock 等）
+    res.json(status)
   } catch (err) {
     logger.error({ err }, '查詢 checkout 狀態失敗')
     res.status(500).json({
-      success: false,
       error: err instanceof Error ? err.message : '查詢失敗',
     })
   }
@@ -188,17 +191,16 @@ router.post('/precision/cancel', requireAuth, async (req: Request, res: Response
   try {
     const { session_id: sessionId, reason } = req.body as { session_id?: string; reason?: string }
     if (!sessionId) {
-      res.status(400).json({ success: false, error: '缺少 session_id' })
+      res.status(400).json({ error: '缺少 session_id' })
       return
     }
 
     await cancelCheckoutSession(sessionId, reason ?? null)
 
-    res.json({ success: true })
+    res.json({ ok: true })
   } catch (err) {
     logger.error({ err }, '取消 checkout 失敗')
     res.status(500).json({
-      success: false,
       error: err instanceof Error ? err.message : '取消失敗',
     })
   }
@@ -217,7 +219,7 @@ router.post('/buyout', requireAuth, async (req: Request, res: Response) => {
       locale?: string
     }
     if (!orderId) {
-      res.status(400).json({ success: false, error: '缺少 orderId' })
+      res.status(400).json({ error: '缺少 orderId' })
       return
     }
     const currency: Currency = isValidCurrency(rawCurrency) ? rawCurrency : localeToCurrency(locale)
@@ -239,19 +241,16 @@ router.post('/buyout', requireAuth, async (req: Request, res: Response) => {
     logger.info({ userId: req.user!.id, orderId, currency, isMock: result.isMock }, '建立代碼買斷 checkout session')
 
     res.json({
-      success: true,
-      data: {
-        sessionId: result.sessionId,
-        checkoutUrl: result.checkoutUrl,
-        amountCents: result.amountCents,
-        currency: result.currency,
-        isMock: result.isMock,
-      },
+      sessionId: result.sessionId,
+      checkoutUrl: result.checkoutUrl,
+      amountCents: result.amountCents,
+      currency: result.currency,
+      isMock: result.isMock,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : '買斷 checkout 建立失敗'
     logger.error({ err }, '建立買斷 checkout 失敗')
-    res.status(500).json({ success: false, error: msg })
+    res.status(500).json({ error: msg })
   }
 })
 
@@ -299,14 +298,10 @@ router.get('/orders', requireAuth, async (req: Request, res: Response) => {
       [req.user!.id]
     )
 
-    res.json({
-      success: true,
-      data: { orders },
-    })
+    res.json({ orders })
   } catch (err) {
     logger.error({ err, userId: req.user?.id }, '查詢精細模式訂單失敗')
     res.status(500).json({
-      success: false,
       error: err instanceof Error ? err.message : '查詢失敗',
     })
   }
