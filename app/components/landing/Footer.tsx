@@ -1,9 +1,10 @@
 'use client'
 
-import { useTranslations } from 'next-intl'
+import { useTranslations, useLocale } from 'next-intl'
 
 function Footer() {
   const t = useTranslations('footer')
+  const locale = useLocale()
   return (
     <footer style={{ padding: '64px 24px 48px', borderTop: '1px solid var(--border-color)', background: 'var(--gray-50)' }}>
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
@@ -49,9 +50,10 @@ function Footer() {
               {t('navAbout')}
             </div>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkPrivacy')}</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkTerms')}</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkContact')}</a>
+              <a href={`/${locale}/privacy`} style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkPrivacy')}</a>
+              <a href={`/${locale}/terms`} style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkTerms')}</a>
+              <a href={`/${locale}/refund`} style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkRefund')}</a>
+              <a href={`/${locale}/contact`} style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkContact')}</a>
             </nav>
           </div>
         </div>

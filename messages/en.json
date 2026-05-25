@@ -509,7 +509,8 @@
     "navAbout": "About",
     "linkPrivacy": "Privacy Policy",
     "linkTerms": "Terms of Service",
-    "linkContact": "Contact Us"
+    "linkContact": "Contact Us",
+    "linkRefund": "Refund Policy"
   },
   "auth": {
     "loginTitle": "Log in to Tellcraft",

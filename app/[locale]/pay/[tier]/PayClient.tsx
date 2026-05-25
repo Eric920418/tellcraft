@@ -378,11 +378,37 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
               )}
             </div>
 
-            {/* 信任元素 */}
+            {/* 信任元素 — 連到合規頁讓客戶可查證 */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, color: 'var(--gray-600)' }}>
-              <TrustItem label={isZh ? '14 天無條件全額退款' : '14-day full refund'} />
-              <TrustItem label={isZh ? '90 天交付後保固期' : '90-day post-delivery warranty'} />
-              <TrustItem label={isZh ? '代碼可付費買斷帶走' : 'Code buyout available'} />
+              <TrustItem
+                label={isZh ? '14 天無條件全額退款' : '14-day full refund'}
+                href={`/${locale}/refund`}
+              />
+              <TrustItem
+                label={isZh ? '90 天交付後保固期' : '90-day post-delivery warranty'}
+                href={`/${locale}/refund`}
+              />
+              <TrustItem
+                label={isZh ? '代碼可付費買斷帶走' : 'Code buyout available'}
+                href={`/${locale}/refund`}
+              />
+            </div>
+
+            {/* 條款連結（Stripe 審核可見性 + 法律合規）*/}
+            <div style={{ fontSize: 11, color: 'var(--gray-500)', lineHeight: 1.6 }}>
+              {isZh ? '點選付款即表示同意' : 'By clicking pay you agree to'}{' '}
+              <a href={`/${locale}/terms`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
+                {isZh ? '服務條款' : 'Terms'}
+              </a>
+              {isZh ? '、' : ', '}
+              <a href={`/${locale}/privacy`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
+                {isZh ? '隱私政策' : 'Privacy'}
+              </a>
+              {isZh ? '、' : ' and '}
+              <a href={`/${locale}/refund`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
+                {isZh ? '退款政策' : 'Refund Policy'}
+              </a>
+              。
             </div>
 
             {/* CTA */}
@@ -435,11 +461,28 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
   )
 }
 
-function TrustItem({ label }: { label: string }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+function TrustItem({ label, href }: { label: string; href?: string }) {
+  const inner = (
+    <>
       <span style={{ color: 'var(--accent)', fontSize: 14, lineHeight: 1.4 }}>✓</span>
       <span>{label}</span>
-    </div>
+    </>
   )
+  if (href) {
+    return (
+      <a
+        href={href}
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 8,
+          color: 'inherit',
+          textDecoration: 'none',
+        }}
+      >
+        {inner}
+      </a>
+    )
+  }
+  return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>{inner}</div>
 }

@@ -509,7 +509,8 @@
     "navAbout": "關於",
     "linkPrivacy": "隱私權政策",
     "linkTerms": "服務條款",
-    "linkContact": "聯絡我們"
+    "linkContact": "聯絡我們",
+    "linkRefund": "退款政策"
   },
   "auth": {
     "loginTitle": "登入 Tellcraft",
