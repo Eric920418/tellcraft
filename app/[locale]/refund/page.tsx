@@ -91,7 +91,7 @@ function RefundZh() {
 
       <h2>4. 退款申請流程</h2>
       <ol>
-        <li>寄信至 <span className="placeholder">[SUPPORT_EMAIL]</span></li>
+        <li>寄信至 tellcraft2026@gmail.com</li>
         <li>主旨寫「退款申請 - 訂單 ID 後 8 碼」（訂單 ID 可在 <code>/dashboard/orders</code> 找到）</li>
         <li>內文：你的 email + 訂單 ID 全碼 + 退款理由（14 天內可不寫）</li>
         <li>我們於 <strong>3 個工作天內</strong>回覆與處理</li>
@@ -125,7 +125,7 @@ function RefundZh() {
 
       <h2>8. 聯絡</h2>
       <p>
-        退款相關問題：<span className="placeholder">[SUPPORT_EMAIL]</span>
+        退款相關問題：tellcraft2026@gmail.com
       </p>
     </>
   )
@@ -191,7 +191,7 @@ function RefundEn() {
 
       <h2>4. Refund Request Process</h2>
       <ol>
-        <li>Email <span className="placeholder">[SUPPORT_EMAIL]</span></li>
+        <li>Email tellcraft2026@gmail.com</li>
         <li>Subject: &ldquo;Refund Request - Order ID last 8 chars&rdquo; (find Order ID at <code>/dashboard/orders</code>)</li>
         <li>Body: your email + full Order ID + reason (optional within 14 days)</li>
         <li>We respond within <strong>3 business days</strong></li>
@@ -222,7 +222,7 @@ function RefundEn() {
 
       <h2>8. Contact</h2>
       <p>
-        Refund-related questions: <span className="placeholder">[SUPPORT_EMAIL]</span>
+        Refund-related questions: tellcraft2026@gmail.com
       </p>
     </>
   )

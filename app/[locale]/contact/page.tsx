@@ -35,13 +35,13 @@ function ContactZh() {
   return (
     <>
       <p>
-        Tellcraft 由 <span className="placeholder">[BUSINESS_LEGAL_NAME]</span> 營運。
+        Tellcraft 由 Tellcraft LLC 營運。
         我們是小團隊，每封來信由真人工程師親自回覆。
       </p>
 
       <h2>客戶支援</h2>
       <p>
-        <strong>Email：</strong><span className="placeholder">[SUPPORT_EMAIL]</span>
+        <strong>Email：</strong>tellcraft2026@gmail.com
       </p>
       <p>
         <strong>回覆時間 SLA：</strong>
@@ -77,15 +77,15 @@ function ContactZh() {
 
       <h2>商務 / 媒體聯絡</h2>
       <p>
-        合作、報導、投資相關：<span className="placeholder">[SUPPORT_EMAIL]</span>，主旨 <code>[商務]</code>。
+        合作、報導、投資相關：tellcraft2026@gmail.com，主旨 <code>[商務]</code>。
       </p>
 
       <h2>公司資訊</h2>
       <p>
-        公司全名：<span className="placeholder">[BUSINESS_LEGAL_NAME]</span><br />
-        統一編號：<span className="placeholder">[BUSINESS_TAX_ID]</span><br />
-        登記地址：<span className="placeholder">[BUSINESS_ADDRESS]</span><br />
-        負責人：<span className="placeholder">[BUSINESS_OWNER_NAME]</span>
+        公司全名：Tellcraft LLC<br />
+        統一編號：N/A (US LLC, no Taiwan tax ID)<br />
+        登記地址：10 Minzu 3rd Street, 11F, New Taipei City, N/A 221, Taiwan<br />
+        負責人：TSAI YI-LIEN
       </p>
 
       <h2>不接受的事項</h2>
@@ -103,13 +103,13 @@ function ContactEn() {
   return (
     <>
       <p>
-        Tellcraft is operated by <span className="placeholder">[BUSINESS_LEGAL_NAME]</span>.
+        Tellcraft is operated by Tellcraft LLC.
         We&apos;re a small team — every email is answered by a real engineer.
       </p>
 
       <h2>Customer Support</h2>
       <p>
-        <strong>Email:</strong> <span className="placeholder">[SUPPORT_EMAIL]</span>
+        <strong>Email:</strong> tellcraft2026@gmail.com
       </p>
       <p>
         <strong>Response SLA:</strong>
@@ -143,15 +143,15 @@ function ContactEn() {
 
       <h2>Business / Media Contact</h2>
       <p>
-        Partnerships, press, investment: <span className="placeholder">[SUPPORT_EMAIL]</span>, subject <code>[Business]</code>.
+        Partnerships, press, investment: tellcraft2026@gmail.com, subject <code>[Business]</code>.
       </p>
 
       <h2>Company Information</h2>
       <p>
-        Legal name: <span className="placeholder">[BUSINESS_LEGAL_NAME]</span><br />
-        Tax ID: <span className="placeholder">[BUSINESS_TAX_ID]</span><br />
-        Registered address: <span className="placeholder">[BUSINESS_ADDRESS]</span><br />
-        Director: <span className="placeholder">[BUSINESS_OWNER_NAME]</span>
+        Legal name: Tellcraft LLC<br />
+        Tax ID: N/A (US LLC, no Taiwan tax ID)<br />
+        Registered address: 10 Minzu 3rd Street, 11F, New Taipei City, N/A 221, Taiwan<br />
+        Director: TSAI YI-LIEN
       </p>
 
       <h2>What We Don&apos;t Accept</h2>

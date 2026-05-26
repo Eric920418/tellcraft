@@ -45,7 +45,7 @@ function TermsZh() {
   return (
     <>
       <p>
-        歡迎使用 Tellcraft（以下稱「本服務」，由 <span className="placeholder">[BUSINESS_LEGAL_NAME]</span> 營運）。
+        歡迎使用 Tellcraft（以下稱「本服務」，由 Tellcraft LLC 營運）。
         當你註冊帳號、提交需求或進行付款，即表示你已閱讀、理解並同意以下條款。
         若你不同意，請勿使用本服務。
       </p>
@@ -64,7 +64,7 @@ function TermsZh() {
       <h2>2. 帳號註冊與安全</h2>
       <p>
         你可透過 Google、LINE 或其他第三方登入服務註冊帳號。
-        你必須提供真實、準確的資料，並對帳號內所有活動負完全責任。若發現未授權存取，請立即聯絡 <span className="placeholder">[SUPPORT_EMAIL]</span>。
+        你必須提供真實、準確的資料，並對帳號內所有活動負完全責任。若發現未授權存取，請立即聯絡 tellcraft2026@gmail.com。
       </p>
 
       <h2>3. 付費條件</h2>
@@ -106,7 +106,7 @@ function TermsZh() {
       <ul>
         <li><strong>AI 生成內容的著作權歸屬：</strong>依各國法律不同，AI 生成物的著作權狀態尚有爭議。你可自由使用、修改、商業化由 Tellcraft 為你生成的網站代碼，但本服務不對「該代碼是否享有完整著作權保護」做擔保。</li>
         <li><strong>第三方權利：</strong>AI 可能生成與既有作品相似的內容，你有責任在使用前自行檢查是否侵權。</li>
-        <li><strong>本服務的權利：</strong>Tellcraft 平台本身（前端、後端、AI 編排邏輯、設計系統範本）的所有權屬於 <span className="placeholder">[BUSINESS_LEGAL_NAME]</span>，未經授權不得複製、轉售。</li>
+        <li><strong>本服務的權利：</strong>Tellcraft 平台本身（前端、後端、AI 編排邏輯、設計系統範本）的所有權屬於 Tellcraft LLC，未經授權不得複製、轉售。</li>
       </ul>
 
       <h2>7. 第三方服務</h2>
@@ -130,7 +130,7 @@ function TermsZh() {
 
       <h2>9. 責任限制</h2>
       <p>
-        在法律允許範圍內，<span className="placeholder">[BUSINESS_LEGAL_NAME]</span> 對下列情況不負責任：
+        在法律允許範圍內，Tellcraft LLC 對下列情況不負責任：
       </p>
       <ul>
         <li>因 AI 生成代碼的瑕疵、錯誤或不適用導致的間接損失（如商機損失、商譽損失）</li>
@@ -162,7 +162,7 @@ function TermsZh() {
 
       <h2>13. 聯絡方式</h2>
       <p>
-        對本條款有疑問請聯絡：<span className="placeholder">[SUPPORT_EMAIL]</span>。詳見<a href="./contact">聯絡資訊</a>頁。
+        對本條款有疑問請聯絡：tellcraft2026@gmail.com。詳見<a href="./contact">聯絡資訊</a>頁。
       </p>
     </>
   )
@@ -176,7 +176,7 @@ function TermsEn() {
     <>
       <p>
         Welcome to Tellcraft (the &ldquo;Service&rdquo;, operated by{' '}
-        <span className="placeholder">[BUSINESS_LEGAL_NAME]</span>). By registering, submitting requests, or making payments,
+        Tellcraft LLC). By registering, submitting requests, or making payments,
         you agree to these Terms. If you do not agree, please do not use the Service.
       </p>
 
@@ -195,7 +195,7 @@ function TermsEn() {
       <p>
         Sign up via Google, LINE, or other third-party login. You must provide accurate information and are
         fully responsible for all activity under your account. Report unauthorized access immediately to{' '}
-        <span className="placeholder">[SUPPORT_EMAIL]</span>.
+        tellcraft2026@gmail.com.
       </p>
 
       <h2>3. Payment Terms</h2>
@@ -231,7 +231,7 @@ function TermsEn() {
       <ul>
         <li><strong>AI copyright:</strong> Legal status of AI-generated content varies by jurisdiction. You may freely use, modify, and commercialize the code generated for you, but we do not guarantee its copyright status.</li>
         <li><strong>Third-party rights:</strong> AI may generate content similar to existing works; you are responsible for checking for infringement before use.</li>
-        <li><strong>Our IP:</strong> The Tellcraft platform itself (frontend, backend, AI orchestration, design system templates) belongs to <span className="placeholder">[BUSINESS_LEGAL_NAME]</span>; do not copy or resell without authorization.</li>
+        <li><strong>Our IP:</strong> The Tellcraft platform itself (frontend, backend, AI orchestration, design system templates) belongs to Tellcraft LLC; do not copy or resell without authorization.</li>
       </ul>
 
       <h2>7. Third-Party Services</h2>
@@ -251,7 +251,7 @@ function TermsEn() {
       </p>
 
       <h2>9. Limitation of Liability</h2>
-      <p>To the extent permitted by law, <span className="placeholder">[BUSINESS_LEGAL_NAME]</span> is not liable for:</p>
+      <p>To the extent permitted by law, Tellcraft LLC is not liable for:</p>
       <ul>
         <li>Indirect damages from defects in AI-generated code (lost business, goodwill, etc.)</li>
         <li>Service disruption caused by third-party providers (Stripe / Vercel / Neon)</li>
@@ -281,7 +281,7 @@ function TermsEn() {
 
       <h2>13. Contact</h2>
       <p>
-        Questions about these Terms: <span className="placeholder">[SUPPORT_EMAIL]</span>. See the{' '}
+        Questions about these Terms: tellcraft2026@gmail.com. See the{' '}
         <a href="./contact">Contact</a> page.
       </p>
     </>

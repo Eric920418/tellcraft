@@ -40,7 +40,7 @@ function PrivacyZh() {
   return (
     <>
       <p>
-        本政策說明 Tellcraft（由 <span className="placeholder">[BUSINESS_LEGAL_NAME]</span> 營運）如何收集、使用、儲存與保護你的個人資料。
+        本政策說明 Tellcraft（由 Tellcraft LLC 營運）如何收集、使用、儲存與保護你的個人資料。
         本政策依台灣《個人資料保護法》及歐盟《一般資料保護規則》（GDPR）原則制定。
       </p>
 
@@ -149,7 +149,7 @@ function PrivacyZh() {
         <li><strong>撤回同意：</strong>對基於同意的處理隨時撤回</li>
       </ul>
       <p>
-        行使任何權利請寄信至 <span className="placeholder">[SUPPORT_EMAIL]</span>，我們將於 30 天內回覆。
+        行使任何權利請寄信至 tellcraft2026@gmail.com，我們將於 30 天內回覆。
       </p>
 
       <h2>6. 資料安全</h2>
@@ -174,7 +174,7 @@ function PrivacyZh() {
       <h2>8. 兒童隱私</h2>
       <p>
         本服務不針對 13 歲以下兒童設計。若我們知悉收集了未成年人的個資，將立即刪除。
-        家長若發現孩童未經同意註冊，請聯絡 <span className="placeholder">[SUPPORT_EMAIL]</span>。
+        家長若發現孩童未經同意註冊，請聯絡 tellcraft2026@gmail.com。
       </p>
 
       <h2>9. Cookies 政策</h2>
@@ -193,7 +193,7 @@ function PrivacyZh() {
 
       <h2>11. 個資聯絡窗口</h2>
       <p>
-        個資保護相關問題、行使權利、舉發隱私事件：<span className="placeholder">[SUPPORT_EMAIL]</span>
+        個資保護相關問題、行使權利、舉發隱私事件：tellcraft2026@gmail.com
       </p>
     </>
   )
@@ -203,7 +203,7 @@ function PrivacyEn() {
   return (
     <>
       <p>
-        This policy explains how Tellcraft (operated by <span className="placeholder">[BUSINESS_LEGAL_NAME]</span>)
+        This policy explains how Tellcraft (operated by Tellcraft LLC)
         collects, uses, stores, and protects your personal data, in line with Taiwan PDPA and EU GDPR principles.
       </p>
 
@@ -305,7 +305,7 @@ function PrivacyEn() {
         <li><strong>Withdraw consent:</strong> revoke consent-based processing</li>
       </ul>
       <p>
-        To exercise any right, email <span className="placeholder">[SUPPORT_EMAIL]</span>. We respond within 30 days.
+        To exercise any right, email tellcraft2026@gmail.com. We respond within 30 days.
       </p>
 
       <h2>6. Data Security</h2>
@@ -331,7 +331,7 @@ function PrivacyEn() {
       <p>
         The Service is not designed for children under 13. If we learn we have collected data from a minor,
         we will delete it immediately. Parents who discover an unauthorized registration should contact{' '}
-        <span className="placeholder">[SUPPORT_EMAIL]</span>.
+        tellcraft2026@gmail.com.
       </p>
 
       <h2>9. Cookies</h2>
@@ -349,7 +349,7 @@ function PrivacyEn() {
 
       <h2>11. Contact</h2>
       <p>
-        Privacy questions, right exercises, breach reports: <span className="placeholder">[SUPPORT_EMAIL]</span>
+        Privacy questions, right exercises, breach reports: tellcraft2026@gmail.com
       </p>
     </>
   )
