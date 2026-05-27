@@ -12,6 +12,7 @@ import GlowButton from '@/app/components/GlowButton'
 import { getUserConversations } from '@/app/lib/vps-api'
 import { useAuth, getAuthToken } from '@/app/hooks/useAuth'
 import LoginPrompt from '@/app/components/LoginPrompt'
+import OnboardingOverlay from '@/app/components/chat/OnboardingOverlay'
 import ProjectReminder from '@/app/components/ProjectReminder'
 import { smoothEasing } from '@/app/lib/chat-utils'
 
@@ -375,6 +376,9 @@ function HomeContent() {
           precisionOrderId={precisionOrderId}
         />
       </ErrorBoundary>
+
+      {/* 付款完 onboarding modal — 帶 ?orderId= 進來時顯示一次（sessionStorage 記憶） */}
+      {precisionOrderId && <OnboardingOverlay orderId={precisionOrderId} />}
 
       {/* Guest Limit Modal */}
       {showGuestLimitModal && (

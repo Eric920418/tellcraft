@@ -28,6 +28,7 @@ const navItems: NavItem[] = [
   { href: '/dashboard/account', labelKey: 'account', icon: '◎' },
   // 管理員專用
   { href: '/dashboard/admin', labelKey: 'adminOverview', icon: '⬡', adminOnly: true },
+  { href: '/dashboard/admin/orders', labelKey: 'adminOrders', icon: '◐', adminOnly: true },
   { href: '/dashboard/admin/users', labelKey: 'adminUsers', icon: '○', adminOnly: true },
   { href: '/dashboard/admin/usage', labelKey: 'adminUsage', icon: '◈', adminOnly: true },
   { href: '/dashboard/admin/templates', labelKey: 'adminTemplates', icon: '◫', adminOnly: true },

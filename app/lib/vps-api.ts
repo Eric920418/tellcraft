@@ -2696,5 +2696,40 @@ export async function purchaseBuyout(input: {
   })
 }
 
+// ============================================================
+// Admin 訂單後台（Sprint 1 — ops backstop 一鍵接案）
+// 比 PrecisionOrderRow 多 user_email/user_name 給 admin 看
+// ============================================================
+
+export interface AdminOrderRow extends PrecisionOrderRow {
+  user_id: string
+  user_email: string | null
+  user_name: string | null
+}
+
+export async function adminGetOrders(input: {
+  token: string
+  statusFilter?: string
+  unacknowledgedOnly?: boolean
+}): Promise<ApiResponse<{ orders: AdminOrderRow[] }>> {
+  const qs = new URLSearchParams()
+  if (input.statusFilter) qs.set('status', input.statusFilter)
+  if (input.unacknowledgedOnly) qs.set('unacknowledged_only', '1')
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return apiRequest(`/api/admin/orders${suffix}`, {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
+export async function adminAcknowledgeOrder(input: {
+  orderId: string
+  token: string
+}): Promise<ApiResponse<{ ok: boolean; already_acknowledged: boolean; engineer_contacted_at: string }>> {
+  return apiRequest(`/api/admin/orders/${input.orderId}/acknowledge`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+}
+
 // 導出類型
 export type { ClarifyItem, BddSession }
