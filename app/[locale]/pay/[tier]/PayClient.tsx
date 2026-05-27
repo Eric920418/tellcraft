@@ -1,17 +1,20 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { useAuth } from '@/app/hooks/useAuth'
 import {
   createCheckoutSession,
   getCheckoutCatalog,
-  type CheckoutAddonType,
   type CheckoutCatalog,
   type CheckoutCurrency,
   type PrecisionTier,
 } from '@/app/lib/vps-api'
+
+// 2026-05-27：策略簡化 — 砍掉所有加購（hosting/maintenance/4 模塊）
+// 用戶只能買標準方案，one-product-one-button 結帳 = 最高轉換率
+// Backend 仍支援 addons param（傳空陣列），未來想復活加購不用 backend rework
 
 const TIER_META: Record<PrecisionTier, { name: { zh: string; en: string }; pages: { zh: string; en: string } }> = {
   starter_299: { name: { zh: '入門', en: 'Starter' }, pages: { zh: 'Landing 單頁', en: 'Single landing page' } },
@@ -19,21 +22,33 @@ const TIER_META: Record<PrecisionTier, { name: { zh: string; en: string }; pages
   pro_999: { name: { zh: '專業', en: 'Pro' }, pages: { zh: '後台 + DB 的 SaaS', en: 'SaaS with admin + DB' } },
 }
 
-const ADDON_LABELS: Record<CheckoutAddonType, { zh: string; en: string; hint?: { zh: string; en: string } }> = {
-  hosting: {
-    zh: '託管月費',
-    en: 'Hosting',
-    hint: { zh: 'hosting + 域名 + uptime 監控（首月免費）', en: 'hosting + domain + uptime (first month free)' },
+const TIER_BULLETS: Record<PrecisionTier, { zh: string[]; en: string[] }> = {
+  starter_299: {
+    zh: ['響應式設計 + 動畫', '3 次微調迭代', '14 天無條件退款', '90 天保固'],
+    en: ['Responsive + animations', '3 refinement iterations', '14-day refund', '90-day warranty'],
   },
-  maintenance: {
-    zh: '維護訂閱',
-    en: 'Maintenance',
-    hint: { zh: '無限迭代 + bugfix 包', en: 'Unlimited iterations + bugfix' },
+  standard_599: {
+    zh: [
+      '3-5 頁完整網站（響應式 + 動畫 + 表單）',
+      '8 次微調迭代額度',
+      'SEO 結構化資料',
+      '14 天無條件全額退款',
+      '90 天交付後保固期',
+      '代碼可付費買斷帶走',
+    ],
+    en: [
+      '3-5 page complete site (responsive + animations + forms)',
+      '8 refinement iterations',
+      'SEO structured data',
+      '14-day full refund',
+      '90-day post-delivery warranty',
+      'Code buyout available',
+    ],
   },
-  module_blog: { zh: '部落格 / CMS 模塊', en: 'Blog / CMS module' },
-  module_auth: { zh: '會員系統 / Auth 模塊', en: 'Member / Auth module' },
-  module_ecommerce: { zh: '電商 + Stripe 付款模塊', en: 'E-commerce + Stripe module' },
-  module_forms: { zh: '表單 / Newsletter 模塊', en: 'Forms / Newsletter module' },
+  pro_999: {
+    zh: ['後台 + 資料庫 + 認證', '15 次微調迭代', '14 天無條件退款', '90 天保固'],
+    en: ['Admin + DB + Auth', '15 refinement iterations', '14-day refund', '90-day warranty'],
+  },
 }
 
 export default function PayClient({ locale, tier }: { locale: string; tier: PrecisionTier }) {
@@ -43,7 +58,6 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
 
   const [catalog, setCatalog] = useState<CheckoutCatalog | null>(null)
   const [catalogError, setCatalogError] = useState<string | null>(null)
-  const [selectedAddons, setSelectedAddons] = useState<Set<CheckoutAddonType>>(new Set(['hosting']))
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -63,29 +77,7 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
   }, [isZh, currency, locale])
 
   const tierInfo = catalog?.tiers.find((t) => t.tier === tier) ?? null
-
-  // 即時計算總額（含加購 — recurring 不計入一次性付款，標示月費另記）
-  const { oneTimeCents, recurringCents } = useMemo(() => {
-    if (!catalog || !tierInfo) return { oneTimeCents: 0, recurringCents: 0 }
-    let oneTime = tierInfo.basePriceCents
-    let recurring = 0
-    for (const type of selectedAddons) {
-      const addon = catalog.addons.find((a) => a.type === type)
-      if (!addon) continue
-      if (addon.recurring === 'month') recurring += addon.priceCents
-      else oneTime += addon.priceCents
-    }
-    return { oneTimeCents: oneTime, recurringCents: recurring }
-  }, [catalog, tierInfo, selectedAddons])
-
-  const toggleAddon = (type: CheckoutAddonType) => {
-    setSelectedAddons((prev) => {
-      const next = new Set(prev)
-      if (next.has(type)) next.delete(type)
-      else next.add(type)
-      return next
-    })
-  }
+  const totalAmount = tierInfo?.basePriceCents ?? 0
 
   const handleCheckout = async () => {
     if (!token) {
@@ -97,7 +89,7 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
     try {
       const res = await createCheckoutSession({
         tier,
-        addons: Array.from(selectedAddons).map((type) => ({ type })),
+        addons: [],  // 不開放加購（backend 仍支援，未來想復活改這裡）
         locale,
         currency,
         token,
@@ -107,7 +99,6 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
         setSubmitting(false)
         return
       }
-      // 跳轉到 Stripe（或 mock success）
       window.location.href = res.data.checkoutUrl
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err))
@@ -118,28 +109,18 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
   // 格式化金額：USD 是 two-decimal（cents/100），TWD 是 zero-decimal（直接用 dollars）
   const fmt = (amount: number) => {
     if (currency === 'twd') {
-      return new Intl.NumberFormat('zh-TW', {
-        style: 'currency',
-        currency: 'TWD',
-        minimumFractionDigits: 0,
-      }).format(amount)
+      return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(amount)
     }
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-    }).format(amount / 100)
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(amount / 100)
   }
 
   const tierMeta = TIER_META[tier]
-
-  // 加購分組
-  const recurringAddons = catalog?.addons.filter((a) => a.recurring === 'month') ?? []
-  const moduleAddons = catalog?.addons.filter((a) => !a.recurring) ?? []
+  const bullets = (isZh ? TIER_BULLETS[tier].zh : TIER_BULLETS[tier].en) ?? []
+  const hasHumanSupport = tier === 'standard_599' || tier === 'pro_999'
 
   return (
     <main style={{ minHeight: '100vh', background: 'var(--white)', color: 'var(--gray-800)' }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '60px 24px 80px' }}>
+      <div style={{ maxWidth: 580, margin: '0 auto', padding: '60px 24px 80px' }}>
         {/* 返回連結 */}
         <Link
           href={`/${locale}/pricing`}
@@ -148,7 +129,7 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
             fontSize: 13,
             color: 'var(--gray-500)',
             textDecoration: 'none',
-            marginBottom: 24,
+            marginBottom: 32,
           }}
         >
           ← {isZh ? '返回方案選擇' : 'Back to pricing'}
@@ -156,7 +137,7 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
 
         <h1
           style={{
-            fontSize: 'clamp(28px, 4vw, 36px)',
+            fontSize: 'clamp(26px, 4vw, 32px)',
             fontWeight: 400,
             letterSpacing: '-0.02em',
             marginBottom: 8,
@@ -164,19 +145,19 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
         >
           {isZh ? '確認購買' : 'Review your order'}
         </h1>
-        <p style={{ fontSize: 14, color: 'var(--gray-500)', marginBottom: 48 }}>
-          {isZh ? '勾選加購、確認金額，然後前往 Stripe 安全付款。' : 'Pick add-ons, confirm the amount, then proceed to Stripe.'}
+        <p style={{ fontSize: 14, color: 'var(--gray-500)', marginBottom: 40 }}>
+          {isZh ? '一鍵完成，前往 Stripe 安全付款。' : 'One click, secure checkout via Stripe.'}
         </p>
 
         {catalogError && (
           <div
             style={{
-              padding: '16px 20px',
+              padding: '14px 18px',
               background: 'rgba(220, 50, 47, 0.08)',
               border: '1px solid rgba(220, 50, 47, 0.3)',
               color: '#a52a25',
-              fontSize: 14,
-              marginBottom: 32,
+              fontSize: 13,
+              marginBottom: 24,
             }}
           >
             {isZh ? '錯誤：' : 'Error: '}
@@ -184,305 +165,143 @@ export default function PayClient({ locale, tier }: { locale: string; tier: Prec
           </div>
         )}
 
-        <div
+        {/* 主商品卡 — 單卡居中，含所有資訊 + CTA */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 380px)',
-            gap: 48,
-            alignItems: 'start',
+            background: 'var(--gray-50)',
+            border: '1px solid var(--gray-200)',
+            padding: '32px 28px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 24,
           }}
         >
-          {/* ── 左欄：訂單摘要 + 加購 ── */}
+          {/* tier 名稱 + 大價格 */}
           <div>
-            {/* 主商品卡 */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4 }}
-              style={{
-                padding: '24px 28px',
-                background: 'var(--gray-50)',
-                border: '1px solid var(--gray-200)',
-                marginBottom: 32,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                <div style={{ fontSize: 18, fontWeight: 500 }}>
-                  {isZh ? tierMeta.name.zh : tierMeta.name.en}
-                </div>
-                <div style={{ fontSize: 20, fontWeight: 400 }}>
-                  {tierInfo ? fmt(tierInfo.basePriceCents) : '—'}
-                </div>
+            <div style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 6, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+              {isZh ? '方案' : 'Plan'}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, marginBottom: 8 }}>
+              <div style={{ fontSize: 22, fontWeight: 500 }}>
+                {isZh ? tierMeta.name.zh : tierMeta.name.en}
               </div>
-              <div style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 8 }}>
-                {isZh ? tierMeta.pages.zh : tierMeta.pages.en}
+              <div style={{ fontSize: 36, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1 }}>
+                {tierInfo ? fmt(totalAmount) : '—'}
               </div>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--gray-600)' }}>
+              {isZh ? tierMeta.pages.zh : tierMeta.pages.en}
               {tierInfo && (
-                <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>
+                <>
+                  {' · '}
                   {tierInfo.iterationsTotal} {isZh ? '次迭代' : 'iterations'}
-                </div>
+                </>
               )}
-
-              {/* 人工協助 trust line — 只給 standard/pro (NT$6,000+) */}
-              {(tier === 'standard_599' || tier === 'pro_999') && (
-                <div
-                  style={{
-                    marginTop: 14,
-                    padding: '8px 12px',
-                    background: 'var(--accent-muted, rgba(201, 81, 47, 0.08))',
-                    borderLeft: '3px solid var(--accent)',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: 'var(--gray-800)',
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {isZh ? '真人工程師 24 小時協助開發完工' : 'Real engineer 24/7 assistance until launch'}
-                </div>
-              )}
-            </motion.div>
-
-            {/* 加購：續費類 */}
-            {recurringAddons.length > 0 && (
-              <div style={{ marginBottom: 32 }}>
-                <h3
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 500,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    color: 'var(--gray-500)',
-                    marginBottom: 16,
-                  }}
-                >
-                  {isZh ? '訂閱加購（月費）' : 'Subscription add-ons'}
-                </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {recurringAddons.map((addon) => {
-                    const checked = selectedAddons.has(addon.type)
-                    const meta = ADDON_LABELS[addon.type]
-                    return (
-                      <label
-                        key={addon.type}
-                        style={{
-                          display: 'flex',
-                          gap: 14,
-                          padding: '16px 20px',
-                          border: checked ? '2px solid var(--accent)' : '1px solid var(--gray-200)',
-                          cursor: 'pointer',
-                          background: 'var(--white)',
-                          transition: 'border-color 0.15s',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleAddon(addon.type)}
-                          style={{ marginTop: 3 }}
-                        />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            <span style={{ fontSize: 14, fontWeight: 500 }}>{isZh ? meta.zh : meta.en}</span>
-                            <span style={{ fontSize: 14, color: 'var(--gray-700)' }}>
-                              {fmt(addon.priceCents)}
-                              <span style={{ fontSize: 11, color: 'var(--gray-500)' }}>{isZh ? ' /月' : '/mo'}</span>
-                            </span>
-                          </div>
-                          {meta.hint && (
-                            <div style={{ fontSize: 12, color: 'var(--gray-500)', marginTop: 4 }}>
-                              {isZh ? meta.hint.zh : meta.hint.en}
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* 加購：模塊 */}
-            {moduleAddons.length > 0 && (
-              <div>
-                <h3
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 500,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    color: 'var(--gray-500)',
-                    marginBottom: 16,
-                  }}
-                >
-                  {isZh ? '功能模塊加購（一次性）' : 'Feature modules (one-time)'}
-                </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {moduleAddons.map((addon) => {
-                    const checked = selectedAddons.has(addon.type)
-                    const meta = ADDON_LABELS[addon.type]
-                    return (
-                      <label
-                        key={addon.type}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 14,
-                          padding: '14px 20px',
-                          border: checked ? '2px solid var(--accent)' : '1px solid var(--gray-200)',
-                          cursor: 'pointer',
-                          background: 'var(--white)',
-                          transition: 'border-color 0.15s',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleAddon(addon.type)}
-                        />
-                        <span style={{ flex: 1, fontSize: 14 }}>{isZh ? meta.zh : meta.en}</span>
-                        <span style={{ fontSize: 14, color: 'var(--gray-700)' }}>{fmt(addon.priceCents)}</span>
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
+            </div>
           </div>
 
-          {/* ── 右欄：總額 + 信任元素 + CTA ── */}
-          <aside
-            style={{
-              position: 'sticky',
-              top: 24,
-              padding: '32px 28px',
-              background: 'var(--gray-50)',
-              border: '1px solid var(--gray-200)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 24,
-            }}
-          >
-            {/* 總額 */}
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--gray-500)', marginBottom: 8 }}>
-                {isZh ? '今日付款' : 'Pay today'}
-              </div>
-              <div style={{ fontSize: 40, fontWeight: 300, letterSpacing: '-0.02em', lineHeight: 1 }}>
-                {fmt(oneTimeCents)}
-              </div>
-              {recurringCents > 0 && (
-                <div style={{ fontSize: 13, color: 'var(--gray-500)', marginTop: 8 }}>
-                  +{fmt(recurringCents)}
-                  {isZh ? ' /月（首月免費）' : '/mo (first month free)'}
-                </div>
-              )}
-            </div>
-
-            {/* 信任元素 — 連到合規頁讓客戶可查證 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, color: 'var(--gray-600)' }}>
-              <TrustItem
-                label={isZh ? '14 天無條件全額退款' : '14-day full refund'}
-                href={`/${locale}/refund`}
-              />
-              <TrustItem
-                label={isZh ? '90 天交付後保固期' : '90-day post-delivery warranty'}
-                href={`/${locale}/refund`}
-              />
-              <TrustItem
-                label={isZh ? '代碼可付費買斷帶走' : 'Code buyout available'}
-                href={`/${locale}/refund`}
-              />
-            </div>
-
-            {/* 條款連結（Stripe 審核可見性 + 法律合規）*/}
-            <div style={{ fontSize: 11, color: 'var(--gray-500)', lineHeight: 1.6 }}>
-              {isZh ? '點選付款即表示同意' : 'By clicking pay you agree to'}{' '}
-              <a href={`/${locale}/terms`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
-                {isZh ? '服務條款' : 'Terms'}
-              </a>
-              {isZh ? '、' : ', '}
-              <a href={`/${locale}/privacy`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
-                {isZh ? '隱私政策' : 'Privacy'}
-              </a>
-              {isZh ? '、' : ' and '}
-              <a href={`/${locale}/refund`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
-                {isZh ? '退款政策' : 'Refund Policy'}
-              </a>
-              。
-            </div>
-
-            {/* CTA */}
-            <button
-              type="button"
-              onClick={handleCheckout}
-              disabled={submitting || authLoading || !catalog}
+          {/* 人工協助 highlight bullet（standard / pro 才有）*/}
+          {hasHumanSupport && (
+            <div
               style={{
-                padding: '16px 24px',
-                background: submitting || !catalog ? 'var(--gray-400)' : 'var(--accent)',
-                color: 'var(--white)',
-                border: 'none',
-                fontSize: 14,
-                fontWeight: 500,
-                cursor: submitting || !catalog ? 'wait' : 'pointer',
-                letterSpacing: '0.02em',
+                padding: '12px 14px',
+                background: 'var(--accent-muted, rgba(201, 81, 47, 0.08))',
+                borderLeft: '3px solid var(--accent)',
+                fontSize: 13,
+                fontWeight: 600,
+                color: 'var(--gray-800)',
+                lineHeight: 1.5,
               }}
             >
-              {submitting
-                ? isZh ? '建立付款連結中…' : 'Creating checkout…'
-                : !isAuthenticated && !authLoading
-                  ? isZh ? '登入後購買' : 'Sign in to buy'
-                  : `${isZh ? '前往 Stripe 付款' : 'Continue to Stripe'} · ${fmt(oneTimeCents)}`}
-            </button>
+              {isZh ? '真人工程師 24 小時協助開發完工' : 'Real engineer 24/7 assistance until launch'}
+            </div>
+          )}
 
-            {/* 錯誤訊息（CLAUDE.md：所有錯誤完整顯示前端）*/}
-            {submitError && (
-              <div
+          {/* 包含內容 bullets */}
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {bullets.map((b) => (
+              <li
+                key={b}
                 style={{
-                  padding: '12px 14px',
-                  background: 'rgba(220, 50, 47, 0.08)',
-                  border: '1px solid rgba(220, 50, 47, 0.3)',
-                  color: '#a52a25',
-                  fontSize: 12,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
+                  fontSize: 13,
+                  color: 'var(--gray-600)',
+                  paddingLeft: 22,
+                  position: 'relative',
+                  lineHeight: 1.5,
                 }}
               >
-                {submitError}
-              </div>
-            )}
+                <span style={{ position: 'absolute', left: 0, color: 'var(--accent)' }}>✓</span>
+                {b}
+              </li>
+            ))}
+          </ul>
 
-            <div style={{ fontSize: 11, color: 'var(--gray-500)', textAlign: 'center' }}>
-              {isZh ? '支援信用卡 / Apple Pay / Google Pay · 由 Stripe 處理' : 'Cards / Apple Pay / Google Pay · Powered by Stripe'}
+          {/* 大 CTA */}
+          <button
+            type="button"
+            onClick={handleCheckout}
+            disabled={submitting || authLoading || !catalog}
+            style={{
+              padding: '16px 24px',
+              background: submitting || !catalog ? 'var(--gray-400)' : 'var(--accent)',
+              color: 'var(--white)',
+              border: 'none',
+              fontSize: 15,
+              fontWeight: 500,
+              cursor: submitting || !catalog ? 'wait' : 'pointer',
+              letterSpacing: '0.02em',
+              marginTop: 8,
+            }}
+          >
+            {submitting
+              ? isZh ? '建立付款連結中…' : 'Creating checkout…'
+              : !isAuthenticated && !authLoading
+                ? isZh ? '登入後購買' : 'Sign in to buy'
+                : `${isZh ? '前往 Stripe 付款' : 'Continue to Stripe'}  ·  ${fmt(totalAmount)}`}
+          </button>
+
+          {/* 錯誤訊息（CLAUDE.md：所有錯誤完整顯示前端） */}
+          {submitError && (
+            <div
+              style={{
+                padding: '12px 14px',
+                background: 'rgba(220, 50, 47, 0.08)',
+                border: '1px solid rgba(220, 50, 47, 0.3)',
+                color: '#a52a25',
+                fontSize: 12,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {submitError}
             </div>
-          </aside>
-        </div>
+          )}
+
+          {/* 條款連結（Stripe 審核 + 法律合規）*/}
+          <div style={{ fontSize: 11, color: 'var(--gray-500)', lineHeight: 1.6, textAlign: 'center' }}>
+            {isZh ? '點選付款即表示同意 ' : 'By clicking pay you agree to '}
+            <a href={`/${locale}/terms`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
+              {isZh ? '服務條款' : 'Terms'}
+            </a>
+            {isZh ? '、' : ', '}
+            <a href={`/${locale}/privacy`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
+              {isZh ? '隱私政策' : 'Privacy'}
+            </a>
+            {isZh ? '、' : ' and '}
+            <a href={`/${locale}/refund`} style={{ color: 'var(--gray-700)', textDecoration: 'underline' }}>
+              {isZh ? '退款政策' : 'Refund Policy'}
+            </a>
+            {isZh ? '。' : '.'}
+          </div>
+
+          <div style={{ fontSize: 11, color: 'var(--gray-500)', textAlign: 'center', marginTop: -8 }}>
+            {isZh ? '支援信用卡 / Apple Pay / Google Pay · 由 Stripe 處理' : 'Cards / Apple Pay / Google Pay · Powered by Stripe'}
+          </div>
+        </motion.div>
       </div>
     </main>
   )
-}
-
-function TrustItem({ label, href }: { label: string; href?: string }) {
-  const inner = (
-    <>
-      <span style={{ color: 'var(--accent)', fontSize: 14, lineHeight: 1.4 }}>✓</span>
-      <span>{label}</span>
-    </>
-  )
-  if (href) {
-    return (
-      <a
-        href={href}
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 8,
-          color: 'inherit',
-          textDecoration: 'none',
-        }}
-      >
-        {inner}
-      </a>
-    )
-  }
-  return <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>{inner}</div>
 }
