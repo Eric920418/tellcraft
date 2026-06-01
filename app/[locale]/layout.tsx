@@ -51,8 +51,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     description: t('description'),
     keywords: isZh
-      ? ['Tellcraft', 'AI 建站', 'AI 網站生成器', 'AI 自動建站', '免費建站', '對話式建站', 'AI 網站製作', '不用寫程式做網站', 'AI 建站平台推薦', 'AI 網頁設計', '一鍵部署網站', '免費 AI 架站', 'AI 開發平台', '自動化網站開發']
-      : ['Tellcraft', 'AI website builder', 'AI website generator', 'build website without coding', 'no-code website builder', 'best AI website builder 2026', 'AI code generation', 'build website free', 'create website with AI', 'conversation-driven development', 'one-click deploy', 'Next.js AI builder', 'automated web development'],
+      ? ['Tellcraft', 'AI 建站', 'AI 網站生成器', 'AI 自動建站', '不用寫程式做網站', '對話式建站', 'AI 全端開發', 'AI 建站含資料庫', '程式碼可帶走', 'AI 建站平台推薦', 'AI 接案神器', '一鍵部署網站', 'AI 開發平台', '自動化網站開發', 'AI 網頁設計']
+      : ['Tellcraft', 'AI website builder', 'AI app builder', 'build website without coding', 'no-code website builder', 'best AI website builder 2026', 'AI full-stack website generator', 'AI website builder with database', 'own your source code', 'create website with AI', 'Bubble alternative', 'Lovable alternative', 'Next.js AI builder', 'one-click deploy', 'conversation-driven development'],
     openGraph: {
       type: 'website',
       locale: isZh ? 'zh_TW' : 'en_US',

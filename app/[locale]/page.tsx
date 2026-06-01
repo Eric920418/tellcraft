@@ -21,11 +21,13 @@ export default async function Home({ params }: Props) {
   const tHero = await getTranslations({ locale, namespace: 'hero' })
   const tHowItWorks = await getTranslations({ locale, namespace: 'howItWorks' })
   const tMetadata = await getTranslations({ locale, namespace: 'metadata' })
+  const tComparison = await getTranslations({ locale, namespace: 'comparison' })
+  const tStats = await getTranslations({ locale, namespace: 'stats' })
 
   const isZh = locale === 'zh'
   const canonicalUrl = isZh ? 'https://tellcraft.com/zh' : 'https://tellcraft.com'
 
-  const faqItems = Array.from({ length: 8 }, (_, i) => ({
+  const faqItems = Array.from({ length: 13 }, (_, i) => ({
     question: tFaq(`q${i + 1}`),
     answer: tFaq(`a${i + 1}`),
   }))
@@ -61,6 +63,39 @@ export default async function Home({ params }: Props) {
             <li><strong>{tHowItWorks('step4Title')}</strong>: {tHowItWorks('step4Desc')}</li>
             <li><strong>{tHowItWorks('step5Title')}</strong>: {tHowItWorks('step5Desc')}</li>
           </ol>
+        </section>
+
+        <section id="comparison">
+          <h2>{tComparison('heading')}</h2>
+          <p>{tComparison('subtitle')}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>{tComparison('columnFeature')}</th>
+                <th>{tComparison('columnTraditional')}</th>
+                <th>Tellcraft</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <tr key={n}>
+                  <td>{tComparison(`feature${n}`)}</td>
+                  <td>{tComparison(`traditional${n}`)}</td>
+                  <td>{tComparison(`tellcraft${n}`)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
+        <section id="stats">
+          <h2>{tStats('heading')}</h2>
+          <ul>
+            <li>90% — {tStats('label1')} ({tStats('desc1')})</li>
+            <li>24 {tStats('suffixHours')} — {tStats('label2')} ({tStats('desc2')})</li>
+            <li>0 {tStats('suffixLines')} — {tStats('label3')} ({tStats('desc3')})</li>
+            <li>100% — {tStats('label4')} ({tStats('desc4')})</li>
+          </ul>
         </section>
 
         <section id="faq">

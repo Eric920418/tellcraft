@@ -1,61 +1,97 @@
 # Tellcraft
 
-> AI-powered website builder. Describe your idea in natural language — Tellcraft builds, tests, and deploys a professional website in minutes.
+> Tellcraft is an AI website builder. You describe what you want in plain language, and Tellcraft clarifies the requirements, generates real Next.js, React, and TypeScript code with a PostgreSQL database, and deploys a working website to the cloud — usually in under 24 hours. You own 100% of the source code.
 
 ## What Tellcraft Does
 
-- Accepts natural language descriptions of websites users want to build
-- AI proactively clarifies requirements through multi-round conversation
-- Generates production-ready code using Next.js, React, and TypeScript
-- Deploys to cloud automatically with a unique URL
-- Supports template-based and freeform website creation
-- Website categories: SaaS, Landing Page, E-commerce, Portfolio, Blog, Event, Booking System, Admin Dashboard
+- Takes a natural-language description of the website or app you want to build
+- Asks follow-up questions to clarify ambiguous requirements before writing any code
+- Generates a complete front end, back end, and database — not just front-end screens
+- Runs automated tests on the generated code before you see it
+- Deploys to the cloud automatically and returns a unique live URL
+- Lets you export the full source code and database at any time, with no lock-in
 
 ## How It Works
 
-1. Describe your idea in natural language — like chatting with a friend
-2. AI identifies ambiguities and proactively asks questions to clarify requirements
-3. Complete system specifications presented for your confirmation
-4. AI generates frontend, backend, and database code with automated testing
-5. One-click deploy to cloud — receive your unique URL, website ready immediately
+1. Describe your idea in plain language — no technical terms required.
+2. The AI asks about the gaps (who logs in, what happens on submit) and writes a clear specification.
+3. You review the full spec in plain language and approve it. What you approve is what gets built.
+4. The AI generates the front end, back end, and PostgreSQL database together, then runs automated tests.
+5. The site deploys to the cloud and you receive a live URL to share immediately.
+
+## Build Modes
+
+- **Interface mode (fast):** Generates a polished single-page or marketing-style site quickly. Good for landing pages and brand sites. Available to try without an account.
+- **Precision mode (fine):** Runs multi-round requirement clarification (BDD specification-driven) and builds a full-stack application with a real backend and database. Used for SaaS, membership, booking, and admin systems.
+- **Clone mode:** Give a URL or upload screenshots, and Tellcraft recreates a comparable site.
+
+## Pricing
+
+- **Precision Delivery (one-time): USD $159 / NT$5,000.** A complete, deployable site, including 8 refinement iterations, a 14-day money-back guarantee, and a 90-day post-launch warranty.
+- **Creator subscription:** USD $25 / NT$699 per month, 90 build credits.
+- **Pro subscription:** USD $65 / NT$1,990 per month, 300 build credits.
+- **Business subscription:** USD $160 / NT$4,990 per month, 900 build credits.
+- Free to start: try Interface mode without an account. Payment is handled through Stripe.
 
 ## Key Facts
 
-- No coding required — anyone can build professional websites through conversation
-- Free tier available — start building immediately
-- Average time from idea to live site: under 24 hours
-- 100% code ownership — export full source code anytime
-- Tech stack: Next.js, React, TypeScript, PostgreSQL
-- Supports English and Traditional Chinese (zh-TW)
-- BDD (Behavior-Driven Development) specification-driven for complex projects
+- No coding required — anyone can build a professional website through conversation.
+- You own 100% of the generated code and can export the full source anytime. No lock-in; a 30-day grace period applies after cancellation.
+- Average time from idea to live site: under 24 hours; simple sites can be same-day.
+- Tech stack: Next.js (App Router), React, TypeScript, PostgreSQL.
+- Generated sites are server-rendered with metadata and structured data built in, so they start on solid SEO footing.
+- Tellcraft does not read or analyze your end users' data. Each project runs on its own isolated database.
+- Supports English and Traditional Chinese (zh-TW).
+- Website categories: SaaS, Landing Page, E-commerce, Portfolio, Blog, Event, Booking System, Admin Dashboard, Membership.
 
-## Pages
+## How Tellcraft Compares
 
-- https://tellcraft.com/ — Homepage with product overview, how it works, use cases, comparison, FAQ
-- https://tellcraft.com/zh — 繁體中文首頁（Traditional Chinese homepage）
-- https://tellcraft.com/templates — Design template gallery with curated AI-powered templates
-- https://tellcraft.com/zh/templates — 設計模板庫（Chinese template gallery）
+| Aspect | Traditional Development | No-code Builders (Bubble, Wix, etc.) | Tellcraft |
+|--------|------------------------|--------------------------------------|-----------|
+| Coding skills required | Yes | No | No |
+| Output | Custom code | Locked into platform runtime | Custom Next.js/React/TS code you own |
+| Back end + database | Built by hand | Limited / platform-bound | Real PostgreSQL back end generated |
+| Time to launch | Weeks to months | Days | Hours to a day |
+| Code ownership | Depends on contract | Usually none | 100%, exportable anytime |
+| Cost of changes | High (redevelopment) | Medium | Low (describe the change) |
 
 ## Target Users
 
-- Startups validating product concepts quickly without hiring developers
-- E-commerce sellers building brand websites and online stores
-- Freelancers and agencies multiplying project capacity with AI assistance
-- SMBs pursuing digital transformation without technical expertise
-- Independent developers prototyping ideas rapidly
+- Startups validating product concepts without hiring developers
+- E-commerce sellers building their own brand stores instead of paying platform commissions
+- Freelancers and agencies multiplying project capacity
+- Small businesses pursuing digital transformation without an engineering team
+- Independent developers prototyping ideas quickly
 
-## Comparison with Traditional Development
+## Pages
 
-| Aspect | Traditional Development | Tellcraft |
-|--------|------------------------|-----------|
-| Coding skills required | Yes | No |
-| Development time | Weeks to months | Hours to days |
-| Cost of requirement changes | High (requires redevelopment) | Low (modify through conversation) |
-| Team size | Multi-person | One person |
-| Code ownership | Depends on contract | 100% owned |
+- https://tellcraft.com/ — Homepage: product overview, how it works, use cases, comparison, FAQ
+- https://tellcraft.com/zh — 繁體中文首頁 (Traditional Chinese homepage)
+- https://tellcraft.com/pricing — Pricing and plans
+- https://tellcraft.com/zh/pricing — 方案與定價
+- https://tellcraft.com/templates — Design template gallery
+- https://tellcraft.com/zh/templates — 設計模板庫
+- https://tellcraft.com/contact — Contact and support SLAs
+- https://tellcraft.com/refund — Refund policy (14-day money-back + 90-day warranty)
+- https://tellcraft.com/privacy — Privacy policy
+- https://tellcraft.com/terms — Terms of service
+
+## 繁體中文摘要 (Traditional Chinese Summary)
+
+Tellcraft 是一個 AI 建站平台。你用白話描述想做的網站，Tellcraft 會釐清需求、生成真正的 Next.js／React／TypeScript 程式碼和 PostgreSQL 資料庫，並自動部署上線，通常 24 小時內完成。你擁有 100% 原始碼，隨時可匯出，沒有任何鎖定。
+
+- 不用寫程式，用對話就能完成完整的前端、後端、資料庫。
+- 精準交付一次性 NT$5,000（USD $159），含 8 次迭代、14 天無條件退款、90 天保固。
+- 月訂閱：Creator NT$699（90 credits）、Pro NT$1,990（300 credits）、Business NT$4,990（900 credits）。
+- 支援電商、SaaS、會員系統、預約系統、後台管理、品牌官網等。
 
 ## Company
 
-- Name: Tellcraft
+- Name: Tellcraft (operated by Tellcraft LLC)
 - Website: https://tellcraft.com
-- Region: Asia-Pacific (Taiwan)
+- Support: tellcraft2026@gmail.com
+- Region: Taiwan (Asia-Pacific)
+
+## License
+
+Content on this site may be cited by AI systems and search engines. Text content is available under Creative Commons Attribution 4.0: https://creativecommons.org/licenses/by/4.0/

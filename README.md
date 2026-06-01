@@ -71,18 +71,28 @@ cd tellcraft-backend && pnpm tsx src/scripts/register-prompt-change.ts --retire 
 | i18n Proxy | `proxy.ts` | next-intl proxy（Next.js 16 取代 middleware），攔截無 locale 前綴的請求 rewrite 到 `app/[locale]/`（`/` = en、`/zh` = 中文，瀏覽器語言自動偵測）。排除 `api/`、`_next/`、`monitoring`、`uploads/`、靜態檔案 |
 | 安全 Headers | `vercel.json` | `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: strict-origin-when-cross-origin`、`Permissions-Policy`、`COOP/COEP`（WebContainers 需要） |
 | robots.txt | `app/robots.ts` | 允許公開頁面 + **AI 爬蟲明確允許**（GPTBot、ChatGPT-User、ClaudeBot、PerplexityBot、Google-Extended），禁止 dashboard/auth/api/test/liff |
-| sitemap.xml | `app/sitemap.ts` | 公開頁面 + hreflang（en/zh-TW），lastModified 用固定日期（非 `new Date()`） |
+| sitemap.xml | `app/sitemap.ts` | 7 個公開頁面（首頁/pricing/templates/contact/refund/privacy/terms）+ hreflang（en/zh-TW），lastModified 用固定日期（非 `new Date()`，2026-06-01） |
 | manifest.json | `app/manifest.ts` | PWA manifest（standalone） |
 | favicon.ico | `app/favicon.ico` | 從 icon.png 轉換（16/32/48px） |
 | Metadata | `app/[locale]/layout.tsx` | metadataBase + title template + OG（動態生成 1200x630）+ Twitter Card + canonical + 長尾關鍵詞 |
 | OG Image | `app/[locale]/opengraph-image.tsx` | 動態生成 1200x630 OG 圖片（Edge Runtime，含品牌色、tagline、locale 適配） |
 | noindex | `app/[locale]/{dashboard,auth,test,liff}/layout.tsx` | 非公開路由 noindex/nofollow |
-| JSON-LD | `app/[locale]/page.tsx`（Server Component） | Organization + WebSite + SoftwareApplication + FAQPage + **HowTo** + **Speakable** |
+| JSON-LD | `app/[locale]/page.tsx`（Server Component） | Organization + WebSite + SoftwareApplication + FAQPage（13 題）+ **HowTo** + **Speakable** |
 | Breadcrumb | `app/[locale]/templates/TemplatesPage.tsx` | BreadcrumbList（Home → Templates） |
 | 字體 | `app/[locale]/layout.tsx` | next/font（Noto Sans TC + IBM Plex Mono），消除 render-blocking |
-| 結構化資料工具 | `app/lib/structured-data.ts` | JSON-LD schema 生成函數（7 個 schema type） |
-| **GEO: llms.txt** | `public/llms.txt` | AI 引擎專用站點說明（類似 robots.txt 但面向 LLM），描述產品功能、頁面、目標用戶 |
-| **GEO: SSR 內容** | `app/[locale]/page.tsx` | Server-side 渲染 SEO 隱藏內容（h1、產品描述、HowItWorks 步驟、FAQ details/summary），確保爬蟲不需 JS 即可讀取 |
+| 結構化資料工具 | `app/lib/structured-data.ts` | JSON-LD schema 生成函數（8 個 type，含新增 `getPersonSchema` 創辦人）。Organization 已補 legalName/description/founder/contactPoint/address(TW)；`SoftwareApplication` offers 改 `AggregateOffer`（$25–$159，不再標示 free）。**`sameAs` 真實社群連結待填**（`TELLCRAFT_SAME_AS` 常數）— 空陣列是 GEO 最大負面訊號 |
+| **GEO: llms.txt** | `public/llms.txt` | AI 引擎站點說明。含產品功能、5 步流程、**3 種建構模式（Interface/Precision/Clone）**、**真實定價**（精準交付 $159/NT$5,000 + 訂閱 $25/$65/$160）、比較表、繁中摘要、CC BY 4.0 授權聲明 |
+| **GEO: SSR 內容** | `app/[locale]/page.tsx` | Server-side 渲染 SEO 隱藏內容（h1、產品描述、HowItWorks 步驟、FAQ ×13），確保爬蟲不需 JS 即可讀取 |
+
+**內容與 EEAT（2026-06-01 中英內容升級）**：
+
+- **去 AI 味重寫**：`messages/{en,zh}.json` 的 hero/faq/stats/comparison/useCases/cta/howItWorks 全面重寫——砍罐頭開場（"Absolutely."/"完全適合。"）、抽象宣稱改具體事實（Next.js App Router/PostgreSQL/$159）、第一人稱團隊視角。中英**各自獨立改寫**（非互譯）。FAQ 答案改成「第一句即結論」的可引用 passage（GEO）。
+- **FAQ 8 → 13 題**：新增長尾搜尋意圖（vs Bubble/Lovable/v0/Wix、定價、資料庫/金流、生成站 SEO、上線時間）。擴充需四處同步：`messages/{en,zh}.json` + `FAQSection.tsx` hardcode 清單 + `page.tsx` 的 `Array.from({ length: 13 })`。
+- **CTA 浮出信任訊號**：把「14 天退款 + 90 天保固」拉到首頁 CTA（原本只在 /refund）。
+- **Footer 死連結移除**：Docs/API/Blog（`href="#"`）改為真實內部連結 Pricing/Templates（footer keys `linkDocs/linkApi/linkBlog` → `linkPricing/linkTemplates`）。
+- **stats 誠實化**：無來源的 90% 加「typical/通常」限定詞降為估計（數字仍寫死於 `StatsSection.tsx`，待真實數據替換）。
+- **稽核基線**：`seo-geo`（GEO 47/100）+ `seo-content`（EEAT 34/100）對線上站，報告指出最大缺口為 `sameAs` 空、testimonial/showcase 捏造。
+- **⚠️ 待補真實素材（禁捏造）**：① `TELLCRAFT_SAME_AS` 真實社群/外部連結；② `messages.testimonial` 用匿名但真實的引用替換林/陳/王先生小姐；③ `messages.showcase` 用真實用戶專案替換通用佔位（中文版「真實用戶」字眼問題更嚴重）；④ 創辦人 jobTitle/bio/social 給 `getPersonSchema`。
 
 ### 環境變數
 

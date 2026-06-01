@@ -40,9 +40,8 @@ function Footer() {
               {t('navResources')}
             </div>
             <nav style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkDocs')}</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkApi')}</a>
-              <a href="#" style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkBlog')}</a>
+              <a href={`/${locale}/pricing`} style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkPricing')}</a>
+              <a href={`/${locale}/templates`} style={{ fontSize: 14, color: 'var(--gray-600)', textDecoration: 'none' }}>{t('linkTemplates')}</a>
             </nav>
           </div>
           <div>

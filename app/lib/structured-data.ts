@@ -1,13 +1,57 @@
 type JsonLd = Record<string, unknown>
 
+// 真實社群 / 外部資產連結。沿用就是 GEO 最關鍵的實體驗證訊號（sameAs），
+// 空陣列等於告訴 AI 引擎「此品牌無可驗證外部存在」。請填入真實 URL（X / LinkedIn / GitHub / Product Hunt 等）。
+const TELLCRAFT_SAME_AS: string[] = [
+  // 'https://github.com/<org>',
+  // 'https://www.linkedin.com/company/<slug>',
+  // 'https://x.com/<handle>',
+]
+
 export function getOrganizationSchema(): JsonLd {
   return {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: 'Tellcraft',
+    legalName: 'Tellcraft LLC',
     url: 'https://tellcraft.com',
     logo: 'https://tellcraft.com/logo.png',
-    sameAs: [],
+    description:
+      'Tellcraft is an AI website builder that turns a plain-language description into a production-ready Next.js site with a real back end and PostgreSQL database, deployed in under 24 hours. Users own 100% of the generated source code.',
+    email: 'tellcraft2026@gmail.com',
+    founder: {
+      '@type': 'Person',
+      name: 'Tsai Yi-Lien',
+    },
+    contactPoint: {
+      '@type': 'ContactPoint',
+      email: 'tellcraft2026@gmail.com',
+      contactType: 'customer support',
+      availableLanguage: ['en', 'zh-TW'],
+    },
+    address: {
+      '@type': 'PostalAddress',
+      addressCountry: 'TW',
+      addressRegion: 'New Taipei City',
+    },
+    sameAs: TELLCRAFT_SAME_AS,
+  }
+}
+
+// 創辦人 / 作者身份 — 供 About 區塊或內容署名使用，提供 EEAT 的 Experience/Expertise 訊號。
+// jobTitle / sameAs 待補充真實資料後啟用。
+export function getPersonSchema(): JsonLd {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Person',
+    name: 'Tsai Yi-Lien',
+    jobTitle: 'Founder',
+    worksFor: {
+      '@type': 'Organization',
+      name: 'Tellcraft',
+      url: 'https://tellcraft.com',
+    },
+    sameAs: TELLCRAFT_SAME_AS,
   }
 }
 
@@ -45,10 +89,14 @@ export function getSoftwareApplicationSchema(locale: string): JsonLd {
       ? 'AI 對話式開發, 自動代碼生成, 一鍵雲端部署, 100% 代碼擁有權, BDD 規格驅動, 即時預覽'
       : 'AI conversational development, automatic code generation, one-click cloud deploy, 100% code ownership, BDD specification-driven, real-time preview',
     offers: {
-      '@type': 'Offer',
-      price: '0',
+      '@type': 'AggregateOffer',
       priceCurrency: 'USD',
-      category: 'Free Tier',
+      lowPrice: '25',
+      highPrice: '159',
+      offerCount: '4',
+      description: isZh
+        ? '精準交付一次性 USD $159，或月訂閱 USD $25 起。'
+        : 'One-time Precision Delivery at USD $159, or monthly plans from USD $25.',
     },
   }
 }
