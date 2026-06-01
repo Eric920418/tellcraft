@@ -21,6 +21,7 @@ import { useCodePreviewEditor } from '@/app/hooks/useCodePreviewEditor'
 import { useLoginPrompt } from '@/app/hooks/useLoginPrompt'
 import { useChatSession } from '@/app/hooks/useChatSession'
 import { useChatPolling } from '@/app/hooks/useChatPolling'
+import { useChatSocket } from '@/app/hooks/useChatSocket'
 import { useStrippedMessageHydration } from '@/app/hooks/useStrippedMessageHydration'
 import { useCompletionAlert } from '@/app/hooks/useCompletionAlert'
 import { useTabSync } from '@/app/hooks/useTabSync'
@@ -267,6 +268,12 @@ export default function ChatSection({
     pollingCallbacks,
   )
   pollingRef.current = polling
+
+  // 即時 socket 推送（補齊 polling 的 3-15s 延遲）
+  useChatSocket(
+    session.sessionInfo?.conversationId,
+    (updater: (prev: Message[]) => Message[]) => setMessages(updater),
+  )
 
   // 防雷 incident 2026-05-17：偵測 polling response 被 cap strip 的 message，自動 lazy fetch detail
   // 避免大 code_preview message 被 strip 後 preview panel 一片黑
@@ -521,8 +528,11 @@ export default function ChatSection({
       // 廣播任務開始，讓同一瀏覽器其他 Tab 知道
       broadcastTaskStarted(session.sessionInfo.conversationId)
     }
+    // 送出成功後立即強制 poll + reset interval 回 3s
+    // 修復 backoff 升到 15s 後送訊息要等 15s 才看到 AI 回覆的 bug
+    polling.forcePoll()
     return true
-  }, [session, isTyping, sendCooldown, isGuestLocked, startSendCooldown, getCommandLabel, scroll, locale, tChat, tLogin, loginPromptHook, broadcastTaskStarted])
+  }, [session, isTyping, sendCooldown, isGuestLocked, startSendCooldown, getCommandLabel, scroll, locale, tChat, tLogin, loginPromptHook, broadcastTaskStarted, polling])
 
   // ── Send from input (Enter key) ──
   const handleSend = useCallback(async () => {

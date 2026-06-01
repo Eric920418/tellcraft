@@ -33,13 +33,18 @@ export function useChatPolling(
   const callbacksRef = useRef(callbacks)
   callbacksRef.current = callbacks
 
+  // 把 pollInterval 跟 poll fn 提升到 ref，讓 forcePoll() 可以從 hook 外重置 + 立即觸發
+  // 修正 useEffect 內部閉包陷阱：原本 resetPolling() 無法重置 pollInterval（區域變數）
+  const pollIntervalRef = useRef(3000)
+  const pollFnRef = useRef<(() => void) | null>(null)
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
   useEffect(() => {
     if (!conversationId) return
 
-    let pollInterval = 3000
     const MAX_INTERVAL = 15000
     const MIN_INTERVAL = 3000
-    let timeoutId: NodeJS.Timeout | null = null
+    pollIntervalRef.current = MIN_INTERVAL
     let isPolling = true
     let currentUpdatedAt = lastUpdatedAtRef.current
 
@@ -65,7 +70,7 @@ export function useChatPolling(
           callbacksRef.current.onStreamingPreview(sp)
           const newChunks = (sp.pages?.length || 0) + (sp.components?.length || 0)
           callbacksRef.current.onFastBuildChunks(newChunks)
-          pollInterval = 3000  // streaming preview 已存 Redis，3s 足夠
+          pollIntervalRef.current = MIN_INTERVAL  // streaming preview 已存 Redis，3s 足夠
           if (typeof window !== 'undefined' && window.innerWidth >= 768) {
             callbacksRef.current.onLayoutModeChange('split')
           }
@@ -79,9 +84,9 @@ export function useChatPolling(
         }
 
         if (result.data.hasChanges === false) {
-          pollInterval = Math.min(pollInterval * 1.5, MAX_INTERVAL)
+          pollIntervalRef.current = Math.min(pollIntervalRef.current * 1.5, MAX_INTERVAL)
           if (isPolling) {
-            timeoutId = setTimeout(poll, pollInterval)
+            pollTimeoutRef.current = setTimeout(poll, pollIntervalRef.current)
           }
           return
         }
@@ -89,7 +94,7 @@ export function useChatPolling(
         const newMessages = result.data.messages
 
         if (newMessages.length > 0) {
-          pollInterval = MIN_INTERVAL
+          pollIntervalRef.current = MIN_INTERVAL
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const formattedMessages: Message[] = newMessages.map((m: any) => ({
@@ -248,7 +253,7 @@ export function useChatPolling(
             setLastTimestamp(latestTimestamp)
           }
         } else {
-          pollInterval = Math.min(pollInterval * 1.5, MAX_INTERVAL)
+          pollIntervalRef.current = Math.min(pollIntervalRef.current * 1.5, MAX_INTERVAL)
         }
 
         // 同步 currentTaskId（設置或清除）
@@ -264,15 +269,17 @@ export function useChatPolling(
       }
 
       if (isPolling) {
-        timeoutId = setTimeout(poll, pollInterval)
+        pollTimeoutRef.current = setTimeout(poll, pollIntervalRef.current)
       }
     }
 
+    pollFnRef.current = poll
     poll()
 
     return () => {
       isPolling = false
-      if (timeoutId) clearTimeout(timeoutId)
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current)
+      pollFnRef.current = null
     }
   }, [conversationId, lastTimestamp])
 
@@ -281,5 +288,16 @@ export function useChatPolling(
     setLastUpdatedAt(null)
   }, [])
 
-  return { lastTimestamp, setLastTimestamp, resetPolling }
+  // 強制立即 poll + 重置 interval 回 3s
+  // 在 handleSendMessage 成功後呼叫，避免 backoff 升到 15s 後送訊息卡很久
+  const forcePoll = useCallback(() => {
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current)
+      pollTimeoutRef.current = null
+    }
+    pollIntervalRef.current = 3000
+    pollFnRef.current?.()
+  }, [])
+
+  return { lastTimestamp, setLastTimestamp, resetPolling, forcePoll }
 }
