@@ -229,6 +229,7 @@ export interface FlowState {
     colors: import('../services/reference-analyzer').ExtractedColors
     typography: import('../services/reference-analyzer').ExtractedTypography
     layout: import('../services/reference-analyzer').ExtractedLayout
+    tokens?: import('../services/clone/design-token-extractor').CloneDesignTokens
   }
   cloneAnalyzingStartedAt?: number        // 超時偵測
   cloneGeneratingStartedAt?: number       // 超時偵測

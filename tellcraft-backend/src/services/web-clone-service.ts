@@ -10,6 +10,7 @@ import { getEnv } from '../lib/env'
 import { createLogger } from '../lib/logger'
 import { PUPPETEER_ARGS, type ExtractedColors, type ExtractedTypography, type ExtractedLayout } from './reference-analyzer'
 import { postProcessExtraction } from './reference-analyzer'
+import { buildCloneDesignTokens, type CloneDesignTokens, type RawTokenData } from './clone/design-token-extractor'
 import type { CloneSectionMeta } from '../types/flow-state'
 
 const logger = createLogger('web-clone-service')
@@ -34,6 +35,8 @@ export interface CloneDesignSystem {
   colors: ExtractedColors
   typography: ExtractedTypography
   layout: ExtractedLayout
+  /** 結構化 design token（移植 design-extract）；抽取失敗時為 undefined → 降級回 colors/typography */
+  tokens?: CloneDesignTokens
 }
 
 export interface CloneAnalysis {
@@ -152,8 +155,14 @@ const CLONE_EXTRACTION_SCRIPT = `(function() {
     };
   });
 
-  // 色板提取（複用 Route A 邏輯）
+  // 色板提取（複用 Route A 邏輯）+ design token 原料收集（移植 design-extract）
   var bgMap = {}, textMap = {}, accentMap = {}, borderMap = {};
+  // ── rawTokens 原料表（不分類，Node 端 design-token-extractor 負責分類）──
+  var colorSamples = [];
+  var fontSizes = {}, fontWeights = {}, lineHeights = {};
+  var paddings = {}, margins = {}, gaps = {};
+  var shadows = {}, radii = {}, borders = {};
+  var gradients = [];
   var allEls = document.querySelectorAll('*');
   var step = Math.max(1, Math.floor(allEls.length / 500));
   for (var i = 0; i < allEls.length; i += step) {
@@ -163,9 +172,74 @@ const CLONE_EXTRACTION_SCRIPT = `(function() {
     var tc = cs.color; if (tc) { var thex = rgbToHex(tc); textMap[thex] = (textMap[thex] || 0) + 1; }
     if (cs.borderWidth !== '0px' && cs.borderColor !== 'rgb(0, 0, 0)') { var bhex = rgbToHex(cs.borderColor); borderMap[bhex] = (borderMap[bhex] || 0) + 1; }
     if (el.tagName === 'BUTTON' || el.tagName === 'A') { var abg = bg && bg !== 'rgba(0, 0, 0, 0)' ? rgbToHex(bg) : null; if (abg && abg !== '#ffffff' && abg !== '#000000') accentMap[abg] = (accentMap[abg] || 0) + 1; }
+
+    // 色彩樣本（帶 role + 面積，供 Node 端 cluster + 語意角色）
+    var erect = el.getBoundingClientRect();
+    var earea = Math.round(erect.width * erect.height);
+    var isBtn = el.tagName === 'BUTTON' || el.tagName === 'A' || (el.getAttribute('role') || '') === 'button';
+    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') colorSamples.push({ hex: rgbToHex(bg), role: isBtn ? 'button' : 'bg', area: earea });
+    if (tc) colorSamples.push({ hex: rgbToHex(tc), role: 'text', area: earea });
+    if (cs.borderWidth !== '0px' && cs.borderColor) colorSamples.push({ hex: rgbToHex(cs.borderColor), role: 'border', area: earea });
+    // 字級階層
+    if (cs.fontSize) fontSizes[cs.fontSize] = (fontSizes[cs.fontSize] || 0) + 1;
+    if (cs.fontWeight) fontWeights[cs.fontWeight] = (fontWeights[cs.fontWeight] || 0) + 1;
+    if (cs.lineHeight && cs.lineHeight !== 'normal') lineHeights[cs.lineHeight] = (lineHeights[cs.lineHeight] || 0) + 1;
+    // 間距
+    if (cs.padding && cs.padding !== '0px') paddings[cs.padding] = (paddings[cs.padding] || 0) + 1;
+    if (cs.margin && cs.margin !== '0px') margins[cs.margin] = (margins[cs.margin] || 0) + 1;
+    if (cs.gap && cs.gap !== 'normal' && cs.gap !== '0px') gaps[cs.gap] = (gaps[cs.gap] || 0) + 1;
+    // 陰影 / 圓角 / 邊框
+    if (cs.boxShadow && cs.boxShadow !== 'none') { var sk = cs.boxShadow.slice(0, 120); shadows[sk] = (shadows[sk] || 0) + 1; }
+    if (cs.borderRadius && cs.borderRadius !== '0px') radii[cs.borderRadius] = (radii[cs.borderRadius] || 0) + 1;
+    if (cs.borderWidth && cs.borderWidth !== '0px') { var bk = cs.borderWidth + ' ' + cs.borderStyle + ' ' + rgbToHex(cs.borderColor); borders[bk] = (borders[bk] || 0) + 1; }
+    // 漸層
+    if (cs.backgroundImage && cs.backgroundImage.indexOf('gradient') !== -1 && gradients.length < 30) gradients.push(cs.backgroundImage.slice(0, 200));
   }
   function sortByFreq(map, limit) { return Object.entries(map).sort(function(a,b){return b[1]-a[1];}).slice(0,limit).map(function(e){return e[0];}); }
   var colorPalette = { backgrounds: sortByFreq(bgMap,6), texts: sortByFreq(textMap,4), accents: sortByFreq(accentMap,3), borders: sortByFreq(borderMap,3) };
+
+  // ── CSS 變數（:root 宣告）──
+  var cssVariables = [];
+  var seenVar = {};
+  for (var si = 0; si < document.styleSheets.length; si++) {
+    try {
+      var rules = document.styleSheets[si].cssRules;
+      if (!rules) continue;
+      for (var ri = 0; ri < rules.length; ri++) {
+        var rule = rules[ri];
+        if (rule.style && rule.selectorText && rule.selectorText.indexOf(':root') !== -1) {
+          for (var pi = 0; pi < rule.style.length; pi++) {
+            var prop = rule.style[pi];
+            if (prop && prop.indexOf('--') === 0 && !seenVar[prop]) {
+              seenVar[prop] = 1;
+              cssVariables.push({ name: prop, value: (rule.style.getPropertyValue(prop) || '').trim().slice(0, 120) });
+            }
+          }
+        }
+      }
+    } catch (e) { /* cross-origin stylesheet 無法讀取，跳過 */ }
+  }
+
+  // ── Media query 斷點 ──
+  var mediaQueries = [];
+  for (var sj = 0; sj < document.styleSheets.length; sj++) {
+    try {
+      var mrules = document.styleSheets[sj].cssRules;
+      if (!mrules) continue;
+      for (var mi = 0; mi < mrules.length; mi++) {
+        var mr = mrules[mi];
+        if (mr.type === 4 && mr.media && mr.media.mediaText) mediaQueries.push(mr.media.mediaText);
+      }
+    } catch (e) { /* cross-origin */ }
+  }
+
+  var rawTokens = {
+    cssVariables: cssVariables, colorSamples: colorSamples,
+    fontSizes: fontSizes, fontWeights: fontWeights, lineHeights: lineHeights,
+    paddings: paddings, margins: margins, gaps: gaps,
+    shadows: shadows, radii: radii, borders: borders,
+    gradients: gradients, mediaQueries: mediaQueries
+  };
 
   // 字體
   var headingFreq = {}, bodyFreq = {};
@@ -193,7 +267,7 @@ const CLONE_EXTRACTION_SCRIPT = `(function() {
 
   var title = document.title || '';
 
-  return { sections: domSections, colorPalette: colorPalette, typography: typography, layoutInfo: layoutInfo, title: title };
+  return { sections: domSections, colorPalette: colorPalette, typography: typography, layoutInfo: layoutInfo, rawTokens: rawTokens, title: title };
 })()`
 
 // ── Section 切割後處理 ──
@@ -259,6 +333,7 @@ export async function extractPageForClone(url: string): Promise<CloneAnalysis> {
       colorPalette: ExtractedColors
       typography: ExtractedTypography
       layoutInfo: ExtractedLayout
+      rawTokens: RawTokenData
       title: string
     }
 
@@ -269,6 +344,22 @@ export async function extractPageForClone(url: string): Promise<CloneAnalysis> {
       typography: rawData.typography,
       layoutInfo: rawData.layoutInfo,
     })
+
+    // 結構化 design token（fail-soft：失敗不阻塞，降級回 colors/typography）
+    let tokens: CloneDesignTokens | undefined
+    try {
+      tokens = buildCloneDesignTokens(rawData.rawTokens)
+      logger.info({
+        primary: tokens.semanticColors.primary,
+        secondary: tokens.semanticColors.secondary,
+        cssVarCount: rawData.rawTokens?.cssVariables?.length || 0,
+        spacingBase: tokens.spacingScale.baseUnit,
+        breakpoints: tokens.breakpoints.length,
+      }, 'Clone design token 抽取完成')
+    } catch (err) {
+      logger.warn({ error: String(err).slice(0, 200) }, 'Clone design token 抽取失敗，降級回基礎色板')
+      tokens = undefined
+    }
 
     // 指派組件名
     assignComponentNames(rawData.sections)
@@ -306,6 +397,7 @@ export async function extractPageForClone(url: string): Promise<CloneAnalysis> {
         colors: processed.colorPalette,
         typography: processed.typography,
         layout: processed.layoutInfo,
+        tokens,
       },
       fullPageScreenshot,
       url,
@@ -333,7 +425,45 @@ const CLONE_SYSTEM_PROMPT = `你是前端工程師。根據截圖和 DOM 結構�
 使用 Tailwind 類名精確復刻截圖的樣式。
 保持原始文字內容完整。
 不要新增互動邏輯（onClick handler 等留空）。
-不要使用 CSS-in-JS 或 inline styles，全部用 Tailwind。`
+不要使用 CSS-in-JS 或 inline styles，全部用 Tailwind。
+
+## 顏色與尺寸硬規則（提升復刻準度）
+- 當 user message 提供「結構化 Design Token」時，**顏色一律從 token 取**，依語意角色挑選（primary=主按鈕/CTA、foreground=正文字、background=頁面底色、surface=卡片底、accent=點綴），用任意值如 bg-[#635bff]、text-[#0a0a0a]。
+- **禁止自創不在 palette 中的顏色**；token 未涵蓋時才退回從截圖目視取色。
+- 圓角/陰影/間距優先採用 token 提供的值（rounded-[12px]、shadow-[...]、gap-[16px]、p-[24px]），對齊原站尺度。`
+
+/**
+ * 把結構化 design token 格式化進 prompt（dynamic block，不進 static system → 守 cache）。
+ * 無 token 時回空字串，prompt 降級回基礎色板。
+ */
+function formatDesignTokensForPrompt(tokens?: CloneDesignTokens): string {
+  if (!tokens) return ''
+  const sc = tokens.semanticColors
+  const lines: string[] = ['\n\n## 結構化 Design Token（語意角色，優先使用）']
+  const roleLines: string[] = []
+  if (sc.primary) roleLines.push(`- primary（主按鈕/CTA）: ${sc.primary}${sc.primaryConfidence != null ? `（信心 ${sc.primaryConfidence.toFixed(2)}）` : ''}`)
+  if (sc.secondary) roleLines.push(`- secondary: ${sc.secondary}`)
+  if (sc.accent) roleLines.push(`- accent（點綴）: ${sc.accent}`)
+  if (sc.foreground) roleLines.push(`- foreground（正文字）: ${sc.foreground}`)
+  if (sc.background) roleLines.push(`- background（頁面底色）: ${sc.background}`)
+  if (sc.surfaces.length) roleLines.push(`- surface（卡片/區塊底）: ${sc.surfaces.join(', ')}`)
+  if (sc.neutrals.length) roleLines.push(`- neutrals（中性色階）: ${sc.neutrals.slice(0, 6).join(', ')}`)
+  if (roleLines.length) lines.push(roleLines.join('\n'))
+
+  // 原站 :root 命名變數（最權威的設計來源 — 比反推渲染色更精準）
+  const colorVars = tokens.cssVariables.colors
+  if (colorVars.length) {
+    lines.push(`- 原站 CSS 顏色變數（命名語意，優先參考）: ${colorVars.slice(0, 12).map(v => `${v.name}=${v.value}`).join(', ')}`)
+  }
+  if (tokens.spacingScale.scale.length) {
+    lines.push(`- 間距尺度（base ${tokens.spacingScale.baseUnit}px）: ${tokens.spacingScale.scale.join(', ')} px`)
+  }
+  if (tokens.radii.length) lines.push(`- 圓角: ${tokens.radii.join(', ')}`)
+  if (tokens.shadows.length) lines.push(`- 陰影: ${tokens.shadows.slice(0, 3).map(s => s.slice(0, 60)).join(' | ')}`)
+  if (tokens.typographyScale.fontSizes.length) lines.push(`- 字級階層: ${tokens.typographyScale.fontSizes.join(', ')}`)
+  if (tokens.gradients.length) lines.push(`- 漸層: ${tokens.gradients.slice(0, 2).map(g => g.slice(0, 80)).join(' | ')}`)
+  return lines.join('\n')
+}
 
 export async function generateSectionCode(
   section: CloneSection,
@@ -361,7 +491,7 @@ export async function generateSectionCode(
 - 文字色: ${designSystem.colors.texts.join(', ')}
 - 強調色: ${designSystem.colors.accents.join(', ')}
 - 標題字體: ${designSystem.typography.headingFont || 'sans-serif'}
-- 內文字體: ${designSystem.typography.bodyFont || 'sans-serif'}`
+- 內文字體: ${designSystem.typography.bodyFont || 'sans-serif'}${formatDesignTokensForPrompt(designSystem.tokens)}`
 
     const userMsg = `精確重建截圖中的這個 ${section.type} section。
 
@@ -463,10 +593,19 @@ ${renders}
   )
 }`
 
-  // globals.css
-  const bg = designSystem.colors.backgrounds[0] || '#ffffff'
-  const text = designSystem.colors.texts[0] || '#000000'
-  const accent = designSystem.colors.accents[0] || '#6366f1'
+  // globals.css — 優先用結構化 token 的語意色，降級回基礎色板
+  const sc = designSystem.tokens?.semanticColors
+  const bg = sc?.background || designSystem.colors.backgrounds[0] || '#ffffff'
+  const text = sc?.foreground || designSystem.colors.texts[0] || '#000000'
+  const accent = sc?.accent || sc?.primary || designSystem.colors.accents[0] || '#6366f1'
+
+  // 額外語意變數（純 CSS，v3/v4 皆安全）
+  const extraVars: string[] = []
+  if (sc?.primary) extraVars.push(`  --primary: ${sc.primary};`)
+  if (sc?.secondary) extraVars.push(`  --secondary: ${sc.secondary};`)
+  if (sc?.surfaces?.[0]) extraVars.push(`  --surface: ${sc.surfaces[0]};`)
+  const radius = designSystem.tokens?.radii?.[0]
+  if (radius) extraVars.push(`  --radius: ${radius};`)
 
   const styles = `@import "tailwindcss";
 
@@ -474,7 +613,7 @@ ${renders}
   --background: ${bg};
   --foreground: ${text};
   --accent: ${accent};
-}
+${extraVars.join('\n')}${extraVars.length ? '\n' : ''}}
 
 body {
   background: var(--background);

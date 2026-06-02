@@ -69,7 +69,7 @@ Vercel (Next.js 16, sin1, maxDuration 60)
 | Design Pipeline | `design-techniques.ts` / `composition-patterns.ts` / `design-moods.ts` / `design-system-freeze.ts` / `design-system-renderer.ts` / `design-system-sync.ts` | 30 技法 + 20 patterns + 8 mood + freeze/render/sync |
 | Reference Analyzer | `services/reference-analyzer.ts` + `design-md-{loader,parser}.ts` + `brand-domain-map.ts` | URL 截圖+DOM/Vision，5 層降級（vendored designmd 71 brand 短路）|
 | Template Matcher | `services/template-matcher.ts` | 三層評分（關鍵詞 40 + Category 30 + UISpec 30，零 LLM） |
-| Web Clone | `services/web-clone-service.ts` | DOM/CSS 提取、section 切割、Sonnet Vision |
+| Web Clone | `services/web-clone-service.ts` + `clone/design-token-extractor.ts` | DOM/CSS 提取、section 切割、**結構化 design token 抽取**、Sonnet Vision |
 | Semantic Gateway | `services/semantic-gateway.ts` | quickFilter 短路 + Sonnet 六元 verdict |
 | Customer Service | `services/customer-service.ts` | FAQ + Sonnet 回答 |
 | Prefilter | `services/prefilter.ts` | 全域預過濾 + phase-aware + Redis anti-loop |
@@ -305,6 +305,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - `[TEST]` **Dynamic slug unification**：`deployer-fixes/unify-dynamic-slugs.ts` 偵測同 `(parent, position)` 多 slug 名衝突（如 `app/products/[productId]` vs `app/products/[id]`），rename 統一成最常見 slug（tie 時優先 `id`）+ destructure aliasing 改 content（`const { id: productId } = await params` 保下游 ref）。Catch-all `[...x]` / Optional `[[x]]` 跳過。整合在 `sanitizeCodeForDeploy` Fix 9.5（修復 10 之前）+ rename 後串 `deduplicateRouteConflicts` 兜底新重複。解 Next.js 硬限制 `id !== productId` build error（conversation b2252efc 觸發治本）
 - **Layout 禁 opacity:0**：SplitLayout/split-layout 外層不能用 `initial={{ opacity: 0 }}`（多層疊加→黑屏）。useEffect 依賴不含 `fastBuildChunks`。split→default 回退需檢查 code_preview 歷史
 - **`app/components/templates/` 已廢棄**，PreviewPanel 用 WebContainers
+- `[TEST]` **Clone design token 抽取（`clone/design-token-extractor.ts`，演算法移植自 design-extract MIT，非依賴）**：瀏覽器端 `CLONE_EXTRACTION_SCRIPT` 收原料 → Node 純函式分類（色彩 clustering+語意角色 / CSS 變數 / spacing·typography scale / shadow·radius·breakpoints）。`extractPageForClone` 組 token **必須 fail-soft**（try/catch 降級回基礎色板，不阻塞 clone）。token 進 `generateSectionCode` 的 **dynamic user block**（守 cache，禁進 static system）。**禁用語意 Tailwind 類名（`bg-primary`）**：clone 的 tailwindConfig 是空字串 + 客戶 app pin v3.4（v4→v3 sanitize 砍 `@theme`）→ 語意類名無處解析會爆版；只能用「依語意角色挑的精確 hex 任意值」`bg-[#hex]`。**不改 `ExtractedColors`**（reference-analyzer 共用），新 token 掛 optional `CloneDesignSystem.tokens?`
 
 ### Coder / SpecFormula / RED Phase
 
