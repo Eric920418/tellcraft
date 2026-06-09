@@ -2356,9 +2356,29 @@ export default function RootLayout({
       data: mainPage.content,
     })
 
+    // Next.js app root 特殊檔不可被當路由頁面重組成 app/<name>/page.tsx
+    const APP_ROOT_SPECIALS = new Set([
+      'not-found.tsx', 'not-found.ts', 'loading.tsx', 'loading.ts', 'error.tsx', 'error.ts',
+      'template.tsx', 'template.ts', 'global-error.tsx', 'global-error.ts', 'globals.css',
+    ])
     for (const page of otherPages) {
-      const pagePath = stripRouteGroups(page.path)
-        .replace(/^(app\/|pages\/)?/, '')        // 去掉 app/ 或 pages/ 前綴
+      const cleanPath = stripRouteGroups(page.path)
+      // (1) root layout：有些 caller（如 clone assembleSections）把 layout.tsx 放在 pages —
+      // 必須歸位 app/layout.tsx 並取代上方補的預設，否則變成 app/layout/page.tsx 且 ./globals.css 解析錯位
+      if (ROOT_LAYOUT_PATHS.has(cleanPath)) {
+        const li = files.findIndex(f => f.file === 'app/layout.tsx')
+        if (li >= 0) files[li] = { file: 'app/layout.tsx', data: page.content }
+        else files.push({ file: 'app/layout.tsx', data: page.content })
+        continue
+      }
+      // (2) 其他 app 根特殊檔 → 放回 app/ 根，不重組
+      const baseName = cleanPath.replace(/^(app\/|pages\/)?/, '')
+      if (APP_ROOT_SPECIALS.has(baseName)) {
+        files.push({ file: `app/${baseName}`, data: page.content })
+        continue
+      }
+      // (3) 一般路由頁面
+      const pagePath = baseName
         .replace(/\/page\.(tsx|ts|jsx|js)$/, '')  // 去掉尾部 /page.tsx
         .replace(/\.(tsx|ts|jsx|js)$/, '')        // 去掉副檔名
       // 如果 path 就是 page / index（首頁），跳過

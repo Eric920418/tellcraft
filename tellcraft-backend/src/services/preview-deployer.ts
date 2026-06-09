@@ -199,7 +199,7 @@ export async function quickPreviewDeploy(
     sanitized.code,
     projectSlug,
     input.tailwindConfig ?? '',
-    {},  // extraDependencies — 用 sanitize 結果即可
+    sanitized.extraDependencies,  // sanitize 掃 import 得到的額外依賴（lucide-react 等）；舊版誤傳 {} → 預覽 build 缺套件
     [],  // injectedFiles
   )
 
