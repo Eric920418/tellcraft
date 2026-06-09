@@ -10,7 +10,8 @@
 
 import type Redis from 'ioredis'
 import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state'
-import { sendMessage, saveFlowState } from '../orchestrator-utils'
+import { sendMessage, saveFlowState, generatedCodeToFileRows } from '../orchestrator-utils'
+import * as db from '../../db/client'
 import { triggerPreviewDeploy } from '../preview-deploy-worker'
 import {
   extractPageForClone, generateSectionCode, assembleSections, toSectionMetas,
@@ -608,6 +609,17 @@ async function finalizeMergedCode(
   state.waitingForReply = true
   state.uiuxCodePhase = 'complete'
   await saveFlowState(redis, conversationId, state)
+
+  // ── 持久化 project_files（否則「部署上線」前置檢查讀 project_files / bdd_sessions 都讀不到 clone 代碼
+  //    → 誤判「此專案尚未完成 UIUX 設計，沒有可部署的代碼」）──
+  // clone 原本只把代碼塞進訊息 richContent；比照 uiux 寫 skill_source='uiux'，讓生產部署來源一致。fail-soft。
+  if (state.projectId) {
+    try {
+      await db.upsertProjectFiles(state.projectId, 'uiux', generatedCodeToFileRows(currentCode))
+    } catch (err) {
+      logger.warn({ err: String(err).slice(0, 150) }, 'clone 持久化 project_files 失敗（fail-soft）')
+    }
+  }
 
   // Vercel preview 自動觸發（gate ENABLE_VERCEL_PREVIEW；fire-and-forget 不阻塞）
   triggerPreviewDeploy(conversationId, state.projectId, currentCode, '', redis, io)
