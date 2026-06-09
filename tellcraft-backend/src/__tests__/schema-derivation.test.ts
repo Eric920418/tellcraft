@@ -520,3 +520,50 @@ describe('schema-derivation', () => {
     expect(ddl).not.toMatch(/COMMENT\s+'/i) // 內聯 COMMENT 已移除
   })
 })
+
+describe('schema-derivation — CREATE TABLE IF NOT EXISTS（A1 治本回歸守護）', () => {
+  const combined = `CREATE TABLE products (
+  id VARCHAR PRIMARY KEY,
+  title VARCHAR(255) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admins (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username VARCHAR(64) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS site_settings (
+  id UUID PRIMARY KEY,
+  setting_key VARCHAR(128) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS media_uploads (
+  id UUID PRIMARY KEY,
+  file_name VARCHAR(256) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS contact_submissions (
+  id UUID PRIMARY KEY,
+  name VARCHAR(100),
+  message TEXT
+);`
+
+  it('parseCreateTables 解析 IF NOT EXISTS 表（此前被靜默丟掉）', () => {
+    const names = parseCreateTables(combined).map(t => t.tableName)
+    expect(names).toEqual(
+      expect.arrayContaining(['products', 'admins', 'site_settings', 'media_uploads', 'contact_submissions']),
+    )
+  })
+
+  it('deriveSchemaFromBdd：skeleton 表進 Neon DDL（修好既有 gap）', () => {
+    const ddl = deriveSchemaFromBdd(combined, '').postgresqlDDL
+    for (const t of ['products', 'admins', 'site_settings', 'media_uploads', 'contact_submissions']) {
+      expect(ddl).toContain(t)
+    }
+  })
+
+  it('deriveSchemaFromBdd：infra 表從用戶可見 entities 隱藏，但 content 表保留', () => {
+    const entities = deriveSchemaFromBdd(combined, '').entities.map(e => e.tableName)
+    expect(entities).toContain('products')
+    expect(entities).toContain('contact_submissions') // 站長要管理的內容
+    expect(entities).not.toContain('admins')
+    expect(entities).not.toContain('site_settings')
+    expect(entities).not.toContain('media_uploads')
+  })
+})

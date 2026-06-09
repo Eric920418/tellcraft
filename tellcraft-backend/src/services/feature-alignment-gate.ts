@@ -492,7 +492,7 @@ export function extractWhenCallTableValues(content: string): {
 export function extractAllSchemaColumnNames(schemaSql: string): Set<string> {
   const cols = new Set<string>()
   if (!schemaSql) return cols
-  const tableRegex = /CREATE\s+TABLE\s+\w+\s*\(([\s\S]*?)\)\s*(?:COMMENT[^;]*)?;/gi
+  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\s*\(([\s\S]*?)\)\s*(?:COMMENT[^;]*)?;/gi
   let m: RegExpExecArray | null
   while ((m = tableRegex.exec(schemaSql)) !== null) {
     const body = m[1]

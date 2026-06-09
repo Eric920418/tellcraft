@@ -405,7 +405,9 @@ function splitColumnsBalanced(body: string): string[] {
 export function parseCreateTables(schemaSql: string): ParsedTable[] {
   const tables: ParsedTable[] = []
   // 支持 MySQL TABLE COMMENT 語法：) COMMENT '...'; 或直接 );
-  const regex = /CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\)\s*(?:COMMENT\s+'[^']*')?\s*;/gi
+  // 支援 `CREATE TABLE IF NOT EXISTS`（CMS skeleton / content 模組表都用此語法）。
+  // 此前缺 (?:IF NOT EXISTS)? → skeleton 表被靜默丟掉，進不了 Neon、也不生 admin panel（治本：認 IF NOT EXISTS）。
+  const regex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(([\s\S]*?)\)\s*(?:COMMENT\s+'[^']*')?\s*;/gi
   let match: RegExpExecArray | null
 
   while ((match = regex.exec(schemaSql)) !== null) {
@@ -630,6 +632,13 @@ function transformToPostgresqlDDL(tables: ParsedTable[]): string {
 // 主函數
 // ============================================================
 
+/**
+ * CMS skeleton 注入的「基礎設施表」— 治本（parseCreateTables 認 IF NOT EXISTS）後會被解析到，
+ * 仍進 postgresqlDDL 建到 Neon，但從用戶可見的 entities/displaySummary 預覽隱藏，保持非技術站長的預覽乾淨。
+ * contact_submissions / newsletter_subscribers 是站長要管理的內容，不在此列。
+ */
+const PREVIEW_HIDDEN_TABLES = new Set(['admins', 'site_settings', 'media_uploads', 'magic_link_tokens'])
+
 export function deriveSchemaFromBdd(schemaSql: string, entityMapping: string): DerivedSchema {
   try {
     const tables = parseCreateTables(schemaSql)
@@ -653,11 +662,13 @@ export function deriveSchemaFromBdd(schemaSql: string, entityMapping: string): D
       logger.info({ table: 'magic_link_tokens' }, '偵測到 users.email → 自動附加 magic_link_tokens 表')
     }
 
-    const entities: DerivedEntity[] = tables.map(t => ({
-      chineseName: entityMap.get(t.tableName) || t.tableName,
-      tableName: t.tableName,
-      columnCount: t.columns.length,
-    }))
+    const entities: DerivedEntity[] = tables
+      .filter(t => !PREVIEW_HIDDEN_TABLES.has(t.tableName))
+      .map(t => ({
+        chineseName: entityMap.get(t.tableName) || t.tableName,
+        tableName: t.tableName,
+        columnCount: t.columns.length,
+      }))
 
     const displaySummary = entities
       .map(e => `- **${e.chineseName}**（${e.tableName}）：${e.columnCount} 個欄位`)

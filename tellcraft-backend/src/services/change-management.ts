@@ -468,7 +468,7 @@ export function verifyConsistency(
 // ============================================================
 
 function extractTableNames(schemaSql: string): string[] {
-  const matches = schemaSql.match(/CREATE\s+TABLE\s+(\w+)/gi) || []
+  const matches = schemaSql.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)/gi) || []
   return matches.map(m => {
     const parts = m.split(/\s+/)
     return parts[parts.length - 1].toLowerCase()
@@ -491,9 +491,9 @@ function extractEntityMapping(entityMapping: string): Array<{ chinese: string; e
 function extractSchemaColumns(schemaSql: string): Record<string, string[]> {
   const columns: Record<string, string[]> = {}
   // 匹配 CREATE TABLE xxx ( ... ) 中的欄位
-  const tableBlocks = schemaSql.match(/CREATE\s+TABLE\s+(\w+)\s*\(([\s\S]*?)\);/gi) || []
+  const tableBlocks = schemaSql.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(([\s\S]*?)\);/gi) || []
   for (const block of tableBlocks) {
-    const nameMatch = block.match(/CREATE\s+TABLE\s+(\w+)/i)
+    const nameMatch = block.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)/i)
     if (!nameMatch) continue
     const tableName = nameMatch[1].toLowerCase()
     const body = block.match(/\(([\s\S]*)\)/)?.[1] || ''
