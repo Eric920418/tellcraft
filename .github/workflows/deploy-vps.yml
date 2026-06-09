@@ -49,7 +49,7 @@ jobs:
 
       - name: Deploy to VPS
         run: |
-          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ubuntu@18.179.205.105 << 'ENDSSH'
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ubuntu@167.233.107.221 << 'ENDSSH'
           echo "=========================================="
           echo "Starting VPS deployment..."
           echo "=========================================="
