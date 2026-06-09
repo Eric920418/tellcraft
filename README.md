@@ -1188,6 +1188,61 @@ Schema 欄位名包含 image/photo/cover/avatar 等 → 自動生成圖片上傳
 
 **非 CMS 場景**：`detectCmsShape()` 回 `isCmsShape=false` → hook 完全短路，零影響電商/SaaS/Landing 流程。
 
+#### M9：Content Model + Operation Layer（Day-2 自助營運層，🟡 進行中 — A0 完成）
+
+**動機**：對比 WordPress 後確認最致命缺口是「生成的客戶 app 沒有持久、自助、不碰 AI 的 Day-2 營運面」。目標用戶 = 非技術站長長期自營，故此為生死問題。核心架構：把**營運（run-time, 確定性, 免費）**與**結構演進（generate-time, AI, 燒 credit）**徹底分離。
+
+```
+Structure 平面（generate-time, AI）     Operation 平面（run-time, 零 LLM, 免費）
+  決定「有哪些內容型別/欄位」      ──→     站長發文/改價/上圖/管訂單（部署出去的 app 內）
+  BDD→schema→Coder                        100% 生成的 TS + tagged-template SQL 打 Neon
+            └────── 橋樑：Content Model Manifest ──────┘
+```
+
+**A0（已完成，ship dark）**：
+- **Content Model Manifest**：`services/content-model/manifest.ts:deriveContentModel(schemaSql, entityMapping)` 純函數零 LLM fail-soft，從已注入 skeleton 的 schema 確定性衍生「內容型別清單」（tableName / source(content_module|bespoke) / displayColumn / capabilities(draft_publish|schedule|version|media) / status·body·media·taxonomy 欄位偵測）。
+- **持久化**：`services/content-model/persist.ts:persistContentModel()` 雙路徑（BullMQ `coder-phases` + LangGraph `coder-subgraph`）共用單一 UPSERT 進 `projects.content_model` JSONB（migration `045`）。衍生在共用 `executeCoderPipeline`（Step 2.9）回傳 `contentModel`，兩 path 只負責持久化。
+- **點亮 media**：`media_uploads` 表 schema 早已定義（`cms-skeleton/schemas.ts`）但 `getCmsSkeletonDdl` 預設不注入；`CONTENT_MODEL_INJECT_MEDIA` 開啟時於 `formulation.ts` 注入（additive `IF NOT EXISTS`）。
+- **Telemetry**：`content_model` skill + `content_model_derived` 事件（fire-and-forget）。
+- **守住「不破壞現有功能」**：全 flag 預設 `false`，不開零行為變化；衍生純 additive；2769 測試全綠。
+
+**Kill switches（`lib/env.ts`，全預設 false ship dark）**：
+
+| Flag | 用途 |
+|------|------|
+| `ENABLE_CONTENT_MODEL` | Phase A 總開關：衍生 + 持久化 manifest |
+| `CONTENT_MODEL_INJECT_MEDIA` | 注入 `media_uploads` 表 |
+| `CONTENT_MODEL_ADDITIVE_DRIFT` | A2：drift 走 additive ALTER 而非硬擋（A2 測完才轉 true）|
+| `ENABLE_RBAC_CAPABILITIES` | C-Auth：additive capability 層 |
+| `ENABLE_COMMERCE_MODULE` | C-Commerce：cart/order + Stripe Checkout |
+
+> ✅ **A1 治本：`CREATE TABLE IF NOT EXISTS` parser bug（連帶修好既有 CMS skeleton 潛在 bug）**。此前 `parseCreateTables` 的 regex 只認 plain `CREATE TABLE` → CMS skeleton 注入的 `IF NOT EXISTS` 表（admins/site_settings/media/contact_submissions/newsletter…）被 `deriveSchemaFromBdd` **從 Neon DDL 丟掉、根本進不了 Neon**。治本（「解打地鼠」一致性修 5 處 parser）：
+> - `schema-derivation.ts:parseCreateTables`（主源頭）+ `feature-alignment-gate.ts:extractAllSchemaColumnNames` + `change-management.ts`（3 處 regex）統一補 `(?:IF\s+NOT\s+EXISTS\s+)?`。
+> - **副作用控管**：`coder-admin-templates.ts` 加 `INFRA_TABLES` 排除（admins/site_settings/media_uploads/magic_link_tokens 不生通用 CRUD 後台，各有專屬處理）；`deriveSchemaFromBdd` 把 infra 表從用戶可見 `entities` 預覽隱藏（仍建到 Neon），保持非技術站長預覽乾淨。`contact_submissions`/`newsletter_subscribers` 不隱藏 → 站長現在**能管理**這些內容（A1 治本新增能力）。
+> - 回歸守護：`schema-derivation.test.ts` 加 3 個 IF NOT EXISTS 測試。content 模組表（posts/pages）現在自然走正常 parse→derive→Neon 路徑，A1 不需 additive-migration（該機制留給 A2 的 bespoke opt-in + drift 修復）。
+
+**A1 — content 模組 + 狀態感知 operation UI（✅ 完成）**：
+- 新 skeleton module `cms-skeleton/modules/blog.ts`（`posts` 表：status draft/published/scheduled + slug + body + cover_image + scheduled_for）+ `pages.ts`（`pages` 表）。**ship-dark**：`detect()` 內 gate `ENABLE_CONTENT_MODEL`，flag off（預設）永不啟用，零行為變化。
+- 公開面 server action（`list_published_posts` / `list_published_pages`，只回 `status='published'`，跳 LLM 確定性產出）。治本後 `posts`/`pages` 表自然進 Neon。
+- **operation UI 增強**（`coder-admin-templates.ts`，manifest 驅動、flag gated）：`generateAdminPanel(...)` 新增 `contentModel?` 參數；draft_publish 內容型別生 **workflow-aware UI**——`buildWorkflowListPage`（狀態分頁 all/published/draft[/scheduled] + 狀態 badge + 一鍵發布/取消發布 `<form action={publishX.bind(null,id)}>`）+ `buildEditPage` status 欄位渲染成下拉選單（複用既有 FormField select）+ `buildActionFile` 追加 `publishX`/`unpublishX` admin actions（只動存在欄位 + `COALESCE(published_at, NOW())`）。manifest 衍生移到 `executeCoderPipeline` Admin Panel **之前**並傳入。**flag off → `contentModel` undefined → 行為與既有完全一致**。
+- 結果：**站長部署後不碰 AI 就能寫文章、存草稿、一鍵發布、依狀態篩選、刪除**。
+- 測試：`content-modules.test.ts`（6）+ `coder-generators.test.ts` 新增 6（ship-dark 無 contentModel 走基本 / 有 contentModel 走 workflow / status select / publish-unpublish actions / 非工作流表不受影響）。esbuild 驗證生成 TSX/TS 語法正確。
+
+**A2 — 結構演進非破壞化 + bespoke opt-in 規劃器（✅ 核心完成）**：
+- **資料安全核心**：`neon-service.ts:ensureNeonSchemaFresh` 把「drift → reprovision（有資料時被 L21 擋成 null → 結構卡死）」改成「drift + DB 有客戶資料 → **additive ALTER**（`extractCreateTableStatements` 抽缺表的 `CREATE TABLE IF NOT EXISTS` → `runAlterMigration` 交易執行，只補缺表、保留既有資料）」。flag `CONTENT_MODEL_ADDITIVE_DRIFT`（預設 false）；不開走原 reprovision。失敗也絕不 reprovision 砍資料。telemetry `content_additive_drift_migration`（high-signal）。
+- **共用遷移器**：`runAlterMigration` 從 `iteration-skill.ts` 抽到 **`services/neon-migrate.ts`**（single source of truth，iteration-skill schema 迭代 + neon-service additive-drift 共用）。
+- **bespoke opt-in 規劃器**：`content-model/workflow-opt-in.ts:planWorkflowColumns(table, capabilities)` 純函數產出 **全 additive** 的 `SchemaChange[]`（status `NOT NULL DEFAULT 'draft'` 既有 row 自動回填 + published_at/scheduled_for + 索引）。`classifySchemaChanges` 恆 `additive`（單測鎖死）。
+- 測試：`content-workflow-opt-in.test.ts`（9：additive 契約 / forward SQL 無 DROP / extractCreateTableStatements 只補缺表）+ 更新 `iteration-skill-schema.test.ts` 契約守護指向 neon-migrate.ts。
+- **A2 剩餘（UI-facing）**：opt-in 觸發端點（`POST /api/project/:id/content/:table/enable-workflow` → `applyWorkflowOptIn` 跑 ALTER + 重衍生 manifest + 重生 operation UI）。規劃器 building block 已就緒。
+
+**A3 — 媒體庫 + 排程發布（🟡 媒體庫 + 排程完成，版本待做）**：
+- **媒體庫**：`generateAdminPanel` 在 `contentModel.mediaTable` 存在時生 `/admin/media`（縮圖 grid + soft delete）+ 查詢/刪除 + 側欄連結。上傳改用 `UPLOAD_API_TEMPLATE_WITH_MEDIA`，成功後 **fail-soft** `INSERT INTO media_uploads`（表不存在則跳過；非媒體 app 用原版，行為完全不變）。
+- **排程發布**：schedule 內容型別 → 生 `app/api/cron/publish-scheduled/route.ts`（把 `scheduled_for` 到期者翻成 published，idempotent + 可選 `CRON_SECRET` Bearer 驗證）；`deployer.ts` 偵測此 route 檔存在 → vercel.json 注入 `crons`（每 15 分）；blog `list_published_posts` 加 **on-read fallback**（到期排程即時公開，不等 cron）。
+- 測試 `coder-generators.test.ts` +9（媒體庫 + 排程 cron）/ `content-modules.test.ts` +1（on-read）/ `deployer-vercel-json.test.ts` +2（crons 注入）。esbuild 驗證生成檔。全 ship-dark（contentModel undefined 時都不生）。
+- **A3 剩餘**：內容版本（`content_versions` 表 + publish/update 寫 JSONB snapshot + restore action/UI，需動生成的 action code，侵入性較高 + 需 restore UI）。
+
+**後續**：A3 內容版本 + A2 opt-in 端點 → C-Auth（capability 層）→ C-Commerce（Stripe + cart/order）。
+
 ## 部署
 
 ### CI/CD

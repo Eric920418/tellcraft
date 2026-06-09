@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import { detectAuthInSchema, generateAuthSystem, injectSessionProvider } from '../services/coder-auth-templates'
 import { generateAdminPanel, parseColumnDefinitions } from '../services/coder-admin-templates'
+import { deriveContentModel } from '../services/content-model/manifest'
 import { detectImageColumnsInSchema, generateUploadFiles } from '../services/coder-upload-templates'
 
 // ============================================================
@@ -352,6 +353,148 @@ describe('Admin Panel Generator (M3)', () => {
       expect(queries.content).toContain('getPostsById')
       expect(queries.content).toContain('getPostsForSelect')
     })
+  })
+})
+
+// ============================================================
+// A1: Admin Panel operation UI（草稿/發布工作流，manifest 驅動）
+// ============================================================
+
+describe('Admin Panel — operation UI workflow (A1)', () => {
+  const BLOG_SCHEMA = `CREATE TABLE users (id UUID PRIMARY KEY, email VARCHAR(255));
+CREATE TABLE posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(200) NOT NULL,
+  slug VARCHAR(220) NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  published_at TIMESTAMPTZ,
+  scheduled_for TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);`
+  const BLOG_MAPPING = '文章: posts'
+  const cm = deriveContentModel(BLOG_SCHEMA, BLOG_MAPPING)
+
+  it('manifest 正確識別 posts 為 draft_publish + schedule 工作流', () => {
+    const posts = cm.contentTypes.find(t => t.tableName === 'posts')!
+    expect(posts.capabilities).toEqual(expect.arrayContaining(['draft_publish', 'schedule']))
+    expect(posts.statusColumn).toBe('status')
+  })
+
+  it('ship-dark：無 contentModel → posts 走基本列表（無分頁/發布按鈕）', () => {
+    const files = generateAdminPanel(BLOG_SCHEMA, BLOG_MAPPING, true)
+    const list = files.find(f => f.path === 'app/admin/posts/page.tsx')!
+    expect(list.content).not.toContain('const TABS')
+    expect(list.content).not.toContain('取消發布')
+    const action = files.find(f => f.path === 'lib/admin-actions/posts.ts')!
+    expect(action.content).not.toContain('publishPosts')
+  })
+
+  it('有 contentModel → posts 列表頁 workflow-aware（分頁 + 發布/取消發布 + 狀態 badge + 排程）', () => {
+    const files = generateAdminPanel(BLOG_SCHEMA, BLOG_MAPPING, true, undefined, cm)
+    const list = files.find(f => f.path === 'app/admin/posts/page.tsx')!
+    expect(list.content).toContain('const TABS')
+    expect(list.content).toContain('statusBadgeClass')
+    expect(list.content).toContain('取消發布')
+    expect(list.content).toContain('publishPosts')
+    expect(list.content).toContain('已排程') // scheduled_for 存在 → hasSchedule
+  })
+
+  it('有 contentModel → posts 編輯頁 status 渲染成下拉選單', () => {
+    const files = generateAdminPanel(BLOG_SCHEMA, BLOG_MAPPING, true, undefined, cm)
+    const edit = files.find(f => f.path === 'app/admin/posts/[id]/page.tsx')!
+    expect(edit.content).toContain('name="status" type="select"')
+    expect(edit.content).toContain('草稿')
+    expect(edit.content).toContain('已發布')
+  })
+
+  it('有 contentModel → posts action 含 publish/unpublish（只動存在欄位 + COALESCE published_at）', () => {
+    const files = generateAdminPanel(BLOG_SCHEMA, BLOG_MAPPING, true, undefined, cm)
+    const action = files.find(f => f.path === 'lib/admin-actions/posts.ts')!
+    expect(action.content).toContain('export async function publishPosts')
+    expect(action.content).toContain('export async function unpublishPosts')
+    expect(action.content).toContain("status = 'published'")
+    expect(action.content).toContain('COALESCE(published_at, NOW())')
+    expect(action.content).toContain('updated_at = NOW()')
+  })
+
+  it('非工作流表（無 status 欄位）→ 即使有 contentModel 仍走基本列表', () => {
+    const schema = `CREATE TABLE tags (id UUID PRIMARY KEY, label VARCHAR(80) NOT NULL);`
+    const cm2 = deriveContentModel(schema, '標籤: tags')
+    const files = generateAdminPanel(schema, '標籤: tags', false, undefined, cm2)
+    const list = files.find(f => f.path === 'app/admin/tags/page.tsx')!
+    expect(list.content).not.toContain('const TABS')
+  })
+})
+
+// ============================================================
+// A3: 媒體庫（manifest.mediaTable 驅動 + 上傳 fail-soft 記錄）
+// ============================================================
+
+describe('Admin Panel — 媒體庫 (A3)', () => {
+  const MEDIA_SCHEMA = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), cover_image VARCHAR(512));
+CREATE TABLE IF NOT EXISTS media_uploads (id UUID PRIMARY KEY, file_name VARCHAR(256) NOT NULL, file_path TEXT NOT NULL, mime_type VARCHAR(128), file_size BIGINT, created_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ);`
+  const cm = deriveContentModel(MEDIA_SCHEMA, '文章: posts')
+
+  it('manifest 偵測 media_uploads 為 mediaTable', () => {
+    expect(cm.mediaTable).toBe('media_uploads')
+  })
+
+  it('有 mediaTable → 生成 /admin/media 頁 + 查詢 + 刪除 + 側欄連結；media_uploads 不生通用 CRUD', () => {
+    const files = generateAdminPanel(MEDIA_SCHEMA, '文章: posts', true, undefined, cm)
+    expect(files.some(f => f.path === 'app/admin/media/page.tsx')).toBe(true)
+    expect(files.some(f => f.path === 'lib/admin-queries/media.ts')).toBe(true)
+    expect(files.some(f => f.path === 'lib/admin-actions/media.ts')).toBe(true)
+    expect(files.find(f => f.path.includes('Sidebar'))!.content).toContain('/admin/media')
+    expect(files.some(f => f.path === 'app/admin/media-uploads/page.tsx')).toBe(false)
+  })
+
+  it('ship-dark：無 contentModel → 不生媒體庫', () => {
+    const files = generateAdminPanel(MEDIA_SCHEMA, '文章: posts', true)
+    expect(files.some(f => f.path === 'app/admin/media/page.tsx')).toBe(false)
+    expect(files.find(f => f.path.includes('Sidebar'))!.content).not.toContain('/admin/media')
+  })
+
+  it('媒體刪除為 soft delete（deleted_at）', () => {
+    const files = generateAdminPanel(MEDIA_SCHEMA, '文章: posts', true, undefined, cm)
+    expect(files.find(f => f.path === 'lib/admin-actions/media.ts')!.content).toContain('deleted_at = NOW()')
+  })
+
+  it('schema 含 media_uploads → upload API fail-soft 記錄進 media_uploads', () => {
+    const api = generateUploadFiles(MEDIA_SCHEMA)!.find(f => f.path.includes('route.ts'))!
+    expect(api.content).toContain('INSERT INTO media_uploads')
+    expect(api.content).toContain('recordMedia')
+  })
+
+  it('schema 無 media_uploads → upload API 用原版（不含記錄，行為不變）', () => {
+    const api = generateUploadFiles(LEARN_SCHEMA)!.find(f => f.path.includes('route.ts'))!
+    expect(api.content).not.toContain('INSERT INTO media_uploads')
+  })
+})
+
+describe('Admin Panel — 排程發布 cron (A3)', () => {
+  const SCHED_SCHEMA = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), status VARCHAR(20) DEFAULT 'draft', published_at TIMESTAMPTZ, scheduled_for TIMESTAMPTZ);`
+  const cm = deriveContentModel(SCHED_SCHEMA, '文章: posts')
+
+  it('schedule 能力 → 生成 cron route 把到期排程翻成已發布', () => {
+    const files = generateAdminPanel(SCHED_SCHEMA, '文章: posts', true, undefined, cm)
+    const cron = files.find(f => f.path === 'app/api/cron/publish-scheduled/route.ts')!
+    expect(cron).toBeTruthy()
+    expect(cron.content).toContain("status = 'published'")
+    expect(cron.content).toContain('scheduled_for <= NOW()')
+    expect(cron.content).toContain('CRON_SECRET') // 有 Bearer 驗證
+  })
+
+  it('無 schedule 能力（無 scheduled_for）→ 不生 cron route', () => {
+    const noSched = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), status VARCHAR(20) DEFAULT 'draft');`
+    const files = generateAdminPanel(noSched, '文章: posts', true, undefined, deriveContentModel(noSched, '文章: posts'))
+    expect(files.some(f => f.path.includes('cron/publish-scheduled'))).toBe(false)
+  })
+
+  it('ship-dark：無 contentModel → 不生 cron route', () => {
+    const files = generateAdminPanel(SCHED_SCHEMA, '文章: posts', true)
+    expect(files.some(f => f.path.includes('cron/publish-scheduled'))).toBe(false)
   })
 })
 

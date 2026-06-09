@@ -34,6 +34,19 @@ describe('wrapInNextJs — vercel.json 自動注入', () => {
     expect(parsed.$schema).toBe('https://openapi.vercel.sh/vercel.json')
   })
 
+  it('A3：injectedFiles 含排程 cron route → vercel.json 注入 crons', () => {
+    const files = wrapInNextJs(makeEmptyCode(), 'test-project', '', undefined, [
+      { file: 'app/api/cron/publish-scheduled/route.ts', data: 'export async function GET() { return Response.json({ ok: true }) }' },
+    ])
+    const parsed = JSON.parse(files.find(f => f.file === 'vercel.json')!.data)
+    expect(parsed.crons).toEqual([{ path: '/api/cron/publish-scheduled', schedule: '*/15 * * * *' }])
+  })
+
+  it('A3：無排程 cron route → vercel.json 無 crons', () => {
+    const parsed = JSON.parse(wrapInNextJs(makeEmptyCode(), 'test-project', '').find(f => f.file === 'vercel.json')!.data)
+    expect(parsed.crons).toBeUndefined()
+  })
+
   it('若 injectedFiles 已含 vercel.json，保留客戶自訂版本不覆蓋', () => {
     const customVercelJson = JSON.stringify({
       regions: ['hkg1'],

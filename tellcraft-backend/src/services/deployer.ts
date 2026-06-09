@@ -2392,6 +2392,9 @@ export default function RootLayout({
   // Hobby plan 收到 regions 設定會 silent ignore（不報錯），Pro/Enterprise 才生效 → 無副作用
   // 客戶代碼若已含 vercel.json（透過 Coder 或 project_files 自訂）→ 保留客戶版本
   if (!files.some(f => f.file === 'vercel.json')) {
+    // A3：偵測到排程發布 cron route 檔 → 注入 Vercel Cron（每 15 分鐘翻到期排程內容為已發布）。
+    // Hobby plan 收到 crons 會 silent ignore（無副作用）；on-read fallback 確保公開列表不等 cron 即時生效。
+    const hasScheduledCron = files.some(f => f.file === 'app/api/cron/publish-scheduled/route.ts')
     files.push({
       file: 'vercel.json',
       data: JSON.stringify({
@@ -2400,6 +2403,7 @@ export default function RootLayout({
         functions: {
           'app/**/*.ts': { maxDuration: 60 },
         },
+        ...(hasScheduledCron ? { crons: [{ path: '/api/cron/publish-scheduled', schedule: '*/15 * * * *' }] } : {}),
       }, null, 2),
     })
   }

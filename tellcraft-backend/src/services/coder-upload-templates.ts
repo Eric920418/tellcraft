@@ -40,9 +40,12 @@ export function generateUploadFiles(schemaSql: string): GeneratedComponent[] | n
 
   logger.info('偵測到圖片欄位，生成 upload 系統')
 
+  // A3 媒體庫：schema 含 media_uploads（CONTENT_MODEL_INJECT_MEDIA 啟用）→ 上傳同時 fail-soft 記錄進
+  // media_uploads，供 /admin/media 瀏覽。非媒體 app（無 media_uploads）→ 用原版模板，行為完全不變。
+  const hasMediaTable = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?media_uploads\b/i.test(schemaSql)
   return [
     { path: 'components/admin/ImageUpload.tsx', content: IMAGE_UPLOAD_COMPONENT, description: '圖片上傳組件' },
-    { path: 'app/api/upload/route.ts', content: UPLOAD_API_TEMPLATE, description: '圖片上傳 API（Vercel Blob / 本地 fallback）' },
+    { path: 'app/api/upload/route.ts', content: hasMediaTable ? UPLOAD_API_TEMPLATE_WITH_MEDIA : UPLOAD_API_TEMPLATE, description: '圖片上傳 API（Vercel Blob / 本地 fallback）' },
   ]
 }
 
@@ -138,6 +141,51 @@ export async function POST(req: NextRequest) {
   await fs.mkdir(dir, { recursive: true })
   const filename = \`\${Date.now()}-\${file.name}\`
   await fs.writeFile(path.join(dir, filename), Buffer.from(bytes))
+  return NextResponse.json({ url: \`/uploads/\${filename}\` })
+}
+`
+
+/**
+ * A3：含媒體庫記錄的上傳 API（schema 有 media_uploads 時用）。
+ * 與 UPLOAD_API_TEMPLATE 差別僅在：上傳成功後 fail-soft INSERT 進 media_uploads（表不存在則靜默跳過）。
+ */
+export const UPLOAD_API_TEMPLATE_WITH_MEDIA = `import { NextRequest, NextResponse } from 'next/server'
+import { sql } from '@/lib/db'
+
+// fail-soft：media_uploads 表不存在（未啟用媒體庫）→ 靜默跳過，絕不影響上傳本身
+async function recordMedia(fileName: string, filePath: string, mimeType: string, fileSize: number) {
+  try {
+    await sql\`INSERT INTO media_uploads (file_name, file_path, mime_type, file_size)
+      VALUES (\${fileName}, \${filePath}, \${mimeType}, \${fileSize})\`
+  } catch { /* media_uploads 不存在 → 跳過 */ }
+}
+
+export async function POST(req: NextRequest) {
+  const formData = await req.formData()
+  const file = formData.get('file') as File
+  if (!file) return NextResponse.json({ error: '請選擇檔案' }, { status: 400 })
+
+  if (file.size > 5 * 1024 * 1024) return NextResponse.json({ error: '檔案不能超過 5MB' }, { status: 400 })
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type))
+    return NextResponse.json({ error: '只接受 JPEG/PNG/WebP' }, { status: 400 })
+
+  // Vercel Blob（生產環境）
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const { put } = await import('@vercel/blob')
+    const blob = await put(\`uploads/\${Date.now()}-\${file.name}\`, file, { access: 'public' })
+    await recordMedia(file.name, blob.url, file.type, file.size)
+    return NextResponse.json({ url: blob.url })
+  }
+
+  // 本地 fallback（開發 / WebContainer 預覽）
+  const bytes = await file.arrayBuffer()
+  const fs = await import('fs/promises')
+  const path = await import('path')
+  const dir = path.join(process.cwd(), 'public', 'uploads')
+  await fs.mkdir(dir, { recursive: true })
+  const filename = \`\${Date.now()}-\${file.name}\`
+  await fs.writeFile(path.join(dir, filename), Buffer.from(bytes))
+  await recordMedia(file.name, \`/uploads/\${filename}\`, file.type, file.size)
   return NextResponse.json({ url: \`/uploads/\${filename}\` })
 }
 `
