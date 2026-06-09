@@ -29,7 +29,7 @@ import {
 import { callStructured } from '../lib/structured-output'
 import { MODEL } from '../lib/anthropic'
 import { z } from 'zod'
-import { Client as PgClient } from 'pg'
+import { runAlterMigration } from './neon-migrate'
 import crypto from 'crypto'
 import { listProjectDeployments, rollbackToDeployment, toVercelSlug } from './deployer'
 import { getEnv } from '../lib/env'
@@ -1806,37 +1806,7 @@ ${input.userFeedback}
  * 真實跑 ALTER TABLE 到 Neon。Postgres 支援 transactional DDL：BEGIN; <sql>; COMMIT;
  * 任何 statement 失敗整批 ROLLBACK，回 { success: false, error }
  */
-async function runAlterMigration(
-  connectionString: string,
-  sql: string
-): Promise<{ success: boolean; error?: string; executedAt: number }> {
-  if (!sql.trim()) return { success: true, executedAt: Date.now() }
-
-  const client = new PgClient({ connectionString, ssl: { rejectUnauthorized: false } })
-  const startedAt = Date.now()
-  try {
-    await Promise.race([
-      client.connect(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Neon connect timeout (>15s)')), 15_000)),
-    ])
-    await client.query('BEGIN')
-    try {
-      await Promise.race([
-        client.query(sql),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('ALTER TABLE timeout (>60s)')), 60_000)),
-      ])
-      await client.query('COMMIT')
-      return { success: true, executedAt: Date.now() }
-    } catch (err) {
-      try { await client.query('ROLLBACK') } catch { /* swallow */ }
-      throw err
-    }
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err), executedAt: startedAt }
-  } finally {
-    await client.end().catch(() => {})
-  }
-}
+// runAlterMigration 已抽至 services/neon-migrate.ts（與 neon-service additive-drift 共用，single source of truth）
 
 interface ApplyResult {
   success: boolean

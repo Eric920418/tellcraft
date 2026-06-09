@@ -11,7 +11,9 @@ import { createLogger } from '../lib/logger'
 import { getDbLimit } from '../config/plans'
 import { sendMessage } from '../workers/orchestrator-utils'
 import { detectAuthInSchema } from './coder-generation'
+import { parseCreateTables } from './schema-derivation'
 import type { DerivedSchema } from './schema-derivation'
+import { runAlterMigration } from './neon-migrate'
 import type { IoEmitter } from '../types/flow-state'
 
 const logger = createLogger('neon-service')
@@ -464,6 +466,20 @@ export function extractTableNamesFromDDL(ddl: string): string[] {
 }
 
 /**
+ * A2 additive-drift：從完整 DDL 抽出指定表的 `CREATE TABLE IF NOT EXISTS …` 區塊。
+ * 重用 parseCreateTables（已支援 IF NOT EXISTS）取 originalBlock，只回 wanted 表的建表語句。
+ * 這些語句全是 IF NOT EXISTS → 加性 + idempotent，補缺表時絕不動既有表/資料。
+ */
+export function extractCreateTableStatements(ddl: string, tableNames: string[]): string {
+  if (!ddl.trim() || tableNames.length === 0) return ''
+  const wanted = new Set(tableNames.map(t => t.toLowerCase()))
+  return parseCreateTables(ddl)
+    .filter(t => wanted.has(t.tableName.toLowerCase()))
+    .map(t => t.originalBlock.trim())
+    .join('\n\n')
+}
+
+/**
  * 查 Neon DB 的 information_schema.tables，找出 expectedTables 中不存在的表。
  * 失敗時回傳空陣列（fail-open，不阻塞 pipeline）。
  */
@@ -544,7 +560,40 @@ export async function ensureNeonSchemaFresh(params: {
     return { connectionString: currentConn, reprovisioned: false }
   }
 
-  // 4. 缺表 → re-provision（provisionNeonDatabase 內部會刪舊 + 清 DB + 建新）
+  // 4. 缺表（drift）→ 依 CONTENT_MODEL_ADDITIVE_DRIFT flag 決定策略：
+  //    flag on + DB 已有客戶資料 → **additive ALTER**（只 CREATE 缺的表，保留既有資料），
+  //      不 reprovision（reprovision 對有資料的 DB 會被 L21 守門擋成 null → 結構從此卡死無法演進）。
+  //    flag off / DB 無資料 → 舊行為 reprovision（安全：無資料可丟）。
+  if (getEnv().CONTENT_MODEL_ADDITIVE_DRIFT) {
+    const dataCheck = await hasNonEmptyUserTables(currentConn)
+    if (dataCheck.hasData) {
+      const additiveDdl = extractCreateTableStatements(schema.postgresqlDDL || '', missing)
+      const migResult = additiveDdl.trim()
+        ? await runAlterMigration(currentConn, additiveDdl)
+        : { success: false, error: '無法從 DDL 抽出缺表的 CREATE TABLE 語句', executedAt: Date.now() }
+
+      void import('./skill-telemetry').then(({ recordTelemetry }) => recordTelemetry({
+        skillName: 'content_model',
+        eventType: 'content_additive_drift_migration',
+        patternKey: `missing:${missing.length}`,
+        projectId,
+        severity: migResult.success ? 'info' : 'warning',
+        outcome: migResult.success ? 'success' : 'failed',
+        payload: { missingTables: missing, existingTableCount: dataCheck.tableCount, error: migResult.error },
+      })).catch(() => {})
+
+      if (migResult.success) {
+        logger.info({ projectId, addedTables: missing }, 'ensureNeonSchemaFresh: drift 走 additive ALTER（保留客戶資料，未 reprovision）')
+      } else {
+        logger.error({ projectId, error: migResult.error, missing }, 'ensureNeonSchemaFresh: additive ALTER 失敗 — 仍不 reprovision（保護客戶資料），回現有 conn 讓下游報缺表錯誤')
+      }
+      // 不論成敗都回現有 conn：絕不對有資料的 DB reprovision（禁止破壞性資料遺失）。失敗時下游測試自會報缺表錯誤。
+      return { connectionString: currentConn, reprovisioned: false, missingTables: missing }
+    }
+    // 無客戶資料 → reprovision 安全，落到下方原行為
+  }
+
+  // 4b. 原行為：reprovision（flag off 或 DB 無資料）。provisionNeonDatabase 內 L21 仍會擋有資料的破壞性 drop。
   logger.warn({ projectId, missingTables: missing, expectedCount: expectedTables.length }, 'ensureNeonSchemaFresh: schema drift detected — re-provisioning')
   const reprovResult = await provisionNeonDatabase(params)
   return {

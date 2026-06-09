@@ -14,6 +14,7 @@ const dslSrc = fs.readFileSync(path.join(repoRoot, 'src/services/schema-change-d
 const intentSrc = fs.readFileSync(path.join(repoRoot, 'src/services/schema-iteration-intent.ts'), 'utf-8')
 const envSrc = fs.readFileSync(path.join(repoRoot, 'src/lib/env.ts'), 'utf-8')
 const migrationSrc = fs.readFileSync(path.join(repoRoot, 'migrations/043_add_schema_iteration_columns.sql'), 'utf-8')
+const migrateSrc = fs.readFileSync(path.join(repoRoot, 'src/services/neon-migrate.ts'), 'utf-8')
 
 describe('Schema iteration 架構契約守護', () => {
   it('classifyIterationScope 簽名包含 schema 第三類', () => {
@@ -37,17 +38,19 @@ describe('Schema iteration 架構契約守護', () => {
     expect(schemaIdx).toBeLessThan(fullstackIdx)
   })
 
-  it('executeSchemaIteration 主流程 + 3 個 helper 都存在', () => {
+  it('executeSchemaIteration 主流程 + helper 都存在；runAlterMigration 改 import 自 neon-migrate', () => {
     expect(iterationSrc).toMatch(/async function executeSchemaIteration\(/)
     expect(iterationSrc).toMatch(/async function planSchemaAndCodeChange\(/)
     expect(iterationSrc).toMatch(/async function applySchemaAndCode\(/)
-    expect(iterationSrc).toMatch(/async function runAlterMigration\(/)
+    // A2：runAlterMigration 抽到 neon-migrate.ts（與 neon-service additive-drift 共用），iteration-skill 改用 import
+    expect(iterationSrc).toMatch(/import\s*\{\s*runAlterMigration\s*\}\s*from\s*['"]\.\/neon-migrate['"]/)
+    expect(migrateSrc).toMatch(/export async function runAlterMigration\(/)
   })
 
-  it('runAlterMigration 用 transactional DDL（BEGIN/COMMIT）', () => {
-    const fnSection = iterationSrc.slice(
-      iterationSrc.indexOf('async function runAlterMigration'),
-      iterationSrc.indexOf('async function runAlterMigration') + 2000,
+  it('runAlterMigration 用 transactional DDL（BEGIN/COMMIT）— 在 neon-migrate.ts', () => {
+    const fnSection = migrateSrc.slice(
+      migrateSrc.indexOf('async function runAlterMigration'),
+      migrateSrc.indexOf('async function runAlterMigration') + 2000,
     )
     expect(fnSection).toContain("query('BEGIN')")
     expect(fnSection).toContain("query('COMMIT')")
