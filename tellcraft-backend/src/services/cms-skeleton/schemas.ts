@@ -89,6 +89,30 @@ CREATE TABLE IF NOT EXISTS role_capabilities (
 );
 CREATE INDEX IF NOT EXISTS idx_role_capabilities ON role_capabilities(role_id, capability_id);
 `.trim(),
+
+  orders: `
+CREATE TABLE IF NOT EXISTS orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  total_cents INTEGER NOT NULL DEFAULT 0,
+  currency VARCHAR(8) NOT NULL DEFAULT 'usd',
+  customer_email VARCHAR(255),
+  stripe_session_id VARCHAR(255),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, created_at DESC);
+`.trim(),
+
+  order_items: `
+CREATE TABLE IF NOT EXISTS order_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID NOT NULL,
+  product_name VARCHAR(255) NOT NULL,
+  unit_price_cents INTEGER NOT NULL DEFAULT 0,
+  quantity INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+`.trim(),
 } as const
 
 export type SkeletonTable = keyof typeof CMS_SKELETON_DDL

@@ -26,6 +26,7 @@ import { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-em
 import { generateAdminPanel } from './coder-admin-templates'
 import { deriveContentModel, type ContentModelManifest } from './content-model/manifest'
 import { generateRbacFiles } from './coder-auth-rbac-templates'
+import { generateCommerceFiles } from './coder-commerce-templates'
 import { generateUploadFiles } from './coder-upload-templates'
 import { getTemplate } from './coder-templates'
 import { tryDeterministicFix } from './coder-deterministic-fixes'
@@ -3351,6 +3352,9 @@ export async function executeCoderPipeline(
   const rbacEnabled = getEnv().ENABLE_RBAC_CAPABILITIES && !!authFiles
   const rbacFiles = rbacEnabled ? generateRbacFiles() : null
 
+  // Step 2.67: Commerce（gated ENABLE_COMMERCE_MODULE + schema 含 orders）。生 checkout/webhook/結帳頁。
+  const commerceFiles = getEnv().ENABLE_COMMERCE_MODULE ? generateCommerceFiles(schemaSql) : null
+
   // Step 2.7: Admin Panel generation (zero-LLM；contentModel 存在時 workflow-aware operation UI；rbac 時 content 動作用 requireCapability)
   const adminFiles = generateAdminPanel(schemaSql, entityMapping, !!authFiles, undefined, contentModel, rbacEnabled)
   if (adminFiles.length > 0) {
@@ -3618,6 +3622,7 @@ export async function executeCoderPipeline(
   // Admin Panel + Upload + Email primitive + Magic-link：注入到 backendFiles
   if (adminFiles.length > 0) backendFiles.push(...adminFiles)
   if (rbacFiles) backendFiles.push(...rbacFiles)
+  if (commerceFiles) backendFiles.push(...commerceFiles)
   if (uploadFiles) backendFiles.push(...uploadFiles)
   if (emailFiles.length > 0) backendFiles.push(...emailFiles)
   if (magicLinkFiles) backendFiles.push(...magicLinkFiles)

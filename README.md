@@ -1250,7 +1250,13 @@ Structure 平面（generate-time, AI）     Operation 平面（run-time, 零 LLM
 - 順手修 A3 漏洞：`INFRA_TABLES` 補 `content_versions` + rbac 三表（不生通用 CRUD 後台）。
 - 測試 `coder-generators.test.ts` +4（authz 生成 / rbac on→requireCapability / off→requireAdmin / INFRA 排除）。esbuild 驗證。
 
-**後續**：A2 opt-in 端點 → **C-Commerce**（Stripe Checkout + cart/order，最後一塊）。
+**C-Commerce — Stripe Checkout 輕整合（✅ 完成，flag `ENABLE_COMMERCE_MODULE` 預設 false）**：
+- **不引 Medusa**（會破壞單 app/單 Neon/Vercel 模型）。`orders`/`order_items` 表（schemas.ts + formulation 注入）。
+- `coder-commerce-templates.ts:generateCommerceFiles(schemaSql)`（schema 含 orders 時觸發）生：`lib/actions/create-checkout-session.ts`（建 order + Stripe Checkout session；**無 `STRIPE_SECRET_KEY` → mock 模式**直接標記已付）+ `app/api/webhooks/stripe/route.ts`（驗簽 + `checkout.session.completed` → 標記已付）+ 結帳成功/取消頁。
+- `'stripe'` 加進 `deployer.ts:KNOWN_PACKAGES`。客戶 app 金流 key 是 **per-deploy env**（`STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`），與 Tellcraft 平台 billing key 完全區隔。`orders` 由 generateAdminPanel 自動生後台供站長管理訂單；`order_items` INFRA 排除。購物車 UI 由客戶 app 負責，本層只提供結帳後端 primitive。
+- 測試 `coder-generators.test.ts` +5。esbuild 驗證 4 個生成檔。**限制：真實 Stripe 金流需用真帳號測**（生成代碼語法已驗證，但端到端付款流程需 STRIPE_SECRET_KEY + webhook 設定）。
+
+**整個 Day-2 自助營運層（A+C）完成** 🎉：站長部署後零 AI 自助營運內容（寫文/草稿/發布/排程/媒體/版本）+ 結構非破壞演進 + RBAC capability 層 + Stripe 電商。全 ship-dark（8 flag 預設 false），逐一開 flag 灰度啟用。**剩餘（UI-facing，非核心）**：A2 opt-in 觸發端點。
 
 ## 部署
 

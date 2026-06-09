@@ -171,6 +171,8 @@ interface SanitizeResult {
  */
 const KNOWN_PACKAGES: Record<string, string> = {
   'lucide-react': '^0.400.0',
+  stripe: '^14.0.0',                  // C-Commerce：生成的 checkout/webhook import 'stripe' 時自動加入
+
   '@radix-ui/react-dialog': '^1.1.0',
   '@radix-ui/react-dropdown-menu': '^2.1.0',
   '@radix-ui/react-popover': '^1.1.0',

@@ -49,7 +49,7 @@ const SYSTEM_TABLES = new Set([
   'users', 'accounts', 'sessions', 'verification_tokens', 'magic_link_tokens',
   'admins', 'site_settings', 'media_uploads',
   'roles', 'capabilities', 'role_capabilities', 'content_versions',
-  'carts', 'cart_items',
+  'carts', 'cart_items', 'orders', 'order_items',
 ])
 
 /** 標準化 content 模組表（A1 起由 blog/pages skeleton module 注入）→ source='content_module' */

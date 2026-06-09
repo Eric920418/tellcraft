@@ -142,6 +142,7 @@ const INFRA_TABLES = new Set([
   'admins', 'site_settings', 'media_uploads', 'magic_link_tokens',
   'content_versions',                                  // A3：版本歷史，由版本 UI 管理，不生通用 CRUD
   'roles', 'capabilities', 'role_capabilities',        // C-Auth：RBAC 表，不生通用 CRUD
+  'order_items', 'carts', 'cart_items',                // C-Commerce：訂單明細/購物車（orders 仍生後台供站長管理訂單）
 ])
 
 // ============================================================

@@ -8,6 +8,7 @@ import { detectAuthInSchema, generateAuthSystem, injectSessionProvider } from '.
 import { generateAdminPanel, parseColumnDefinitions } from '../services/coder-admin-templates'
 import { deriveContentModel } from '../services/content-model/manifest'
 import { generateRbacFiles } from '../services/coder-auth-rbac-templates'
+import { generateCommerceFiles } from '../services/coder-commerce-templates'
 import { detectImageColumnsInSchema, generateUploadFiles } from '../services/coder-upload-templates'
 
 // ============================================================
@@ -560,6 +561,45 @@ CREATE TABLE IF NOT EXISTS role_capabilities (id UUID PRIMARY KEY, role_id UUID,
     expect(files.some(f => f.path.includes('admin/roles'))).toBe(false)
     expect(files.some(f => f.path.includes('admin/role-capabilities'))).toBe(false)
     expect(files.some(f => f.path === 'app/admin/posts/page.tsx')).toBe(true)
+  })
+})
+
+describe('C-Commerce — Stripe Checkout', () => {
+  const SCHEMA = `CREATE TABLE products (id UUID PRIMARY KEY, name VARCHAR(200));
+CREATE TABLE IF NOT EXISTS orders (id UUID PRIMARY KEY, status VARCHAR(20) DEFAULT 'pending', total_cents INTEGER, currency VARCHAR(8), customer_email VARCHAR(255), stripe_session_id VARCHAR(255), created_at TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS order_items (id UUID PRIMARY KEY, order_id UUID, product_name VARCHAR(255), unit_price_cents INTEGER, quantity INTEGER);`
+
+  it('schema 含 orders → 生 checkout + webhook + 成功/取消頁', () => {
+    const paths = generateCommerceFiles(SCHEMA)!.map(f => f.path)
+    expect(paths).toContain('lib/actions/create-checkout-session.ts')
+    expect(paths).toContain('app/api/webhooks/stripe/route.ts')
+    expect(paths).toContain('app/checkout/success/page.tsx')
+    expect(paths).toContain('app/checkout/cancel/page.tsx')
+  })
+
+  it('checkout 建 order + Stripe session + 無 key mock 模式', () => {
+    const checkout = generateCommerceFiles(SCHEMA)!.find(f => f.path.includes('create-checkout'))!.content
+    expect(checkout).toContain('INSERT INTO orders')
+    expect(checkout).toContain('stripe.checkout.sessions.create')
+    expect(checkout).toContain('STRIPE_SECRET_KEY')
+    expect(checkout).toContain("status = 'paid'")
+  })
+
+  it('webhook 驗簽 + checkout.session.completed → 標記已付', () => {
+    const webhook = generateCommerceFiles(SCHEMA)!.find(f => f.path.includes('webhooks/stripe'))!.content
+    expect(webhook).toContain('constructEvent')
+    expect(webhook).toContain('checkout.session.completed')
+    expect(webhook).toContain("status = 'paid'")
+  })
+
+  it('無 orders 表 → 不生 commerce 檔', () => {
+    expect(generateCommerceFiles('CREATE TABLE posts (id UUID PRIMARY KEY);')).toBeNull()
+  })
+
+  it('orders 生後台供站長管理訂單；order_items 排除', () => {
+    const files = generateAdminPanel(SCHEMA, '商品: products', true, undefined, deriveContentModel(SCHEMA, '商品: products'))
+    expect(files.some(f => f.path === 'app/admin/orders/page.tsx')).toBe(true)
+    expect(files.some(f => f.path.includes('admin/order-items'))).toBe(false)
   })
 })
 
