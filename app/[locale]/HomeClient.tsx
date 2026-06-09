@@ -103,6 +103,23 @@ function HomeContent() {
   // 傳給 ChatSection，每次 sendMessage 都帶到 backend；後端只第一次寫入 FlowState
   const precisionOrderId = searchParams.get('orderId') || undefined
 
+  // pay-to-start 還原：用戶在首頁選精細模式但未付款 → 被導去付款（prompt 暫存 sessionStorage）。
+  // 付完跳回 ?orderId= → 還原當初的 prompt + 切回精細模式，用戶按送出即可續跑（此時已有已付訂單，gate 放行）。
+  // 不自動送出：避免蓋掉付款完 onboarding overlay，也讓用戶有機會修改 prompt 再開始。
+  useEffect(() => {
+    if (!precisionOrderId) return
+    let pending: { prompt?: string } | null = null
+    try {
+      const raw = sessionStorage.getItem('tellcraft_pending_precision')
+      if (raw) pending = JSON.parse(raw)
+    } catch { /* 解析失敗就略過還原 */ }
+    if (pending?.prompt) {
+      sessionStorage.removeItem('tellcraft_pending_precision')
+      setBuildMode('fine')
+      setHeroInput(pending.prompt)
+    }
+  }, [precisionOrderId])
+
   // 瀏覽器返回鍵監聯
   useEffect(() => {
     const handlePopState = () => {

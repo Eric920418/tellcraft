@@ -86,6 +86,58 @@ export const TIER_CONFIG: Record<PrecisionTier, TierConfig> = {
   },
 }
 
+/**
+ * 已付款且可用於生成/迭代的精細訂單狀態。
+ * pending=未付款 / cancelled/refunded/failed=無效。
+ * ⚠️ 全站統一判定來源——project.ts 下載 gate、iteration-skill.ts 配額查詢、本檔 pay-to-start gate
+ *    都應以此為準，避免「同一條規則散在多處」漂移（CLAUDE.md source-of-truth 原則）。
+ */
+export const USABLE_PRECISION_ORDER_STATUSES: readonly string[] = ['paid', 'in_progress', 'delivered']
+
+/**
+ * 精細模式 pay-to-start gate 核心：判定 user 能否「啟動本專案的精細生成」，可則回傳並原子綁定訂單。
+ *
+ * - 已綁到本專案的可用訂單 → 直接回傳（idempotent：同專案重送 / 瀏覽器重整 / 恢復都不會被擋）
+ * - 未綁定（project_id IS NULL）的已付訂單 → 用單一 UPDATE 原子認領（FIFO，最早付的先用），綁到本專案
+ * - 兩者皆無 → null（呼叫端回 402 PRECISION_PAYMENT_REQUIRED，前端導去單次付款）
+ *
+ * 為什麼用「認領」而非只「檢查」：精細模式第一則訊息不帶 precisionOrderId，若只檢查不綁定，
+ * 訂單會一直 unbound → 下一個新專案可重複使用同一筆付款（白嫖）。認領用
+ * `WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING` 保證併發安全：
+ * 同一張訂單不會被兩個專案同時搶走，落實「一筆付款 = 一個專案」。
+ */
+export async function claimPrecisionOrderForStart(
+  userId: string,
+  projectId: string
+): Promise<{ id: string; tier: string } | null> {
+  // 1. 已綁本專案的可用訂單 → idempotent 放行
+  const bound = await queryOne<{ id: string; tier: string }>(
+    `SELECT id, tier
+       FROM precision_orders
+      WHERE user_id = $1 AND project_id = $2 AND status = ANY($3::text[])
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [userId, projectId, [...USABLE_PRECISION_ORDER_STATUSES]]
+  )
+  if (bound) return bound
+
+  // 2. 原子認領一張未綁定的已付訂單（FIFO，最早付的先消耗）
+  const claimed = await queryOne<{ id: string; tier: string }>(
+    `UPDATE precision_orders
+        SET project_id = $2
+      WHERE id = (
+        SELECT id FROM precision_orders
+         WHERE user_id = $1 AND project_id IS NULL AND status = ANY($3::text[])
+         ORDER BY created_at ASC
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id, tier`,
+    [userId, projectId, [...USABLE_PRECISION_ORDER_STATUSES]]
+  )
+  return claimed
+}
+
 // 加購菜單（與 migration 040 對齊；本 PR 先在前端勾選並列入訂單總價，後續真實 module 生成留 W3）
 // 加購價同步等比下調，避免 $99 訂單搭 $149 模塊比例失衡
 export type AddonType = 'hosting' | 'maintenance' | 'module_blog' | 'module_auth' | 'module_ecommerce' | 'module_forms'

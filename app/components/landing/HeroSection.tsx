@@ -281,6 +281,7 @@ function HeroSection({
               typingSpeed={75}
               pauseDuration={1500}
               showCursor
+              hideCursorOnComplete
               cursorCharacter="_"
               deletingSpeed={50}
               cursorBlinkDuration={0.5}

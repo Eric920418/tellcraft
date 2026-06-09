@@ -224,6 +224,15 @@ export function useChatSession(
 
         if (!sendResult.success) {
           const initErr = sendResult.error || ''
+          if (initErr.includes('PRECISION_PAYMENT_REQUIRED')) {
+            // 精細模式未付款 → 暫存 prompt，導去單次付款；付完跳回首頁帶 ?orderId= 由 HomeClient 自動還原
+            try {
+              sessionStorage.setItem('tellcraft_pending_precision', JSON.stringify({ prompt: initialMessage }))
+            } catch { /* sessionStorage 不可用就跳過還原，不阻擋導轉 */ }
+            const localePrefix = locale && locale !== 'en' ? `/${locale}` : ''
+            window.location.href = `${localePrefix}/pay/standard_599`
+            return
+          }
           if (initErr.includes('GUEST_FINE_LOCKED') || initErr.includes('GUEST_LIMIT_REACHED')) {
             localStorage.setItem('tellcraft_guest_fast_used', 'true')
             setGuestBuildCompleted(true)

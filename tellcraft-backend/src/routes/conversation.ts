@@ -10,6 +10,7 @@ import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../c
 import { acquireUserActiveLock, releaseUserActiveLock, USER_ACTIVE_TTL_SECONDS } from '../services/conversation-lock'
 import { enqueuePreviewDeploy } from '../workers/preview-deploy-worker'
 import { repairCodePreviewInMessages } from '../services/code-repair'
+import { claimPrecisionOrderForStart } from '../services/stripe-service'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('conversation')
@@ -203,6 +204,30 @@ router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async
       if (ownerUser?.email !== callerUser?.email) {
         return res.status(403).json({ error: 'Access denied' })
       }
+    }
+
+    // ===== 精細模式 pay-to-start gate（單次付費才能啟動昂貴 pipeline）=====
+    // mode==='fine' 只在「啟動精細生成」的第一則訊息帶（useChatSession:219），
+    // 後續迭代訊息不帶 mode（由 iteration-skill 的配額 gate 管），故此 gate 剛好只在「啟動」那刻觸發。
+    // 認領式：有未綁定的已付訂單 → 原子綁到本專案放行；完全沒有可用訂單 → 402 導去單次付款。
+    // 對 fast/clone 模式、creator/pro/business 訂閱用戶完全無影響。
+    if (mode === 'fine' && conversation.project_id) {
+      const usableOrder = await claimPrecisionOrderForStart(userId, conversation.project_id)
+      if (!usableOrder) {
+        logger.info(
+          { userId, projectId: conversation.project_id },
+          '精細模式未付款 → 擋下並導去單次付款'
+        )
+        return res.status(402).json({
+          error: 'PRECISION_PAYMENT_REQUIRED',
+          message: '精細模式為單次付費方案，請先完成付款再開始生成',
+          tier: 'standard_599',
+        })
+      }
+      logger.info(
+        { userId, projectId: conversation.project_id, orderId: usableOrder.id },
+        '精細模式付款驗證通過，訂單已綁定本專案'
+      )
     }
 
     // 精細模式訂單綁定：用戶從 /pay/success 跳回 chat 帶 ?orderId=（前端 ChatSection 每次 sendMessage 帶）。

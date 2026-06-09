@@ -171,6 +171,19 @@ cd tellcraft-backend && pnpm tsx src/scripts/warm-image-library.ts [--type=<prod
 | 成功 | `/[locale]/pay/success?session_id=xxx` | Polling DB（1.5s 一次，30s 上限）確認 `precision_orders.status='paid'` 才放行進 BDD |
 | 取消 | `/[locale]/pay/cancel?session_id=xxx` | 5 個 radio reason 寫 `cancellation_reason`（分析定價/轉換問題用） |
 
+#### pay-to-start gate（精細模式啟動付費牆）
+
+精細模式（`buildMode='fine'`）是**單次付費才能啟動生成**，不是免費試後付。曝光保留（首頁 Hero 仍顯示「精細模式」按鈕當行銷入口），但**按下生成那刻**就驗付款，保護昂貴的多頁 Sonnet pipeline 不被白嫖。兩條入口殊途同歸：
+
+- **入口 A（Pricing 先付）**：`/pricing` → `/pay/[tier]` → Stripe → `/pay/success` → 跳回首頁帶 `?orderId=` → 開始精細生成。
+- **入口 B（Hero 選了才付，pay-to-start）**：Hero 選精細模式 + 送出 → 後端 gate 查無已付訂單 → **402 `PRECISION_PAYMENT_REQUIRED`** → 前端暫存 prompt（sessionStorage）+ 導去 `/pay/standard_599` → 付完跳回 `?orderId=` → `HomeClient` 還原 prompt + 切回精細模式 → 用戶一鍵續跑。
+
+**load-bearing 在後端**（前端 redirect 只是 UX，可繞過）：`routes/conversation.ts` 訊息入口對 `mode==='fine'` 的第一則訊息呼叫 `claimPrecisionOrderForStart(userId, projectId)`（`services/stripe-service.ts`）——
+- 已綁本專案的可用訂單 → 冪等放行；未綁定的已付訂單 → **單一 UPDATE `... WHERE id=(SELECT ... FOR UPDATE SKIP LOCKED) RETURNING` 原子認領**綁到本專案，落實「一筆付款 = 一個專案」；都沒有 → 回 402。
+- 後續迭代訊息不帶 `mode`（由 iteration 配額 gate 管），故此牆只在「啟動」那刻觸發，對 fast/clone、訂閱用戶零影響。
+- 「可用訂單」狀態統一常數 `USABLE_PRECISION_ORDER_STATUSES = ['paid','in_progress','delivered']`，與下載買斷 gate（`project.ts`）、迭代配額（`iteration-skill.ts`）同一真相來源。
+- ⚠️ 此牆只管「**啟動生成**」；下載**原始碼**仍走獨立的 `exported_buyout` 買斷 gate（`project.ts`，另一筆錢），兩者不混。守 `__tests__/precision-pay-to-start.test.ts`（認領原子性 / 冪等 / 無單回 null / 狀態白名單）。
+
 **後端**：
 - `POST /api/checkout/precision` — 創 Checkout session + `precision_orders` row（status=pending）
 - `GET /api/checkout/catalog` — tier + addon 價格元資料（前端避免 hardcode）
@@ -1326,7 +1339,9 @@ psql "$DATABASE_URL" -f tellcraft-backend/migrations/xxx.sql
 <details>
 <summary><h2>開發更新紀錄（點擊展開）</h2></summary>
 
-### 近期更新（2026-03-13 ~ 2026-06-02）
+### 近期更新（2026-03-13 ~ 2026-06-09）
+
+- **Hero 打字機游標打完即收（消除標題視覺不對齊）**（06-09）：Landing Hero 標題「告訴我你想做什麼」用 `TextType` 打字機元件，但 `heroTitleTexts` 是單一字串（`[heroTitle]`）→ 元件不進 delete/loop 分支，打完停在 `displayText === currentText`，游標 `_` 卻是 `animation: blink ... infinite` **永遠閃下去**；置中 h1 尾端掛著會閃的字元造成視覺重心飄移、看起來沒對齊中線。**修法**：`TextType` 新增 opt-in `hideCursorOnComplete` prop + `isComplete` state（單一文字打完即設 `true`，多文字循環場景不受影響保留無限閃游標），render 端 `showCursor && !(hideCursorOnComplete && isComplete)` 收掉游標；`HeroSection` 啟用該 prop。打字過程仍有游標引導，跑完一次即消失。**核心洞察**：通用元件加 opt-in prop（預設 false）比直接砍游標好 —— 保留打字引導體驗、不破壞其他潛在 loop 用途、零行為回歸
 
 - **Web Clone 結構化 design token 抽取（移植 design-extract 演算法提升復刻準度）**（06-02）：用戶要求把 `Manavarya09/design-extract`（npm `designlang` v12.x，MIT）導入 clone 提升準度。**框架修正**：不裝套件 — 它依賴完整 `playwright`（postinstall 下載瀏覽器 binary），與本專案既有 `puppeteer-core` + 系統 Chromium 衝突且 redundant，52 模組 / 17 種輸出 95% 無用。**真正值錢的是演算法**：它的 extractor 多是「瀏覽器收集 `getComputedStyle` 原料 → Node 純函式分類」兩段式，剛好對得上現有 `page.evaluate(CLONE_EXTRACTION_SCRIPT)`。**決策（與用戶確認）**：vendor/移植核心+視覺細節 extractor 的演算法（MIT，可合法移植）。**改動**：(1) 新檔 `services/clone/design-token-extractor.ts` 純函式分類器，移植 `colors.js`（RGB clustering 距離 15 + 語意角色 primary/secondary/accent/neutral/surface/foreground，brand score = interactiveBg×100 + saturation×2 + log₁₀(count)、secondary 色相距離 >60、accent <5% 使用率、confidence = 0.3+gap×1.4）、`variables.js`（CSS 變數分桶 + `var()` 依賴）、`spacing.js`（base unit 8/4px 推導）、`typography.js`（字級/字重/行高階層）、`shadows/borders/breakpoints.js`。(2) 擴充 `CLONE_EXTRACTION_SCRIPT` 在**同一個 `page.evaluate`** 多收原料：`:root` CSS 變數、帶 role+面積的色彩樣本、字體/間距/陰影/圓角/邊框頻率表、漸層、`document.styleSheets` 的 media query 斷點（cross-origin try/catch fail-soft，**截圖流程零改動**）。(3) `extractPageForClone` 組 `CloneDesignTokens`（**fail-soft：抽取失敗降級回基礎色板**）；新型別掛 `CloneDesignSystem.tokens?` + `FlowState.cloneDesignSystem.tokens?`（optional，**不污染 reference-analyzer 共用的 `ExtractedColors`**）。(4) `generateSectionCode` 加 `formatDesignTokensForPrompt()` 把語意 token 當約束注入 **dynamic user block**（守 cache，不進 static system）；`CLONE_SYSTEM_PROMPT` 加硬規則「顏色一律從 token 依語意角色取、禁自創、圓角/陰影/間距優先採 token 值」。(5) `assembleSections` 的 globals.css `:root` 用語意色（純 CSS，v3/v4 皆安全）。**務實修正原 plan**：clone 的 tailwindConfig 是空字串 + 客戶 app pin Tailwind v3.4（v4→v3 sanitize 砍 `@theme`），故**不用 `bg-primary` 語意類名**（無處解析會爆版），改用「依語意角色挑對的精確 hex 任意值」`bg-[#635bff]` —— 準度提升來自 LLM 拿到對的、分好類的值而非類名形式。**26 個新單元測試**（2731→2757）含 clustering 合併近似色 / primary 互動加權選定 / secondary 色相門檻 / 變數分桶 + `var()` 依賴 / spacing base 8 推導 / typography 去重排序 / breakpoints 去重升冪 / 空輸入 fail-soft。**核心洞察**：(A) 「import 整個 project」常是錯的粒度 — 值錢的是演算法不是套件，MIT 授權下移植純函式避免拖入重依賴。(B) 語意角色靠「使用脈絡」(button bg ×100) 而非單純頻率 — 這是現有頻率採樣抓不到主色的關鍵。(C) 準度瓶頸不在 LLM 而在「餵給它的結構化程度」：把亂猜任意值改成「有語意標註的精確值」就能大幅收斂走樣
 

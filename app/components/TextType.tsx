@@ -8,6 +8,7 @@ interface TextTypeProps {
   deletingSpeed?: number
   pauseDuration?: number
   showCursor?: boolean
+  hideCursorOnComplete?: boolean
   cursorCharacter?: string
   cursorBlinkDuration?: number
   variableSpeedEnabled?: boolean
@@ -23,6 +24,7 @@ const TextType: React.FC<TextTypeProps> = ({
   deletingSpeed = 50,
   pauseDuration = 1500,
   showCursor = true,
+  hideCursorOnComplete = false,
   cursorCharacter = '_',
   cursorBlinkDuration = 0.5,
   variableSpeedEnabled = false,
@@ -35,6 +37,7 @@ const TextType: React.FC<TextTypeProps> = ({
   const [textIndex, setTextIndex] = useState(0)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
+  const [isComplete, setIsComplete] = useState(false)
 
   const getTypingSpeed = useCallback(() => {
     if (variableSpeedEnabled) {
@@ -72,6 +75,9 @@ const TextType: React.FC<TextTypeProps> = ({
     if (displayText === currentText) {
       if (texts.length > 1) {
         setIsPaused(true)
+      } else {
+        // 單一文字：打完即視為完成（不再循環刪除）
+        setIsComplete(true)
       }
       return
     }
@@ -86,7 +92,7 @@ const TextType: React.FC<TextTypeProps> = ({
   return (
     <span className={className} style={style}>
       {displayText}
-      {showCursor && (
+      {showCursor && !(hideCursorOnComplete && isComplete) && (
         <span
           style={{
             animation: `blink ${cursorBlinkDuration}s step-end infinite`,
