@@ -14,7 +14,7 @@ function getApiBase(): string {
     return '/api/vps'
   }
   // 伺服器端: 直連 VPS API
-  return process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+  return process.env.VPS_API_URL || 'https://api.tellcraft.com'
 }
 
 // ============================================================

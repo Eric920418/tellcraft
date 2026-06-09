@@ -5,7 +5,7 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
 )
 
-const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+const VPS_API_URL = process.env.VPS_API_URL || 'https://api.tellcraft.com'
 
 /**
  * GET /api/auth/me

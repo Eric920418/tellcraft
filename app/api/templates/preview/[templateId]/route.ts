@@ -7,7 +7,7 @@ export async function GET(
   const { templateId } = await params
 
   // 代理到 VPS API（DB-only 來源）
-  const vpsUrl = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+  const vpsUrl = process.env.VPS_API_URL || 'https://api.tellcraft.com'
   try {
     const response = await fetch(`${vpsUrl}/api/templates/preview/${templateId}`, {
       headers: {

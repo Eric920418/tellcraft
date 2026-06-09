@@ -2,7 +2,7 @@ import { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
 import createNextIntlPlugin from 'next-intl/plugin';
 
-const DEFAULT_VPS_API_URL = 'http://54.238.4.117:8080';
+const DEFAULT_VPS_API_URL = 'https://api.tellcraft.com';
 
 const nextConfig: NextConfig = {
   async rewrites() {

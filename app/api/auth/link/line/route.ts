@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { jwtVerify } from 'jose'
 
-const VPS_API_URL = process.env.VPS_API_URL || 'http://54.238.4.117:8080'
+const VPS_API_URL = process.env.VPS_API_URL || 'https://api.tellcraft.com'
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'tellcraft-jwt-secret-change-in-production'
 )

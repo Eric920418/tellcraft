@@ -29,7 +29,7 @@ const envSchema = z.object({
   DEPLOY_BUILD_MAX_MEMORY_MB: z.coerce.number().default(1024),    // next build 子進程記憶體上限
   UPLOAD_DIR: z.string().default('/var/www/uploads/tellcraft'),
   APP_URL: z.string().default('https://tellcraft.com'),
-  API_URL: z.string().default('http://54.238.4.117:8080'),
+  API_URL: z.string().default('https://api.tellcraft.com'),
   SOCKET_VERBOSE_LOG: z.stringbool().default(false),
   ALLOWED_CALLBACK_HOSTS: z.string().default('https://tellcraft.com'),
 
