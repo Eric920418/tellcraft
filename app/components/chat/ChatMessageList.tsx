@@ -126,7 +126,10 @@ export default function ChatMessageList({
       : messages
     ).filter(m =>
       !(m.stage === 'deployer_code_sync' && !m.content?.trim()) &&
-      !(m.role === 'user' && m.content?.startsWith('__auto_repair_preview__:'))
+      !(m.role === 'user' && m.content?.startsWith('__auto_repair_preview__:')) &&
+      // code_preview 是給右側預覽面板的，無文字內容時別在訊息流渲染成空泡泡
+      // （預覽面板讀完整 messages，不受此過濾影響，資料不會丟）
+      !(m.richContent?.type === 'code_preview' && !m.content?.trim())
     )
   }, [messages, layoutMode])
 
