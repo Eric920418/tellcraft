@@ -25,6 +25,7 @@ import { generateAuthSystem, injectSessionProvider, detectAuthCapabilities } fro
 import { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-email-templates'
 import { generateAdminPanel } from './coder-admin-templates'
 import { deriveContentModel, type ContentModelManifest } from './content-model/manifest'
+import { generateRbacFiles } from './coder-auth-rbac-templates'
 import { generateUploadFiles } from './coder-upload-templates'
 import { getTemplate } from './coder-templates'
 import { tryDeterministicFix } from './coder-deterministic-fixes'
@@ -3346,8 +3347,12 @@ export async function executeCoderPipeline(
     )
   }
 
-  // Step 2.7: Admin Panel generation (zero-LLM；contentModel 存在時 workflow-aware operation UI)
-  const adminFiles = generateAdminPanel(schemaSql, entityMapping, !!authFiles, undefined, contentModel)
+  // Step 2.66: RBAC capability 層（gated ENABLE_RBAC_CAPABILITIES + 有 auth）。生 lib/authz.ts:requireCapability。
+  const rbacEnabled = getEnv().ENABLE_RBAC_CAPABILITIES && !!authFiles
+  const rbacFiles = rbacEnabled ? generateRbacFiles() : null
+
+  // Step 2.7: Admin Panel generation (zero-LLM；contentModel 存在時 workflow-aware operation UI；rbac 時 content 動作用 requireCapability)
+  const adminFiles = generateAdminPanel(schemaSql, entityMapping, !!authFiles, undefined, contentModel, rbacEnabled)
   if (adminFiles.length > 0) {
     await callbacks.onProgress('生成管理後台...', 8)
     logger.info({ fileCount: adminFiles.length }, 'Admin Panel 生成完成')
@@ -3612,6 +3617,7 @@ export async function executeCoderPipeline(
 
   // Admin Panel + Upload + Email primitive + Magic-link：注入到 backendFiles
   if (adminFiles.length > 0) backendFiles.push(...adminFiles)
+  if (rbacFiles) backendFiles.push(...rbacFiles)
   if (uploadFiles) backendFiles.push(...uploadFiles)
   if (emailFiles.length > 0) backendFiles.push(...emailFiles)
   if (magicLinkFiles) backendFiles.push(...magicLinkFiles)

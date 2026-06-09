@@ -138,7 +138,11 @@ function formDataGetter(col: AdminColumnInfo): string {
 const AUTH_TABLES = new Set(['users', 'accounts', 'sessions', 'verification_tokens'])
 // CMS skeleton 技術 / 基礎設施表 — 各有專屬處理（admin auth / get_site_settings action / A3 媒體庫 / magic-link），
 // 不生通用 CRUD 後台。注意 contact_submissions / newsletter_subscribers 不在此列 → 會生後台供站長管理（A1 治本後新增的能力）。
-const INFRA_TABLES = new Set(['admins', 'site_settings', 'media_uploads', 'magic_link_tokens'])
+const INFRA_TABLES = new Set([
+  'admins', 'site_settings', 'media_uploads', 'magic_link_tokens',
+  'content_versions',                                  // A3：版本歷史，由版本 UI 管理，不生通用 CRUD
+  'roles', 'capabilities', 'role_capabilities',        // C-Auth：RBAC 表，不生通用 CRUD
+])
 
 // ============================================================
 // A1 operation UI：內容工作流（草稿/發布/排程）— manifest 驅動，flag gated
@@ -185,6 +189,7 @@ export function generateAdminPanel(
   hasAuth: boolean,
   slots?: ResolvedSlots | null,
   contentModel?: ContentModelManifest,
+  rbac?: boolean,
 ): GeneratedComponent[] {
   const tables = parseCreateTables(schemaSql)
   const entityMap = parseEntityToTableMapping(entityMapping)
@@ -232,7 +237,7 @@ export function generateAdminPanel(
       { path: `app/admin/${slug}/page.tsx`, content: workflow ? buildWorkflowListPage(info, workflow, hasAuth) : buildListPage(info, hasAuth), description: `${info.entityName} 列表` },
       { path: `app/admin/${slug}/[id]/page.tsx`, content: buildEditPage(info, tableInfos, hasAuth, workflow), description: `${info.entityName} 編輯` },
       { path: `lib/admin-queries/${slug}.ts`, content: buildQueryFile(info, workflow), description: `${info.entityName} 查詢` },
-      { path: `lib/admin-actions/${slug}.ts`, content: buildActionFile(info, hasAuth, workflow), description: `${info.entityName} CRUD Actions` },
+      { path: `lib/admin-actions/${slug}.ts`, content: buildActionFile(info, hasAuth, workflow, rbac), description: `${info.entityName} CRUD Actions` },
     )
   }
 
@@ -563,13 +568,15 @@ export default async function MediaLibraryPage() {
 `
 }
 
-function buildActionFile(info: TableInfo, hasAuth: boolean, workflow?: TableWorkflow): string {
+function buildActionFile(info: TableInfo, hasAuth: boolean, workflow?: TableWorkflow, rbac?: boolean): string {
   const pascal = toPascal(info.tableName)
   const slug = toKebab(info.tableName)
   const editable = info.columns.filter(c => !isSkippedColumn(c))
 
-  const authImport = hasAuth ? `\nimport { requireAdmin } from '@/lib/auth-check'` : ''
-  const authCheck = hasAuth ? '\n  await requireAdmin()' : ''
+  // C-Auth：workflow 內容型別的動作在 rbac 開啟時用 requireCapability('content.manage')；其餘維持 requireAdmin
+  const useCapability = !!rbac && !!workflow && hasAuth
+  const authImport = !hasAuth ? '' : (useCapability ? `\nimport { requireCapability } from '@/lib/authz'` : `\nimport { requireAdmin } from '@/lib/auth-check'`)
+  const authCheck = !hasAuth ? '' : (useCapability ? `\n  await requireCapability('content.manage')` : '\n  await requireAdmin()')
 
   const getters = editable.map(c => `    ${c.name}: ${formDataGetter(c)},`).join('\n')
   const insertCols = editable.map(c => c.name).join(', ')

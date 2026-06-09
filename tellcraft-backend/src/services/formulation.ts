@@ -1487,6 +1487,7 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
     const coreTables: SkeletonTable[] = ['admins', 'site_settings']
     if (getEnv().CONTENT_MODEL_INJECT_MEDIA) coreTables.push('media_uploads')
     if (getEnv().ENABLE_CONTENT_VERSIONING) coreTables.push('content_versions')
+    if (getEnv().ENABLE_RBAC_CAPABILITIES) coreTables.push('roles', 'capabilities', 'role_capabilities')
     const coreDdl = getCmsSkeletonDdl(coreTables)
     let mergedSchemaSql = schemaSql.includes('CREATE TABLE IF NOT EXISTS admins')
       ? schemaSql

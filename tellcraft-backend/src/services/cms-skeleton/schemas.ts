@@ -63,6 +63,32 @@ CREATE TABLE IF NOT EXISTS content_versions (
 );
 CREATE INDEX IF NOT EXISTS idx_content_versions_lookup ON content_versions(content_table, content_id, created_at DESC);
 `.trim(),
+
+  roles: `
+CREATE TABLE IF NOT EXISTS roles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(64) NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+`.trim(),
+
+  capabilities: `
+CREATE TABLE IF NOT EXISTS capabilities (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key VARCHAR(128) NOT NULL UNIQUE,
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+`.trim(),
+
+  role_capabilities: `
+CREATE TABLE IF NOT EXISTS role_capabilities (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  role_id UUID NOT NULL,
+  capability_id UUID NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_role_capabilities ON role_capabilities(role_id, capability_id);
+`.trim(),
 } as const
 
 export type SkeletonTable = keyof typeof CMS_SKELETON_DDL

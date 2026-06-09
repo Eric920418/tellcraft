@@ -1243,7 +1243,14 @@ Structure 平面（generate-time, AI）     Operation 平面（run-time, 零 LLM
 
 **A 階段完成**：站長部署後零 AI 自助營運——寫文/草稿/發布/排程/篩選/媒體庫/版本還原，且結構演進非破壞。**A 剩餘（UI-facing，非核心）**：A2 opt-in 觸發端點（規劃器已就緒）。
 
-**後續**：A3 內容版本 + A2 opt-in 端點 → C-Auth（capability 層）→ C-Commerce（Stripe + cart/order）。
+**C-Auth — NextAuth 保留 + additive capability 層（✅ 完成，flag `ENABLE_RBAC_CAPABILITIES` 預設 false）**：
+- 不換 Better-Auth（避免破壞既有 NextAuth + users/sessions schema），additive 加 `roles`/`capabilities`/`role_capabilities` 表（schemas.ts + formulation 注入）。
+- `coder-auth-rbac-templates.ts:generateRbacFiles()` 生 `lib/authz.ts:requireCapability(cap)`——**admin 角色 = superuser shortcut**（自動通過），其他角色查 role_capabilities。solo 站長 MVP 即用、零 seeding；加 editor 角色後才差別化。
+- rbac 開啟時 `generateAdminPanel` 對 workflow 內容型別的動作改用 `requireCapability('content.manage')`（取代 requireAdmin）。`coder-generation.ts` gated 生成 + 注入 `lib/authz.ts`。
+- 順手修 A3 漏洞：`INFRA_TABLES` 補 `content_versions` + rbac 三表（不生通用 CRUD 後台）。
+- 測試 `coder-generators.test.ts` +4（authz 生成 / rbac on→requireCapability / off→requireAdmin / INFRA 排除）。esbuild 驗證。
+
+**後續**：A2 opt-in 端點 → **C-Commerce**（Stripe Checkout + cart/order，最後一塊）。
 
 ## 部署
 

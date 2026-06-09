@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest'
 import { detectAuthInSchema, generateAuthSystem, injectSessionProvider } from '../services/coder-auth-templates'
 import { generateAdminPanel, parseColumnDefinitions } from '../services/coder-admin-templates'
 import { deriveContentModel } from '../services/content-model/manifest'
+import { generateRbacFiles } from '../services/coder-auth-rbac-templates'
 import { detectImageColumnsInSchema, generateUploadFiles } from '../services/coder-upload-templates'
 
 // ============================================================
@@ -522,6 +523,43 @@ CREATE TABLE IF NOT EXISTS content_versions (id UUID PRIMARY KEY, content_table 
     const action = generateAdminPanel(noVer, '文章: posts', true, undefined, deriveContentModel(noVer, '文章: posts')).find(f => f.path === 'lib/admin-actions/posts.ts')!
     expect(action.content).not.toContain('content_versions')
     expect(action.content).not.toContain('restorePostsVersion')
+  })
+})
+
+describe('C-Auth — RBAC capability 層', () => {
+  const SCHEMA = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), status VARCHAR(20) DEFAULT 'draft');`
+  const cm = deriveContentModel(SCHEMA, '文章: posts')
+
+  it('generateRbacFiles → lib/authz.ts requireCapability（admin superuser shortcut）', () => {
+    const f = generateRbacFiles()[0]
+    expect(f.path).toBe('lib/authz.ts')
+    expect(f.content).toContain('export async function requireCapability')
+    expect(f.content).toContain("role === 'admin'")
+    expect(f.content).toContain('role_capabilities')
+  })
+
+  it('rbac on → workflow 內容動作用 requireCapability，不用 requireAdmin', () => {
+    const action = generateAdminPanel(SCHEMA, '文章: posts', true, undefined, cm, true).find(f => f.path === 'lib/admin-actions/posts.ts')!
+    expect(action.content).toContain("requireCapability('content.manage')")
+    expect(action.content).not.toContain('requireAdmin')
+  })
+
+  it('ship-dark：rbac off → 維持 requireAdmin', () => {
+    const action = generateAdminPanel(SCHEMA, '文章: posts', true, undefined, cm, false).find(f => f.path === 'lib/admin-actions/posts.ts')!
+    expect(action.content).toContain('requireAdmin')
+    expect(action.content).not.toContain('requireCapability')
+  })
+
+  it('INFRA 排除：content_versions / roles / role_capabilities 不生 CRUD 後台（posts 仍生）', () => {
+    const schema = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200));
+CREATE TABLE IF NOT EXISTS content_versions (id UUID PRIMARY KEY, content_table VARCHAR(64), content_id UUID, snapshot JSONB);
+CREATE TABLE IF NOT EXISTS roles (id UUID PRIMARY KEY, name VARCHAR(64));
+CREATE TABLE IF NOT EXISTS role_capabilities (id UUID PRIMARY KEY, role_id UUID, capability_id UUID);`
+    const files = generateAdminPanel(schema, '文章: posts', true, undefined, deriveContentModel(schema, '文章: posts'))
+    expect(files.some(f => f.path.includes('admin/content-versions'))).toBe(false)
+    expect(files.some(f => f.path.includes('admin/roles'))).toBe(false)
+    expect(files.some(f => f.path.includes('admin/role-capabilities'))).toBe(false)
+    expect(files.some(f => f.path === 'app/admin/posts/page.tsx')).toBe(true)
   })
 })
 
