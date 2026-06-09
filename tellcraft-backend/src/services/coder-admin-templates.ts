@@ -5,6 +5,7 @@
 
 import type { GeneratedComponent } from './uiux-generation'
 import { parseCreateTables, parseEntityToTableMapping } from './schema-derivation'
+import type { ContentModelManifest, ContentTypeManifest } from './content-model/manifest'
 import { IMAGE_COLUMN_PATTERN } from './coder-upload-templates'
 import { createLogger } from '../lib/logger'
 import {
@@ -135,22 +136,60 @@ function formDataGetter(col: AdminColumnInfo): string {
 // ============================================================
 
 const AUTH_TABLES = new Set(['users', 'accounts', 'sessions', 'verification_tokens'])
+// CMS skeleton 技術 / 基礎設施表 — 各有專屬處理（admin auth / get_site_settings action / A3 媒體庫 / magic-link），
+// 不生通用 CRUD 後台。注意 contact_submissions / newsletter_subscribers 不在此列 → 會生後台供站長管理（A1 治本後新增的能力）。
+const INFRA_TABLES = new Set(['admins', 'site_settings', 'media_uploads', 'magic_link_tokens'])
+
+// ============================================================
+// A1 operation UI：內容工作流（草稿/發布/排程）— manifest 驅動，flag gated
+// ============================================================
+
+interface TableWorkflow {
+  statusColumn: string
+  publishedAtColumn?: string
+  hasSchedule: boolean
+}
+
+const STATUS_OPTIONS_BASE = [
+  { value: 'draft', label: '草稿' },
+  { value: 'published', label: '已發布' },
+]
+const STATUS_OPTION_SCHEDULED = { value: 'scheduled', label: '已排程' }
+
+/** 從 Content Model manifest 建「表 → 工作流」對照（只含有 draft_publish 能力的內容型別） */
+function buildWorkflowMap(contentModel?: ContentModelManifest): Map<string, TableWorkflow> {
+  const map = new Map<string, TableWorkflow>()
+  if (!contentModel) return map
+  for (const ct of contentModel.contentTypes) {
+    if (ct.capabilities.includes('draft_publish') && ct.statusColumn) {
+      map.set(ct.tableName, {
+        statusColumn: ct.statusColumn,
+        publishedAtColumn: ct.publishedAtColumn,
+        hasSchedule: ct.capabilities.includes('schedule'),
+      })
+    }
+  }
+  return map
+}
 
 /**
- * 從 BDD Schema 自動生成 Admin Panel（零 LLM）
+ * 從 BDD Schema 自動生成 Admin Panel（零 LLM）。
+ * contentModel 存在（ENABLE_CONTENT_MODEL on）時，draft_publish 內容型別會生 workflow-aware UI
+ * （狀態分頁 + 發布按鈕 + status 下拉）；否則行為與既有完全一致（ship-dark）。
  */
 export function generateAdminPanel(
   schemaSql: string,
   entityMapping: string,
   hasAuth: boolean,
   slots?: ResolvedSlots | null,
+  contentModel?: ContentModelManifest,
 ): GeneratedComponent[] {
   const tables = parseCreateTables(schemaSql)
   const entityMap = parseEntityToTableMapping(entityMapping)
   const reverseMap = new Map<string, string>()
   for (const [cn, en] of entityMap) reverseMap.set(en, cn)
 
-  const adminTables = tables.filter(t => !AUTH_TABLES.has(t.tableName))
+  const adminTables = tables.filter(t => !AUTH_TABLES.has(t.tableName) && !INFRA_TABLES.has(t.tableName))
   if (adminTables.length === 0) return []
 
   const tableInfos: TableInfo[] = adminTables.map(t => ({
@@ -158,6 +197,8 @@ export function generateAdminPanel(
     entityName: reverseMap.get(t.tableName) || toPascal(t.tableName),
     columns: parseColumnDefinitions(t.columns),
   }))
+
+  const workflowByTable = buildWorkflowMap(contentModel)
 
   const shellOpts: AdminShellOptions = {
     ...getAdminShellOptionsFromSlots(slots ?? null),
@@ -171,9 +212,10 @@ export function generateAdminPanel(
   const files: GeneratedComponent[] = []
 
   // 共用組件（ui-scaffold + entity-aware Sidebar）
-  const navItemsLiteral = tableInfos
+  const navItems = tableInfos
     .map(t => `  { href: '/admin/${toKebab(t.tableName)}', label: '${t.entityName}' },`)
-    .join('\n')
+  if (contentModel?.mediaTable) navItems.push(`  { href: '/admin/media', label: '媒體庫' },`)
+  const navItemsLiteral = navItems.join('\n')
   files.push(
     { path: 'components/admin/Sidebar.tsx', content: buildSidebarShell(navItemsLiteral, shellOpts), description: 'Admin 側邊導航' },
     ...generateAdminLayoutShell(shellOpts).map(f => ({ path: f.path, content: f.content, description: f.description })),
@@ -183,15 +225,56 @@ export function generateAdminPanel(
   // 每個 entity 的 CRUD
   for (const info of tableInfos) {
     const slug = toKebab(info.tableName)
+    const workflow = workflowByTable.get(info.tableName)
     files.push(
-      { path: `app/admin/${slug}/page.tsx`, content: buildListPage(info, hasAuth), description: `${info.entityName} 列表` },
-      { path: `app/admin/${slug}/[id]/page.tsx`, content: buildEditPage(info, tableInfos, hasAuth), description: `${info.entityName} 編輯` },
+      { path: `app/admin/${slug}/page.tsx`, content: workflow ? buildWorkflowListPage(info, workflow, hasAuth) : buildListPage(info, hasAuth), description: `${info.entityName} 列表` },
+      { path: `app/admin/${slug}/[id]/page.tsx`, content: buildEditPage(info, tableInfos, hasAuth, workflow), description: `${info.entityName} 編輯` },
       { path: `lib/admin-queries/${slug}.ts`, content: buildQueryFile(info), description: `${info.entityName} 查詢` },
-      { path: `lib/admin-actions/${slug}.ts`, content: buildActionFile(info, hasAuth), description: `${info.entityName} CRUD Actions` },
+      { path: `lib/admin-actions/${slug}.ts`, content: buildActionFile(info, hasAuth, workflow), description: `${info.entityName} CRUD Actions` },
     )
   }
 
+  // A3：媒體庫（contentModel.mediaTable 存在時）— 瀏覽 media_uploads（infra 表，與一般 CRUD 後台分開）
+  if (contentModel?.mediaTable) {
+    files.push(
+      { path: 'app/admin/media/page.tsx', content: buildMediaLibraryPage(), description: '媒體庫' },
+      { path: 'lib/admin-queries/media.ts', content: buildMediaQueryFile(), description: '媒體查詢' },
+      { path: 'lib/admin-actions/media.ts', content: buildMediaActionFile(hasAuth), description: '媒體 Actions' },
+    )
+  }
+
+  // A3：排程發布 cron route（有 schedule 能力的內容型別時）。Vercel Cron 觸發（deployer 偵測此 route → vercel.json 注入 crons），
+  // 把到期排程內容翻成已發布；公開列表另有 on-read fallback（到期即時可見，不等 cron）。
+  const scheduleTables = (contentModel?.contentTypes ?? []).filter(ct => ct.capabilities.includes('schedule') && !!ct.statusColumn)
+  if (scheduleTables.length > 0) {
+    files.push({ path: 'app/api/cron/publish-scheduled/route.ts', content: buildScheduledPublishCron(scheduleTables), description: '排程發布 cron' })
+  }
+
   return files
+}
+
+/** 排程發布 cron：把每個 schedule 內容型別中 scheduled_for 到期者翻成 published（idempotent，可重跑） */
+function buildScheduledPublishCron(tables: ContentTypeManifest[]): string {
+  const updates = tables.map(t => {
+    const statusCol = t.statusColumn as string
+    const schedCol = t.scheduledForColumn || 'scheduled_for'
+    const setPub = t.publishedAtColumn ? `, ${t.publishedAtColumn} = COALESCE(${t.publishedAtColumn}, NOW())` : ''
+    return `  await sql\`UPDATE ${t.tableName} SET ${statusCol} = 'published'${setPub} WHERE ${statusCol} = 'scheduled' AND ${schedCol} IS NOT NULL AND ${schedCol} <= NOW()\``
+  }).join('\n')
+
+  return `import { NextRequest, NextResponse } from 'next/server'
+import { sql } from '@/lib/db'
+
+// Vercel Cron 觸發（vercel.json crons）把到期排程內容翻成已發布；也可手動 GET。
+// 設 CRON_SECRET 環境變數即啟用 Bearer 驗證（Vercel Cron 會自動帶）。
+export async function GET(req: NextRequest) {
+  if (process.env.CRON_SECRET && req.headers.get('authorization') !== \`Bearer \${process.env.CRON_SECRET}\`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+${updates}
+  return NextResponse.json({ ok: true, ranAt: new Date().toISOString() })
+}
+`
 }
 
 // ============================================================
@@ -277,7 +360,7 @@ ${cells}
 `
 }
 
-function buildEditPage(info: TableInfo, allTables: TableInfo[], _hasAuth: boolean): string {
+function buildEditPage(info: TableInfo, allTables: TableInfo[], _hasAuth: boolean, workflow?: TableWorkflow): string {
   const pascal = toPascal(info.tableName)
   const slug = toKebab(info.tableName)
   const editableColumns = info.columns.filter(c => !isSkippedColumn(c))
@@ -307,6 +390,11 @@ function buildEditPage(info: TableInfo, allTables: TableInfo[], _hasAuth: boolea
 
   const fields = editableColumns.map(col => {
     const ft = columnToFieldType(col)
+    // A1：status 欄位 → 草稿/發布/排程 下拉選單（取代自由輸入）
+    if (workflow && col.name === workflow.statusColumn) {
+      const opts = workflow.hasSchedule ? [...STATUS_OPTIONS_BASE, STATUS_OPTION_SCHEDULED] : STATUS_OPTIONS_BASE
+      return `        <FormField label="${col.name}" name="${col.name}" type="select" defaultValue={item?.${col.name} ?? 'draft'}\n          options={${JSON.stringify(opts)}} />`
+    }
     if (ft === 'image') {
       return `        <ImageUpload name="${col.name}" currentImage={item?.${col.name} ?? ''} label="${col.name}" />`
     }
@@ -386,7 +474,69 @@ export async function get${pascal}ForSelect() {
 `
 }
 
-function buildActionFile(info: TableInfo, hasAuth: boolean): string {
+// ============================================================
+// A3：媒體庫（瀏覽 media_uploads；上傳由 coder-upload-templates 的記錄版 API fail-soft 寫入）
+// ============================================================
+
+function buildMediaQueryFile(): string {
+  return `import { sql } from '@/lib/db'
+
+export async function getAllMedia() {
+  return sql\`SELECT id, file_name, file_path, mime_type, file_size, created_at
+    FROM media_uploads WHERE deleted_at IS NULL ORDER BY created_at DESC\`
+}
+`
+}
+
+function buildMediaActionFile(hasAuth: boolean): string {
+  const authImport = hasAuth ? `\nimport { requireAdmin } from '@/lib/auth-check'` : ''
+  const authCheck = hasAuth ? '\n  await requireAdmin()' : ''
+  return `'use server'
+
+import { sql } from '@/lib/db'
+import { revalidatePath } from 'next/cache'${authImport}
+
+export async function deleteMedia(id: string) {${authCheck}
+  await sql\`UPDATE media_uploads SET deleted_at = NOW() WHERE id = \${id}\`
+  revalidatePath('/admin/media')
+}
+`
+}
+
+function buildMediaLibraryPage(): string {
+  return `import { getAllMedia } from '@/lib/admin-queries/media'
+import { deleteMedia } from '@/lib/admin-actions/media'
+import { DeleteButton } from '@/components/admin/DeleteButton'
+
+export default async function MediaLibraryPage() {
+  const items = (await getAllMedia()) as any[]
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-6">媒體庫</h1>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        {items.map((m: any) => (
+          <div key={m.id} className="bg-white rounded-lg border overflow-hidden">
+            {String(m.mime_type || '').startsWith('image/')
+              ? <img src={m.file_path} alt={m.file_name} className="w-full h-32 object-cover" />
+              : <div className="w-full h-32 flex items-center justify-center bg-gray-100 text-gray-400 text-sm">{m.mime_type || 'file'}</div>}
+            <div className="p-2">
+              <p className="text-xs truncate" title={m.file_name}>{m.file_name}</p>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-[10px] text-gray-400">{m.created_at ? new Date(m.created_at).toLocaleDateString() : ''}</span>
+                <DeleteButton onDelete={deleteMedia.bind(null, m.id)} itemName={m.file_name} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {items.length === 0 && <p className="p-6 text-center text-gray-500">尚無媒體。從內容編輯頁上傳圖片後會出現在這裡。</p>}
+    </div>
+  )
+}
+`
+}
+
+function buildActionFile(info: TableInfo, hasAuth: boolean, workflow?: TableWorkflow): string {
   const pascal = toPascal(info.tableName)
   const slug = toKebab(info.tableName)
   const editable = info.columns.filter(c => !isSkippedColumn(c))
@@ -398,6 +548,7 @@ function buildActionFile(info: TableInfo, hasAuth: boolean): string {
   const insertCols = editable.map(c => c.name).join(', ')
   const insertVals = editable.map(c => `\${data.${c.name}}`).join(', ')
   const updateSets = editable.map(c => `${c.name} = \${data.${c.name}}`).join(', ')
+  const workflowActions = workflow ? buildWorkflowActions(info, workflow, slug, authCheck) : ''
 
   return `'use server'
 
@@ -424,6 +575,120 @@ ${getters}
 export async function delete${pascal}(id: string) {${authCheck}
   await sql\`DELETE FROM ${info.tableName} WHERE id = \${id}\`
   revalidatePath('/admin/${slug}')
+}
+${workflowActions}`
+}
+
+// ============================================================
+// A1 operation UI：workflow actions + 狀態感知列表頁
+// ============================================================
+
+/** 生成 publish/unpublish admin server actions（只動存在的欄位，避免 column not found） */
+function buildWorkflowActions(info: TableInfo, workflow: TableWorkflow, slug: string, authCheck: string): string {
+  const pascal = toPascal(info.tableName)
+  const hasUpdatedAt = info.columns.some(c => c.name === 'updated_at')
+  const publishSets = [
+    `${workflow.statusColumn} = 'published'`,
+    workflow.publishedAtColumn ? `${workflow.publishedAtColumn} = COALESCE(${workflow.publishedAtColumn}, NOW())` : '',
+    hasUpdatedAt ? 'updated_at = NOW()' : '',
+  ].filter(Boolean).join(', ')
+  const draftSets = [
+    `${workflow.statusColumn} = 'draft'`,
+    hasUpdatedAt ? 'updated_at = NOW()' : '',
+  ].filter(Boolean).join(', ')
+
+  return `
+export async function publish${pascal}(id: string) {${authCheck}
+  await sql\`UPDATE ${info.tableName} SET ${publishSets} WHERE id = \${id}\`
+  revalidatePath('/admin/${slug}')
+}
+
+export async function unpublish${pascal}(id: string) {${authCheck}
+  await sql\`UPDATE ${info.tableName} SET ${draftSets} WHERE id = \${id}\`
+  revalidatePath('/admin/${slug}')
+}
+`
+}
+
+/** 狀態感知列表頁：分頁過濾（all/published/draft[/scheduled）+ 狀態 badge + 一鍵發布/取消發布 */
+function buildWorkflowListPage(info: TableInfo, workflow: TableWorkflow, _hasAuth: boolean): string {
+  const pascal = toPascal(info.tableName)
+  const slug = toKebab(info.tableName)
+  const displayCol = inferDisplayColumn(info.columns)
+  const statusCol = workflow.statusColumn
+  const tabs: [string, string][] = workflow.hasSchedule
+    ? [['all', '全部'], ['published', '已發布'], ['draft', '草稿'], ['scheduled', '已排程']]
+    : [['all', '全部'], ['published', '已發布'], ['draft', '草稿']]
+
+  return `import Link from 'next/link'
+import { getAll${pascal} } from '@/lib/admin-queries/${slug}'
+import { delete${pascal}, publish${pascal}, unpublish${pascal} } from '@/lib/admin-actions/${slug}'
+import { DeleteButton } from '@/components/admin/DeleteButton'
+
+const TABS: [string, string][] = ${JSON.stringify(tabs)}
+
+function statusBadgeClass(s: string): string {
+  if (s === 'published') return 'bg-green-100 text-green-700'
+  if (s === 'scheduled') return 'bg-amber-100 text-amber-700'
+  return 'bg-gray-100 text-gray-600'
+}
+
+export default async function ${pascal}ListPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  const { status } = await searchParams
+  const active = status || 'all'
+  const all = (await getAll${pascal}()) as any[]
+  const items = active === 'all' ? all : all.filter((i: any) => i.${statusCol} === active)
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">${info.entityName}</h1>
+        <Link href="/admin/${slug}/new" className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">新增</Link>
+      </div>
+      <div className="flex gap-1 mb-4 border-b">
+        {TABS.map(([key, label]) => (
+          <Link key={key} href={key === 'all' ? '/admin/${slug}' : \`/admin/${slug}?status=\${key}\`}
+            className={\`px-4 py-2 text-sm -mb-px border-b-2 \${active === key ? 'border-blue-600 text-blue-600 font-medium' : 'border-transparent text-gray-500 hover:text-gray-700'}\`}>
+            {label}
+          </Link>
+        ))}
+      </div>
+      <div className="bg-white rounded-lg border overflow-x-auto">
+        <table className="w-full">
+          <thead className="border-b bg-gray-50">
+            <tr>
+              <th className="text-left py-2 px-3 text-sm font-medium text-gray-600">${displayCol}</th>
+              <th className="text-left py-2 px-3 text-sm font-medium text-gray-600">狀態</th>
+              <th className="text-right py-2 px-3 text-sm font-medium text-gray-600">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {items.map((item: any) => (
+              <tr key={item.id} className="hover:bg-gray-50">
+                <td className="py-2 px-3 text-sm">{item.${displayCol}}</td>
+                <td className="py-2 px-3 text-sm">
+                  <span className={\`inline-block px-2 py-0.5 rounded text-xs \${statusBadgeClass(item.${statusCol})}\`}>{item.${statusCol}}</span>
+                </td>
+                <td className="py-2 px-3 text-right space-x-3 whitespace-nowrap">
+                  {item.${statusCol} === 'published' ? (
+                    <form action={unpublish${pascal}.bind(null, item.id)} className="inline">
+                      <button className="text-sm text-amber-600 hover:text-amber-800">取消發布</button>
+                    </form>
+                  ) : (
+                    <form action={publish${pascal}.bind(null, item.id)} className="inline">
+                      <button className="text-sm text-green-600 hover:text-green-800">發布</button>
+                    </form>
+                  )}
+                  <Link href={\`/admin/${slug}/\${item.id}\`} className="text-sm text-blue-600 hover:text-blue-800">編輯</Link>
+                  <DeleteButton onDelete={delete${pascal}.bind(null, item.id)} itemName={item.${displayCol}} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {items.length === 0 && <p className="p-6 text-center text-gray-500">尚無資料</p>}
+      </div>
+    </div>
+  )
 }
 `
 }

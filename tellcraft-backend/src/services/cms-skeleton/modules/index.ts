@@ -12,4 +12,8 @@
 import './contact-form'
 import './newsletter'
 
+// Day-2 自助營運層 content modules（A1）— detect() 內 gate ENABLE_CONTENT_MODEL，預設不啟用
+import './blog'
+import './pages'
+
 export {}
