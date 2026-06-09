@@ -148,6 +148,7 @@ interface TableWorkflow {
   statusColumn: string
   publishedAtColumn?: string
   hasSchedule: boolean
+  hasVersion: boolean
 }
 
 const STATUS_OPTIONS_BASE = [
@@ -166,6 +167,7 @@ function buildWorkflowMap(contentModel?: ContentModelManifest): Map<string, Tabl
         statusColumn: ct.statusColumn,
         publishedAtColumn: ct.publishedAtColumn,
         hasSchedule: ct.capabilities.includes('schedule'),
+        hasVersion: ct.capabilities.includes('version'),
       })
     }
   }
@@ -229,7 +231,7 @@ export function generateAdminPanel(
     files.push(
       { path: `app/admin/${slug}/page.tsx`, content: workflow ? buildWorkflowListPage(info, workflow, hasAuth) : buildListPage(info, hasAuth), description: `${info.entityName} 列表` },
       { path: `app/admin/${slug}/[id]/page.tsx`, content: buildEditPage(info, tableInfos, hasAuth, workflow), description: `${info.entityName} 編輯` },
-      { path: `lib/admin-queries/${slug}.ts`, content: buildQueryFile(info), description: `${info.entityName} 查詢` },
+      { path: `lib/admin-queries/${slug}.ts`, content: buildQueryFile(info, workflow), description: `${info.entityName} 查詢` },
       { path: `lib/admin-actions/${slug}.ts`, content: buildActionFile(info, hasAuth, workflow), description: `${info.entityName} CRUD Actions` },
     )
   }
@@ -413,17 +415,36 @@ function buildEditPage(info: TableInfo, allTables: TableInfo[], _hasAuth: boolea
     return `        <FormField label="${col.name}" name="${col.name}" type="${ft}" defaultValue=${dv}${req}${step} />`
   }).join('\n')
 
+  const hasVersion = !!workflow?.hasVersion
+  const versionsFetch = hasVersion ? `\n  const versions = isNew ? [] : (await get${pascal}Versions(id)) as any[]` : ''
+  const versionSection = hasVersion ? `
+      {!isNew && versions.length > 0 && (
+        <div className="max-w-3xl mt-6 bg-white p-6 rounded-lg border">
+          <h2 className="font-semibold mb-3">版本歷史</h2>
+          <ul className="space-y-2">
+            {versions.map((v: any) => (
+              <li key={v.id} className="flex items-center justify-between text-sm">
+                <span className="text-gray-500">{v.created_at ? new Date(v.created_at).toLocaleString() : ''}</span>
+                <form action={restore${pascal}Version.bind(null, v.id)}>
+                  <button className="text-blue-600 hover:text-blue-800">還原此版本</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}` : ''
+
   return `import { redirect } from 'next/navigation'
-import { get${pascal}ById } from '@/lib/admin-queries/${slug}'
+import { get${pascal}ById${hasVersion ? `, get${pascal}Versions` : ''} } from '@/lib/admin-queries/${slug}'
 ${fkImports.join('\n')}
-import { create${pascal}, update${pascal} } from '@/lib/admin-actions/${slug}'
+import { create${pascal}, update${pascal}${hasVersion ? `, restore${pascal}Version` : ''} } from '@/lib/admin-actions/${slug}'
 import { FormField } from '@/components/admin/FormField'
 import { SubmitButton } from '@/components/admin/SubmitButton'${hasImageField ? `\nimport { ImageUpload } from '@/components/admin/ImageUpload'` : ''}
 
 export default async function ${pascal}EditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const isNew = id === 'new'
-${fetchLine}
+${fetchLine}${versionsFetch}
   if (!isNew && !item) redirect('/admin/${slug}')
 
   async function handleAction(formData: FormData) {
@@ -440,6 +461,7 @@ ${fetchLine}
 ${fields}
         <SubmitButton label={isNew ? '新增' : '儲存'} />
       </form>
+${versionSection}
     </div>
   )
 }
@@ -450,12 +472,17 @@ ${fields}
 // Query / Action 函數模板
 // ============================================================
 
-function buildQueryFile(info: TableInfo): string {
+function buildQueryFile(info: TableInfo, workflow?: TableWorkflow): string {
   const pascal = toPascal(info.tableName)
   const display = inferDisplayColumn(info.columns)
   const hasCreatedAt = info.columns.some(c => c.name === 'created_at')
   const orderBy = hasCreatedAt ? 'created_at DESC' : display
   const selectClause = display === 'id' ? 'id' : `id, ${display}`
+  const versionsQuery = workflow?.hasVersion ? `
+export async function get${pascal}Versions(id: string) {
+  return sql\`SELECT id, created_at FROM content_versions WHERE content_table = '${info.tableName}' AND content_id = \${id} ORDER BY created_at DESC LIMIT 20\`
+}
+` : ''
 
   return `import { sql } from '@/lib/db'
 
@@ -471,7 +498,7 @@ export async function get${pascal}ById(id: string) {
 export async function get${pascal}ForSelect() {
   return sql\`SELECT ${selectClause} FROM ${info.tableName} ORDER BY ${display === 'id' ? 'id' : display}\`
 }
-`
+${versionsQuery}`
 }
 
 // ============================================================
@@ -549,6 +576,21 @@ function buildActionFile(info: TableInfo, hasAuth: boolean, workflow?: TableWork
   const insertVals = editable.map(c => `\${data.${c.name}}`).join(', ')
   const updateSets = editable.map(c => `${c.name} = \${data.${c.name}}`).join(', ')
   const workflowActions = workflow ? buildWorkflowActions(info, workflow, slug, authCheck) : ''
+  const restoreSets = editable.map(c => `${c.name} = \${s.${c.name}}`).join(', ')
+  const snapshotCall = workflow?.hasVersion ? `
+  try {
+    const [snap] = await sql\`SELECT * FROM ${info.tableName} WHERE id = \${id}\`
+    if (snap) await sql\`INSERT INTO content_versions (content_table, content_id, snapshot) VALUES ('${info.tableName}', \${id}, \${JSON.stringify(snap)}::jsonb)\`
+  } catch { /* content_versions 不存在則跳過 */ }` : ''
+  const versionActions = workflow?.hasVersion ? `
+export async function restore${pascal}Version(versionId: string) {${authCheck}
+  const [v] = await sql\`SELECT content_id, snapshot FROM content_versions WHERE id = \${versionId} AND content_table = '${info.tableName}'\`
+  if (!v) return
+  const s = (v as any).snapshot
+  await sql\`UPDATE ${info.tableName} SET ${restoreSets} WHERE id = \${(v as any).content_id}\`
+  revalidatePath('/admin/${slug}')
+}
+` : ''
 
   return `'use server'
 
@@ -568,7 +610,7 @@ export async function update${pascal}(formData: FormData) {${authCheck}
   const data = {
 ${getters}
   }
-  await sql\`UPDATE ${info.tableName} SET ${updateSets} WHERE id = \${id}\`
+  await sql\`UPDATE ${info.tableName} SET ${updateSets} WHERE id = \${id}\`${snapshotCall}
   revalidatePath('/admin/${slug}')
 }
 
@@ -576,7 +618,7 @@ export async function delete${pascal}(id: string) {${authCheck}
   await sql\`DELETE FROM ${info.tableName} WHERE id = \${id}\`
   revalidatePath('/admin/${slug}')
 }
-${workflowActions}`
+${versionActions}${workflowActions}`
 }
 
 // ============================================================

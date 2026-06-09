@@ -131,6 +131,7 @@ export function deriveContentModel(schemaSql: string, entityMapping: string): Co
     }
 
     const hasMedia = tables.some(t => t.tableName.toLowerCase() === 'media_uploads')
+    const hasVersioning = tables.some(t => t.tableName.toLowerCase() === 'content_versions')
     const contentTypes: ContentTypeManifest[] = []
 
     for (const t of tables) {
@@ -143,13 +144,16 @@ export function deriveContentModel(schemaSql: string, entityMapping: string): Co
       const taxonomies = [...new Set(
         cols.filter(c => c.referencesTable && TAXONOMY_RE.test(c.referencesTable)).map(c => c.referencesTable as string)
       )]
+      // version 能力：content_versions 表存在時，給有 draft_publish 的內容型別加上（A3，opt-in via 表存在）
+      const capabilities = [...cap.capabilities]
+      if (hasVersioning && capabilities.includes('draft_publish')) capabilities.push('version')
 
       contentTypes.push({
         tableName: tn,
         entityName: tableToEntity.get(tn) || tn,
         source: CONTENT_MODULE_TABLES.has(tn) ? 'content_module' : 'bespoke',
         displayColumn: inferDisplayColumn(cols),
-        capabilities: cap.capabilities,
+        capabilities,
         statusColumn: cap.statusColumn,
         publishedAtColumn: cap.publishedAtColumn,
         scheduledForColumn: cap.scheduledForColumn,

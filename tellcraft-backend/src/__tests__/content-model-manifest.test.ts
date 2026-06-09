@@ -104,6 +104,17 @@ CREATE TABLE posts (
     expect(tags.displayColumn).toBe('label')
   })
 
+  it('content_versions 表存在 → draft_publish 內容型別獲得 version 能力（A3）', () => {
+    const schema = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), status VARCHAR(20) DEFAULT 'draft');
+CREATE TABLE IF NOT EXISTS content_versions (id UUID PRIMARY KEY, content_table VARCHAR(64), content_id UUID, snapshot JSONB);`
+    expect(deriveContentModel(schema, '文章: posts').contentTypes.find(t => t.tableName === 'posts')!.capabilities).toContain('version')
+  })
+
+  it('無 content_versions → 無 version 能力', () => {
+    const schema = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), status VARCHAR(20) DEFAULT 'draft');`
+    expect(deriveContentModel(schema, '文章: posts').contentTypes.find(t => t.tableName === 'posts')!.capabilities).not.toContain('version')
+  })
+
   it('fail-soft：空 / 壞 schema 回空 manifest（不 throw）', () => {
     expect(deriveContentModel('', '')).toEqual({ version: 1, contentTypes: [], mediaTable: null })
     expect(() => deriveContentModel('not sql at all {{{', '')).not.toThrow()

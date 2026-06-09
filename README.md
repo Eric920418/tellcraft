@@ -1235,11 +1235,13 @@ Structure 平面（generate-time, AI）     Operation 平面（run-time, 零 LLM
 - 測試：`content-workflow-opt-in.test.ts`（9：additive 契約 / forward SQL 無 DROP / extractCreateTableStatements 只補缺表）+ 更新 `iteration-skill-schema.test.ts` 契約守護指向 neon-migrate.ts。
 - **A2 剩餘（UI-facing）**：opt-in 觸發端點（`POST /api/project/:id/content/:table/enable-workflow` → `applyWorkflowOptIn` 跑 ALTER + 重衍生 manifest + 重生 operation UI）。規劃器 building block 已就緒。
 
-**A3 — 媒體庫 + 排程發布（🟡 媒體庫 + 排程完成，版本待做）**：
+**A3 — 媒體庫 + 排程發布 + 內容版本（✅ 完成）**：
 - **媒體庫**：`generateAdminPanel` 在 `contentModel.mediaTable` 存在時生 `/admin/media`（縮圖 grid + soft delete）+ 查詢/刪除 + 側欄連結。上傳改用 `UPLOAD_API_TEMPLATE_WITH_MEDIA`，成功後 **fail-soft** `INSERT INTO media_uploads`（表不存在則跳過；非媒體 app 用原版，行為完全不變）。
 - **排程發布**：schedule 內容型別 → 生 `app/api/cron/publish-scheduled/route.ts`（把 `scheduled_for` 到期者翻成 published，idempotent + 可選 `CRON_SECRET` Bearer 驗證）；`deployer.ts` 偵測此 route 檔存在 → vercel.json 注入 `crons`（每 15 分）；blog `list_published_posts` 加 **on-read fallback**（到期排程即時公開，不等 cron）。
-- 測試 `coder-generators.test.ts` +9（媒體庫 + 排程 cron）/ `content-modules.test.ts` +1（on-read）/ `deployer-vercel-json.test.ts` +2（crons 注入）。esbuild 驗證生成檔。全 ship-dark（contentModel undefined 時都不生）。
-- **A3 剩餘**：內容版本（`content_versions` 表 + publish/update 寫 JSONB snapshot + restore action/UI，需動生成的 action code，侵入性較高 + 需 restore UI）。
+- **內容版本**（flag `ENABLE_CONTENT_VERSIONING`，預設 false）：`content_versions` 表（schemas.ts + formulation 注入，JSONB snapshot）；manifest 偵測 `content_versions` 存在 → 給 draft_publish 內容型別加 `version` 能力；`generateAdminPanel` 對 version 型別生 **snapshot-on-update**（update 後存完整 row 進 content_versions，fail-soft）+ `restoreXVersion` action（從 snapshot 還原）+ 編輯頁「版本歷史」清單（每版一鍵還原）+ `getXVersions` query。
+- 測試：`coder-generators.test.ts`（媒體庫 6 + 排程 3 + 版本 3）/ `content-modules.test.ts`（on-read 1）/ `deployer-vercel-json.test.ts`（crons 2）/ `content-model-manifest.test.ts`（version 能力 2）。esbuild 驗證生成檔。全 ship-dark（flag/contentModel off 時都不生）。
+
+**A 階段完成**：站長部署後零 AI 自助營運——寫文/草稿/發布/排程/篩選/媒體庫/版本還原，且結構演進非破壞。**A 剩餘（UI-facing，非核心）**：A2 opt-in 觸發端點（規劃器已就緒）。
 
 **後續**：A3 內容版本 + A2 opt-in 端點 → C-Auth（capability 層）→ C-Commerce（Stripe + cart/order）。
 

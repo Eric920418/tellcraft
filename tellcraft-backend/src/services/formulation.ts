@@ -1484,9 +1484,9 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
 
     // DDL 追加（IF NOT EXISTS 安全）— core + enabled framework modules
     // A0: media_uploads 已在 schemas.ts 定義但預設未注入；CONTENT_MODEL_INJECT_MEDIA 開啟時點亮（additive IF NOT EXISTS，安全）
-    const coreTables: SkeletonTable[] = getEnv().CONTENT_MODEL_INJECT_MEDIA
-      ? ['admins', 'site_settings', 'media_uploads']
-      : ['admins', 'site_settings']
+    const coreTables: SkeletonTable[] = ['admins', 'site_settings']
+    if (getEnv().CONTENT_MODEL_INJECT_MEDIA) coreTables.push('media_uploads')
+    if (getEnv().ENABLE_CONTENT_VERSIONING) coreTables.push('content_versions')
     const coreDdl = getCmsSkeletonDdl(coreTables)
     let mergedSchemaSql = schemaSql.includes('CREATE TABLE IF NOT EXISTS admins')
       ? schemaSql

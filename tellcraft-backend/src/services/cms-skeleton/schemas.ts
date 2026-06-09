@@ -51,6 +51,18 @@ CREATE TABLE IF NOT EXISTS media_uploads (
 );
 CREATE INDEX IF NOT EXISTS idx_media_uploads_uploaded_by ON media_uploads(uploaded_by);
 `.trim(),
+
+  content_versions: `
+CREATE TABLE IF NOT EXISTS content_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  content_table VARCHAR(64) NOT NULL,
+  content_id UUID NOT NULL,
+  snapshot JSONB NOT NULL,
+  created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_content_versions_lookup ON content_versions(content_table, content_id, created_at DESC);
+`.trim(),
 } as const
 
 export type SkeletonTable = keyof typeof CMS_SKELETON_DDL

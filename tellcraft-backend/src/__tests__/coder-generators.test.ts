@@ -498,6 +498,33 @@ describe('Admin Panel — 排程發布 cron (A3)', () => {
   })
 })
 
+describe('Admin Panel — 內容版本 (A3)', () => {
+  const VER_SCHEMA = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), body TEXT, status VARCHAR(20) DEFAULT 'draft', created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS content_versions (id UUID PRIMARY KEY, content_table VARCHAR(64) NOT NULL, content_id UUID NOT NULL, snapshot JSONB NOT NULL, created_at TIMESTAMPTZ);`
+  const cm = deriveContentModel(VER_SCHEMA, '文章: posts')
+
+  it('version 能力 → action 含 snapshot-on-update + restore', () => {
+    const action = generateAdminPanel(VER_SCHEMA, '文章: posts', true, undefined, cm).find(f => f.path === 'lib/admin-actions/posts.ts')!
+    expect(action.content).toContain('INSERT INTO content_versions')
+    expect(action.content).toContain('restorePostsVersion')
+  })
+
+  it('version 能力 → query 含 getPostsVersions；編輯頁含版本歷史 + 還原按鈕', () => {
+    const files = generateAdminPanel(VER_SCHEMA, '文章: posts', true, undefined, cm)
+    expect(files.find(f => f.path === 'lib/admin-queries/posts.ts')!.content).toContain('getPostsVersions')
+    const edit = files.find(f => f.path === 'app/admin/posts/[id]/page.tsx')!
+    expect(edit.content).toContain('版本歷史')
+    expect(edit.content).toContain('還原此版本')
+  })
+
+  it('ship-dark：無 content_versions → 不生版本程式碼', () => {
+    const noVer = `CREATE TABLE posts (id UUID PRIMARY KEY, title VARCHAR(200), status VARCHAR(20) DEFAULT 'draft');`
+    const action = generateAdminPanel(noVer, '文章: posts', true, undefined, deriveContentModel(noVer, '文章: posts')).find(f => f.path === 'lib/admin-actions/posts.ts')!
+    expect(action.content).not.toContain('content_versions')
+    expect(action.content).not.toContain('restorePostsVersion')
+  })
+})
+
 // ============================================================
 // M4: Upload Generator
 // ============================================================

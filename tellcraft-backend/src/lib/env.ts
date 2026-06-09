@@ -116,6 +116,7 @@ const envSchema = z.object({
   CONTENT_MODEL_ADDITIVE_DRIFT: z.stringbool().default(false),  // A2：ensureNeonSchemaFresh 偵測 drift 且 DB 有客戶資料時走 additive ALTER 補表而非硬擋。A2 測完才轉 true
   ENABLE_RBAC_CAPABILITIES: z.stringbool().default(false),      // C-Auth：生成 roles/capabilities additive 層 + requireCapability。off = 現行 admin/user 二分
   ENABLE_COMMERCE_MODULE: z.stringbool().default(false),        // C-Commerce：生成 cart/order + Stripe Checkout commerce module。off = 不生成電商
+  ENABLE_CONTENT_VERSIONING: z.stringbool().default(false),     // A3：注入 content_versions 表 + 生成 snapshot-on-update + restore UI（僅 draft_publish 內容型別）。off = 不生成版本功能
   // Vercel preview iframe 替換 WebContainer（2026-05-17 incident 治本）— phase 完成 enqueue quickPreviewDeploy → Vercel target='preview' → iframe src
   // 2026-05-17 default 改 true：commit 4420645d 砍了 SplitLayout，flag-off 用戶看不到任何 preview UI（chat 全寬 + 卡片不會注入）
   ENABLE_VERCEL_PREVIEW: z.stringbool().default(true),           // master kill switch；false 走既有 WebContainer (legacy)，true 走 Vercel preview iframe + chat inline 卡片
