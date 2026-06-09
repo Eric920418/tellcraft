@@ -86,6 +86,9 @@ function buildStubComponent(filePath: string, originalContent: string): string {
  * 回傳修復後的 content 與是否有改動
  */
 export function applyFixersToContent(filePath: string, content: string): { content: string; changed: boolean } {
+  // 防護：content/path 來自 JSON（messages richContent），型別不可信 —
+  // 非字串直接跳過，避免 fixer 對 undefined 呼叫字串方法導致取訊息 500
+  if (typeof content !== 'string' || typeof filePath !== 'string') return { content, changed: false }
   if (!/\.(tsx?|jsx?)$/.test(filePath)) return { content, changed: false }
   const f = { path: filePath, content, description: '' }
   let current = content
@@ -169,6 +172,7 @@ export function repairCodePreviewInMessages(messages: unknown[]): { messages: un
       if (!Array.isArray(files)) return { files: [], changed: false }
       let fc = false
       const result = (files as CodeFile[]).map(f => {
+        if (!f || typeof f.content !== 'string' || typeof f.path !== 'string') return f
         const { content, changed } = applyFixersToContent(f.path, f.content)
         if (changed) { fc = true; return { ...f, content } }
         return f

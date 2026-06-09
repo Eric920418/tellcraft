@@ -2730,7 +2730,7 @@ const REACT_ONLY_HOOKS_SET = new Set([
 export function repairMotionReactHookImports(
   file: GeneratedComponent
 ): { content: string; repaired: boolean } {
-  if (!/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
+  if (typeof file.content !== 'string' || !/\.(tsx?|jsx?)$/.test(file.path)) return { content: file.content, repaired: false }
 
   // 找到所有 motion/react import 行（可能有多行）
   const motionImportRegex = /^import\s+\{([^}]+)\}\s*from\s+['"]motion\/react['"]\s*;?\s*$/gm
