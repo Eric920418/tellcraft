@@ -8,6 +8,7 @@ import * as db from '../../db/client'
 import type { FlowState, GeneratedCode, IoEmitter } from '../../types/flow-state'
 import { type GeneratedComponent, generateTailwindConfig } from '../../services/uiux-generation'
 import { executeCoderPipeline } from '../../services/coder-generation'
+import { persistContentModel } from '../../services/content-model/persist'
 import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCodeToGeneration, inferFileType } from '../orchestrator-utils'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
@@ -566,6 +567,11 @@ export async function executeCoderSkill(input: CoderSkillInput): Promise<void> {
     ]
 
     await db.upsertProjectFiles(projectId, 'coder', allCoderFiles)
+
+    // A0: Content Model manifest 持久化（ship dark — 只有 result.contentModel 存在才寫，fail-soft）
+    if (result.contentModel) {
+      await persistContentModel(projectId, result.contentModel, { conversationId, userId })
+    }
 
     // 快照代碼到 generation（Coder 完成後的完整代碼）
     await snapshotCodeToGeneration(projectId, {

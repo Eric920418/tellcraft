@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { createLogger } from '../lib/logger'
 import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, type CacheableSystemPrompt } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
+import type { SkeletonTable } from './cms-skeleton/schemas'
 import { callStructured } from '../lib/structured-output'
 import { ClarifyItem, TechnicalContext } from './bdd-session'
 import { LlmTrackingContext } from './classifier'
@@ -1482,7 +1483,11 @@ export async function injectCmsSkeletonFeaturesIfApplicable(
     ]
 
     // DDL 追加（IF NOT EXISTS 安全）— core + enabled framework modules
-    const coreDdl = getCmsSkeletonDdl(['admins', 'site_settings'])
+    // A0: media_uploads 已在 schemas.ts 定義但預設未注入；CONTENT_MODEL_INJECT_MEDIA 開啟時點亮（additive IF NOT EXISTS，安全）
+    const coreTables: SkeletonTable[] = getEnv().CONTENT_MODEL_INJECT_MEDIA
+      ? ['admins', 'site_settings', 'media_uploads']
+      : ['admins', 'site_settings']
+    const coreDdl = getCmsSkeletonDdl(coreTables)
     let mergedSchemaSql = schemaSql.includes('CREATE TABLE IF NOT EXISTS admins')
       ? schemaSql
       : schemaSql.trim() + '\n\n-- CMS Skeleton tables (auto-injected)\n' + coreDdl

@@ -42,6 +42,7 @@ export type SkillName =
   | 'budget_guard'  // L31.M: per-conversation budget cap
   | 'actions_design'  // actions.yml 生成 + 修復
   | 'cms_skeleton'  // Phase 1 Week 4: CMS skeleton 採用 / partial regen
+  | 'content_model'  // Day-2 自助營運層：content model manifest 衍生 / 工作流 opt-in / additive drift
 
 export type EventType =
   | 'sanitize_fix'
@@ -97,6 +98,9 @@ export type EventType =
   | 'extension_element_selected'       // 用戶 click 元素 (5s debounce 避免高頻噪音)
   | 'extension_update_applied'         // /apply-update 成功（含 reason: 'text-unique' / 'style-only'）
   | 'extension_apply_failed'           // /apply-update 失敗（含 reason: 'text-not-unique' / 'invalid-op' / ...）
+  // Day-2 自助營運層（Content Model / operation 平面）
+  | 'content_model_derived'            // A0: manifest 衍生 + 持久化（payload: contentTypeCount / withWorkflow / sources / mediaTable）
+  | 'content_additive_drift_migration' // A2: drift 偵測且 DB 有客戶資料 → 走 additive ALTER 補表（不 reprovision 砍資料）。high-signal
 
 export type TelemetrySeverity = 'critical' | 'warning' | 'info'
 export type TelemetryOutcome = 'success' | 'failed' | 'repaired' | 'timeout' | 'blocked'

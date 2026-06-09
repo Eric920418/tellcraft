@@ -24,6 +24,7 @@ import { getCoderHandlersJoined, type CoderHandlerId } from '../lib/skill-loader
 import { generateAuthSystem, injectSessionProvider, detectAuthCapabilities } from './coder-auth-templates'
 import { generateEmailInfrastructure, generateMagicLinkSystem } from './coder-email-templates'
 import { generateAdminPanel } from './coder-admin-templates'
+import { deriveContentModel, type ContentModelManifest } from './content-model/manifest'
 import { generateUploadFiles } from './coder-upload-templates'
 import { getTemplate } from './coder-templates'
 import { tryDeterministicFix } from './coder-deterministic-fixes'
@@ -98,6 +99,8 @@ export interface CoderOutput {
   unchangedFrontend: GeneratedComponent[]
   summary: string
   mockDataWarnings?: string[]
+  /** A0: Content Model manifest（ENABLE_CONTENT_MODEL gate；off 時 undefined）。由 path 層持久化進 projects.content_model */
+  contentModel?: ContentModelManifest
 }
 
 // ============================================================
@@ -3331,8 +3334,20 @@ export async function executeCoderPipeline(
     )
   }
 
-  // Step 2.7: Admin Panel generation (zero-LLM)
-  const adminFiles = generateAdminPanel(schemaSql, entityMapping, !!authFiles)
+  // Step 2.65: Content Model Manifest 衍生（零 LLM，ship dark — ENABLE_CONTENT_MODEL gate）。
+  // 放在 Admin Panel 之前 → operation UI 可消費 workflow 能力（status 下拉 + 發布按鈕 + 狀態分頁）。
+  // flag off → contentModel undefined → generateAdminPanel 行為與既有完全一致。
+  let contentModel: ContentModelManifest | undefined
+  if (getEnv().ENABLE_CONTENT_MODEL) {
+    contentModel = deriveContentModel(schemaSql, entityMapping)
+    logger.info(
+      { contentTypes: contentModel.contentTypes.length, mediaTable: contentModel.mediaTable },
+      'Content Model manifest 衍生完成',
+    )
+  }
+
+  // Step 2.7: Admin Panel generation (zero-LLM；contentModel 存在時 workflow-aware operation UI)
+  const adminFiles = generateAdminPanel(schemaSql, entityMapping, !!authFiles, undefined, contentModel)
   if (adminFiles.length > 0) {
     await callbacks.onProgress('生成管理後台...', 8)
     logger.info({ fileCount: adminFiles.length }, 'Admin Panel 生成完成')
@@ -3610,7 +3625,7 @@ export async function executeCoderPipeline(
     unchangedFrontend: unchanged.length,
   }, 'Coder Pipeline 完成')
 
-  return { backendFiles, rewrittenFrontend, unchangedFrontend: unchanged, summary, mockDataWarnings: mockDataWarnings.length > 0 ? mockDataWarnings : undefined }
+  return { backendFiles, rewrittenFrontend, unchangedFrontend: unchanged, summary, mockDataWarnings: mockDataWarnings.length > 0 ? mockDataWarnings : undefined, contentModel }
 }
 
 // ============================================================

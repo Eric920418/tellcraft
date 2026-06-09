@@ -110,6 +110,12 @@ const envSchema = z.object({
   // open-design 差集風格範本（Phase 1）— 整合 nexu-io/open-design 跟 awesome-design-md 的差集（~15 個 bergside/awesome-design-skills 來源）。用戶選擇立刻啟用，48h 內密集監控 telemetry
   ENABLE_OPEN_DESIGN_STYLES: z.stringbool().default(true),       // kill switch：iteration_aesthetic_complaint 突增或 score_delta 顯著惡化時設 false 立即關閉注入
   OPEN_DESIGN_STYLE_MAX_INJECT_COUNT: z.coerce.number().default(1), // 單次 generateVariants prompt dynamic block 最多注入 N 個 style hint（≥2 易造成選擇爆炸）
+  // Day-2 自助營運層（Content Model / operation 平面）— 站長部署後不碰 AI 的確定性營運面。全 flag 預設 false ship dark，不開不改現行行為
+  ENABLE_CONTENT_MODEL: z.stringbool().default(false),          // Phase A 總開關：衍生 + 持久化 projects.content_model manifest（operation/structure 分離基底）。off = 完全不衍生，零行為變化
+  CONTENT_MODEL_INJECT_MEDIA: z.stringbool().default(false),    // 注入 media_uploads 表（schema 已定義但預設未注入）。additive CREATE TABLE IF NOT EXISTS，安全
+  CONTENT_MODEL_ADDITIVE_DRIFT: z.stringbool().default(false),  // A2：ensureNeonSchemaFresh 偵測 drift 且 DB 有客戶資料時走 additive ALTER 補表而非硬擋。A2 測完才轉 true
+  ENABLE_RBAC_CAPABILITIES: z.stringbool().default(false),      // C-Auth：生成 roles/capabilities additive 層 + requireCapability。off = 現行 admin/user 二分
+  ENABLE_COMMERCE_MODULE: z.stringbool().default(false),        // C-Commerce：生成 cart/order + Stripe Checkout commerce module。off = 不生成電商
   // Vercel preview iframe 替換 WebContainer（2026-05-17 incident 治本）— phase 完成 enqueue quickPreviewDeploy → Vercel target='preview' → iframe src
   // 2026-05-17 default 改 true：commit 4420645d 砍了 SplitLayout，flag-off 用戶看不到任何 preview UI（chat 全寬 + 卡片不會注入）
   ENABLE_VERCEL_PREVIEW: z.stringbool().default(true),           // master kill switch；false 走既有 WebContainer (legacy)，true 走 Vercel preview iframe + chat inline 卡片

@@ -20,6 +20,7 @@ import { sendMessage, saveFlowState, getFlowState, touchFlowActivity, snapshotCo
 import { executeRedPhase, formatRedPhaseReport, runRedPhaseFullValidation, runRedPhaseRoutingValidation } from '../../services/red-phase-validator'
 import { runFeatureAlignmentGate } from '../../services/feature-alignment-gate'
 import { executeCoderPipeline } from '../../services/coder-generation'
+import { persistContentModel } from '../../services/content-model/persist'
 import { runCoderE2ETests } from '../../services/coder-e2e-test'
 import { type GeneratedComponent, generateTailwindConfig } from '../../services/uiux-generation'
 import { sanitizeForPreview } from '../../services/code-verify'
@@ -431,6 +432,10 @@ async function generateNode(state: TellcraftStateType): Promise<Partial<Tellcraf
       ...result.rewrittenFrontend.map(f => ({ filePath: f.path, content: f.content, description: f.description, fileType: inferFileType(f.path) })),
     ]
     await db.upsertProjectFiles(projectId, 'coder', allCoderFiles)
+    // A0: Content Model manifest 持久化（ship dark — fail-soft）
+    if (result.contentModel) {
+      await persistContentModel(projectId, result.contentModel, { conversationId, userId })
+    }
     await snapshotCodeToGeneration(projectId, { changeSummary: 'Coder 後端生成完成', conversationId })
 
     // 合併代碼
