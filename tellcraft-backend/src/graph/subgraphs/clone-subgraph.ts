@@ -16,6 +16,7 @@ import { TellcraftState, type TellcraftStateType } from '../state'
 import { getRedis, getIo } from '../context'
 import { sendMessage, saveFlowState, getFlowState } from '../../workers/orchestrator-utils'
 import { executeCloneSkill } from '../../workers/phase-handlers/clone-phases'
+import { extractFirstUrl, isSafeUrl } from '../../services/reference-analyzer'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('clone-subgraph')
@@ -29,8 +30,10 @@ async function executeNode(state: TellcraftStateType): Promise<Partial<Tellcraft
   // ── clone_failed 後 fresh invoke → 從 FlowState 取回原始 URL ──
   // 用戶回覆 "重試" 或 __retry_clone__，state.message 不是 URL
   const flowState = await getFlowState(redis, state.conversationId)
-  let cloneUrl = state.message
-  let cloneImageUrls = state.imageUrls
+  // 與 BullMQ 路徑 (orchestrator.ts Step 1.4) 對齊：必須從訊息「抽出」URL，
+  // 不可把整句話當網址（否則 puppeteer 收到 "幫我複製 https://..." → invalid URL）
+  let cloneUrl = extractFirstUrl(state.message) ?? undefined
+  const cloneImageUrls = state.imageUrls
 
   if (flowState?.phase === 'clone_failed' && flowState.waitingForReply) {
     const reply = state.message.trim()
@@ -38,9 +41,10 @@ async function executeNode(state: TellcraftStateType): Promise<Partial<Tellcraft
     if (/取消|cancel|放棄/i.test(reply) || reply === '__cancel_domain__') {
       return { phase: 'idle' }
     }
-    // 用戶貼了新 URL → 用新 URL
-    if (/https?:\/\//.test(reply)) {
-      cloneUrl = reply
+    // 用戶貼了新 URL → 抽出後使用（不可整句當 URL）
+    const replyUrl = extractFirstUrl(reply)
+    if (replyUrl) {
+      cloneUrl = replyUrl
     } else {
       // 重試 → 用 FlowState 中的原始 URL
       const originalUrl = (flowState as unknown as Record<string, unknown>).cloneSourceUrl as string
@@ -50,6 +54,18 @@ async function executeNode(state: TellcraftStateType): Promise<Partial<Tellcraft
     flowState.phase = 'clone_analyzing'
     flowState.waitingForReply = false
     await saveFlowState(redis, state.conversationId, flowState)
+  }
+
+  // SSRF / 無效網址防護（與 BullMQ 路徑對齊）：擋內網/非法網址
+  if (cloneUrl && !isSafeUrl(cloneUrl)) {
+    const isChinese = state.locale !== 'en'
+    await sendMessage(state.conversationId, io, {
+      content: isChinese
+        ? '此網址無法存取（內部網路或無效網址）。請輸入有效的公開網址。'
+        : 'This URL cannot be accessed (internal network or invalid). Please enter a valid public URL.',
+      stage: 'customer_service' as const,
+    })
+    return { phase: 'idle' }
   }
 
   await executeCloneSkill({
