@@ -16,15 +16,19 @@ import { auth } from '@/auth'
 import { sql } from '@/lib/db'
 
 /**
- * 要求目前登入者具備某 capability。
- * - admin 角色 = superuser，自動通過所有 capability。
+ * 要求目前登入者具備某 capability。**Fail-closed**：
+ * - 未登入 / session 無 role → 拒絕（絕不預設 admin，避免設定漏接時整站變超管）。
+ * - role === 'admin' → superuser，通過所有 capability（後端必須只 seed 唯一一個 admin）。
  * - 其他角色查 role_capabilities（無對應列則拒絕）。
- * 未登入 → 拋錯。
+ *
+ * 前置要求：NextAuth session callback **必須**從 DB 寫 user.role（見 auth.ts），且只 seed 一個 admin 列；
+ * 不可從「資料缺失」推斷 admin。
  */
 export async function requireCapability(capability: string) {
   const session = await auth()
   if (!session) throw new Error('需要登入')
-  const role = (session.user as any)?.role || 'admin'
+  const role = (session.user as any)?.role
+  if (!role) throw new Error('權限不足：未指派角色')
   if (role === 'admin') return session
   const rows = await sql\`
     SELECT 1 FROM role_capabilities rc

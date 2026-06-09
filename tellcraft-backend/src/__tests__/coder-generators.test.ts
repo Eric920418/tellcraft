@@ -537,6 +537,9 @@ describe('C-Auth — RBAC capability 層', () => {
     expect(f.content).toContain('export async function requireCapability')
     expect(f.content).toContain("role === 'admin'")
     expect(f.content).toContain('role_capabilities')
+    // fail-closed：沒 role 拒絕，不再 fail-open 預設 admin
+    expect(f.content).toContain('未指派角色')
+    expect(f.content).not.toContain("role || 'admin'")
   })
 
   it('rbac on → workflow 內容動作用 requireCapability，不用 requireAdmin', () => {
@@ -565,7 +568,7 @@ CREATE TABLE IF NOT EXISTS role_capabilities (id UUID PRIMARY KEY, role_id UUID,
 })
 
 describe('C-Commerce — Stripe Checkout', () => {
-  const SCHEMA = `CREATE TABLE products (id UUID PRIMARY KEY, name VARCHAR(200));
+  const SCHEMA = `CREATE TABLE products (id UUID PRIMARY KEY, name VARCHAR(200), price_cents INTEGER);
 CREATE TABLE IF NOT EXISTS orders (id UUID PRIMARY KEY, status VARCHAR(20) DEFAULT 'pending', total_cents INTEGER, currency VARCHAR(8), customer_email VARCHAR(255), stripe_session_id VARCHAR(255), created_at TIMESTAMPTZ);
 CREATE TABLE IF NOT EXISTS order_items (id UUID PRIMARY KEY, order_id UUID, product_name VARCHAR(255), unit_price_cents INTEGER, quantity INTEGER);`
 
@@ -577,12 +580,16 @@ CREATE TABLE IF NOT EXISTS order_items (id UUID PRIMARY KEY, order_id UUID, prod
     expect(paths).toContain('app/checkout/cancel/page.tsx')
   })
 
-  it('checkout 建 order + Stripe session + 無 key mock 模式', () => {
+  it('checkout：server-side 查價（防價格竄改）+ 建 order + Stripe + mock 僅非 prod', () => {
     const checkout = generateCommerceFiles(SCHEMA)!.find(f => f.path.includes('create-checkout'))!.content
     expect(checkout).toContain('INSERT INTO orders')
     expect(checkout).toContain('stripe.checkout.sessions.create')
-    expect(checkout).toContain('STRIPE_SECRET_KEY')
-    expect(checkout).toContain("status = 'paid'")
+    // 安全：input 只帶 productId；價格 server-side 從商品表查，不信任 client
+    expect(checkout).toContain('productId')
+    expect(checkout).toContain('FROM products WHERE id = ANY')
+    expect(checkout).not.toContain('it?.priceCents')
+    // mock 只在非 production（prod 無 key → 拒絕，不自動標記已付）
+    expect(checkout).toContain("NODE_ENV === 'production'")
   })
 
   it('webhook 驗簽 + checkout.session.completed → 標記已付', () => {
