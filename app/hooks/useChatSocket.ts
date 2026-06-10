@@ -53,7 +53,8 @@ export function useChatSocket(
   useEffect(() => {
     if (!conversationId) return
 
-    const wsUrl = process.env.NEXT_PUBLIC_VPS_WS_URL || '/'
+    // fallback 不能是 '/'：頁面 origin 是 Vercel（沒有 socket server），WS 會永遠連不上
+    const wsUrl = process.env.NEXT_PUBLIC_VPS_WS_URL || process.env.NEXT_PUBLIC_VPS_API_URL || 'https://api.tellcraft.com'
     const socket: Socket = ioClient(wsUrl, {
       transports: ['websocket', 'polling'],
       query: { conversationId },

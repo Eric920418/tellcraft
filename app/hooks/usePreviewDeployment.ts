@@ -118,7 +118,8 @@ export function usePreviewDeployment(conversationId: string | undefined): Previe
   useEffect(() => {
     if (!conversationId) return
 
-    const wsUrl = process.env.NEXT_PUBLIC_VPS_WS_URL || '/'
+    // fallback 不能是 '/'：頁面 origin 是 Vercel（沒有 socket server），WS 會永遠連不上
+    const wsUrl = process.env.NEXT_PUBLIC_VPS_WS_URL || process.env.NEXT_PUBLIC_VPS_API_URL || 'https://api.tellcraft.com'
     const socket = ioClient(wsUrl, {
       transports: ['websocket', 'polling'],
       query: { conversationId },
@@ -172,6 +173,46 @@ export function usePreviewDeployment(conversationId: string | undefined): Previe
       socketRef.current = null
     }
   }, [conversationId])
+
+  // Polling 補償：socket 斷線（WS URL 配錯 / 防火牆擋 WS）時 preview:ready 永遠收不到 →
+  // 轉圈卡死直到重整。building 期間每 10s 輪詢 latest，只在 ready/failed 時套用（不干擾 socket 進度更新）
+  useEffect(() => {
+    if (!conversationId || state.status !== 'building') return
+    const token = getAuthToken()
+    const interval = setInterval(() => {
+      fetch(`/api/vps/api/conversation/${conversationId}/preview/latest`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+        .then(r => r.ok ? r.json() as Promise<PreviewLatestResponse> : null)
+        .then(data => {
+          if (!data) return
+          if (data.status === 'ready') {
+            setState(prev => prev.status === 'building' ? {
+              ...prev,
+              url: data.url,
+              status: 'ready',
+              progressPercent: 100,
+              progressStep: '預覽就緒',
+              etaSeconds: 0,
+              error: null,
+              deploymentId: data.deploymentId ?? prev.deploymentId,
+              lkgUrl: data.lkgUrl,
+            } : prev)
+          } else if (data.status === 'failed') {
+            setState(prev => prev.status === 'building' ? {
+              ...prev,
+              status: 'failed',
+              error: data.error ?? '部署失敗',
+              lkgUrl: data.lkgUrl,
+              progressPercent: 0,
+              progressStep: '',
+            } : prev)
+          }
+        })
+        .catch(() => { /* fail-soft：下一輪再試 */ })
+    }, 10_000)
+    return () => clearInterval(interval)
+  }, [conversationId, state.status])
 
   // ETA 倒數
   useEffect(() => {
