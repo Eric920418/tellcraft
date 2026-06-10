@@ -92,18 +92,46 @@ const CLONE_EXTRACTION_SCRIPT = `(function() {
     return result;
   }
 
-  // Section 識別
-  var selectorList = 'body > header, body > nav, body > main, body > footer, body > aside, body > section, body > article, body > div, main > section, main > article, main > div';
-  var seen = new Set();
-  var sectionEls = [];
-  document.querySelectorAll(selectorList).forEach(function(el) {
-    if (seen.has(el)) return;
-    var rect = el.getBoundingClientRect();
-    if (rect.height > 80 && rect.width > 200) {
-      seen.add(el);
-      sectionEls.push(el);
-    }
+  // Section 識別 — 混合策略（2026-06 改，跨站實測驗證）：
+  // 舊版只抓 body/main 直接子層 → Wix 等把內容深埋 wrapper 的站只抓到 2-3 個巨型容器（漏 header + 十幾個 section）。
+  // 新版：A) 語意元素（section/header/nav/footer/article，整棵樹）優先；B) 無語意（老式 table 站）→ 遞迴穿 wrapper 找內容根再切子層。
+  function __isVisibleSection(el) {
+    var cs = window.getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+    var r = el.getBoundingClientRect();
+    return r.height > 60 && r.width > 200;
+  }
+  var __semantic = [].filter.call(
+    document.querySelectorAll('section, header, nav, footer, article, [role="banner"], [role="navigation"], [role="contentinfo"]'),
+    __isVisibleSection
+  );
+  // 去重 1：移除被其他候選包住的（保留最外層 → 砍掉 section 內的子 header / 巢狀 section）
+  var sectionEls = __semantic.filter(function(el) {
+    for (var j = 0; j < __semantic.length; j++) { if (__semantic[j] !== el && __semantic[j].contains(el)) return false; }
+    return true;
   });
+  // 去重 2：移除位置幾乎重疊的重複（Wix responsive / 巢狀 section 常見）
+  sectionEls.sort(function(a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+  var __deduped = [];
+  sectionEls.forEach(function(el) {
+    var r = el.getBoundingClientRect();
+    var dup = __deduped.some(function(d) { var dr = d.getBoundingClientRect(); return Math.abs(dr.top - r.top) < 8 && Math.abs(dr.height - r.height) < 8; });
+    if (!dup) __deduped.push(el);
+  });
+  sectionEls = __deduped;
+  // Fallback：語意 < 3（如老式 table 站）→ 遞迴穿過單一 wrapper 找內容根，再切其子層
+  if (sectionEls.length < 3) {
+    var __root = document.body, __guard = 0;
+    while (__guard++ < 25) {
+      var __kids = [].filter.call(__root.children, function(c) { var r = c.getBoundingClientRect(); var cs = window.getComputedStyle(c); return cs.display !== 'none' && r.width > 100 && r.height > 20; });
+      if (__kids.length === 0) break;
+      if (__kids.length === 1) { var __pr = __root.getBoundingClientRect(), __cr = __kids[0].getBoundingClientRect(); if (__cr.height >= __pr.height * 0.5 && __cr.width >= __pr.width * 0.5) { __root = __kids[0]; continue; } break; }
+      break;
+    }
+    var __rootKids = [].filter.call(__root.children, function(c) { var r = c.getBoundingClientRect(); var cs = window.getComputedStyle(c); return cs.display !== 'none' && cs.visibility !== 'hidden' && r.height > 40 && r.width > 150; });
+    if (__rootKids.length >= sectionEls.length) sectionEls = __rootKids;
+  }
+  sectionEls.sort(function(a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
   var sections = sectionEls.slice(0, 15);
 
   // Section 結構
