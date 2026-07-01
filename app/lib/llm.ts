@@ -7,8 +7,14 @@ const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 
 // Claude 定價 (每百萬 tokens，美元)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'claude-sonnet-4-6': { input: 3, output: 15 },            // Sonnet 4.6
+  'claude-sonnet-5': { input: 3, output: 15 },              // Sonnet 5（標準價；介紹期到 2026-08-31 為 $2/$10）
   'claude-haiku-4-5-20251001': { input: 1, output: 5 },     // Haiku 4.5
+}
+
+// Sonnet 5 / Opus 4.7+ / Fable 這一代拒絕非預設 sampling 參數（temperature 傳了 → 400）；
+// 只有 Haiku 4.5 等舊模型仍接受。與後端 lib/anthropic.ts supportsSampling 同一規則。
+function supportsSampling(model: string): boolean {
+  return model.startsWith('claude-haiku')
 }
 
 interface Message {
@@ -151,7 +157,7 @@ export async function callClaude(
     return { success: false, error: 'Missing ANTHROPIC_API_KEY' }
   }
 
-  const model = options?.model || 'claude-sonnet-4-6'
+  const model = options?.model || 'claude-sonnet-5'
   const maxRetries = 3
   const baseDelay = 30000 // 30 秒基礎等待時間
 
@@ -167,7 +173,7 @@ export async function callClaude(
         body: JSON.stringify({
           model,
           max_tokens: options?.maxTokens || 4096,
-          temperature: options?.temperature ?? 0.7,
+          ...(supportsSampling(model) ? { temperature: options?.temperature ?? 0.7 } : {}),
           system: systemPrompt,
           messages: messages.map(m => ({
             role: m.role,
@@ -207,7 +213,7 @@ export async function callClaude(
       // 計算 token 使用量和成本
       const inputTokens = data.usage?.input_tokens || 0
       const outputTokens = data.usage?.output_tokens || 0
-      const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-sonnet-4-6']
+      const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-sonnet-5']
       const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000
 
       // 記錄使用量

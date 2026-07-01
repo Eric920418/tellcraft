@@ -16,7 +16,7 @@ Tellcraft 是一個 AI 驅動的 **SDD（Specification-Driven Development）自�
 | **後端** | Express + BullMQ + LangGraph + Socket.io | VPS 部署，PM2 管理（LangGraph 由 `USE_LANGGRAPH` feature flag 控制） |
 | **資料庫** | PostgreSQL（VPS 本地） | 低延遲，自主控制 |
 | **佇列/狀態** | Redis | BullMQ 任務佇列 + 串流狀態 |
-| **LLM** | Claude Sonnet / Haiku | Anthropic SDK + Structured Outputs + Prompt Caching |
+| **LLM** | Claude Sonnet 5 + Haiku 4.5 | Anthropic SDK + Structured Outputs + Prompt Caching。模型 ID 常數在 `lib/anthropic.ts` `MODEL`。**Sonnet 5 這代拒絕非預設 sampling（temperature）與 `budget_tokens` extended thinking → 400**，所有 API 組裝點統一經 `samplingParams()`/`thinkingParams()` gate（2026-07-02 從 Sonnet 4.6 遷移）；Haiku 4.5 仍支援 sampling |
 | **動畫** | framer-motion (v12+) + Remotion | 需求藍圖面板 + 串流動畫 |
 | **i18n** | next-intl v4 | 中/英雙語，`[locale]` 路由 |
 | **樣式** | Tailwind CSS v4 | `@import "tailwindcss"` 語法 |
@@ -857,9 +857,10 @@ sdd.os/                   # SDD 上游 Reference Repo（git subtree，只讀參�
 │   ├── specformula-ts/      # TS 版（Placeholder，實作在 tellcraft-backend/src/lib/specformula/）
 │   └── benchmark/           # 範例專案（guessing_game / todo_list / agent_hr_system）
 marketing/                # 行銷素材（非程式）
-│   ├── tellcraft-animation-script.html  # 60s 品牌動畫腳本（分鏡+旁白+數據），A4 列印優化
-│   ├── build-pdf.mjs                     # 用 puppeteer-core 渲染成 PDF（node marketing/build-pdf.mjs）
-│   └── Tellcraft-動畫腳本.pdf            # 交付動畫廠商的成品
+│   ├── 腳本.txt                           # 品牌影片劇本（純文字，30s，接案攝影師）← 目前交付版
+│   ├── tellcraft-animation-script.html  # 舊版 PDF 腳本原始檔（已被純文字劇本取代）
+│   ├── build-pdf.mjs                     # 舊版：用 puppeteer-core 渲染 HTML→PDF
+│   └── Tellcraft-動畫腳本.pdf            # 舊版 PDF 成品
 ```
 
 ## Roadmap（待實作）

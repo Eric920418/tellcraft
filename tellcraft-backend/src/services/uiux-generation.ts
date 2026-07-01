@@ -7,7 +7,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import * as ts from 'typescript'
-import { getAnthropicClient, MODEL, trackLlmUsage, buildCacheableSystem } from '../lib/anthropic'
+import { getAnthropicClient, MODEL, trackLlmUsage, buildCacheableSystem, samplingParams } from '../lib/anthropic'
 import { callStructured, type StructuredOptions, type StructuredResult } from '../lib/structured-output'
 import { getEnv } from '../lib/env'
 import { formatUISpecForPrompt, UIRequirementsSpec } from './bdd-to-ui-spec'
@@ -281,7 +281,7 @@ export async function callClaude(
           const stream = anthropic.messages.stream({
             model: MODEL.SONNET,
             max_tokens: options?.maxTokens || 4096,
-            temperature: options?.temperature ?? 0.2,
+            ...samplingParams(MODEL.SONNET, options?.temperature ?? 0.2),
             system: systemPrompt,
             messages: requestMessages,
           })

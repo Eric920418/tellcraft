@@ -221,7 +221,7 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 
 ### 已自動化覆蓋（一行原則，違反就會被擋）
 
-- `[CI]` 一律用 `claude-sonnet-4-6`（不加日期），用 `semantic-gateway.ts` 常數
+- `[CI]` 一律用 `claude-sonnet-5`（不加日期），用 `lib/anthropic.ts` 的 `MODEL.SONNET` 常數。**Sonnet 5 這一代拒絕非預設 sampling（temperature/top_p/top_k）與 `{type:'enabled',budget_tokens}` extended thinking（傳了 → 400）**：所有 API 組裝點一律經 `lib/anthropic.ts` 的 `samplingParams()` / `thinkingParams()` gate 過濾，禁止手動塞 `temperature`/`thinking` 進 body。Haiku 4.5 仍支援 sampling（不受影響）
 - `[CI]` 字體只能用 `next/font`，禁 `<link>`/`@import` Google Fonts
 - `[CI]` Tailwind v4：`@import "tailwindcss"`（非 v3 `@tailwind`）— **僅指 Tellcraft 前端開發 app（chat UI）**
 - `[TEST]` **生成的客戶 app pin Tailwind v3.4**（`deployer.ts:250` + `app/lib/webcontainer-utils.ts:43`）→ `globals.css` 必須有 `@tailwind base/components/utilities;` 三行。**LLM 偏寫 v4 `@import "tailwindcss"` 時 sanitize 砍掉但不能不補 v3 directives** — `cleanTailwindV4Syntax` 必須**自包含**（砍 v4 + 補 v3 同一函數內完成）。Incident 2026-05-17：原版只在 `assembleDeployFiles` L1979-82 補 v3，但 `sanitizeCodeForDeploy` 在 iteration / UIUX 完成寫 DB 也呼叫，那條路徑沒補 → DB 內 globals.css 缺 directives → WebContainer preview 讀 LKG 直接整個專案大爆版（zero Tailwind utility 生效）。守護：`__tests__/tailwind-v4-cleanup.test.ts` 10 個 case 驗 idempotent + 自包含

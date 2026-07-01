@@ -9,7 +9,7 @@ vi.mock('../lib/cache', () => ({
   invalidateCache: vi.fn(async () => {}),
 }))
 vi.mock('../lib/anthropic', () => ({
-  MODEL: { HAIKU: 'claude-haiku-4-5-20251001', SONNET: 'claude-sonnet-4-6' },
+  MODEL: { HAIKU: 'claude-haiku-4-5-20251001', SONNET: 'claude-sonnet-5' },
 }))
 vi.mock('../lib/structured-output', () => ({
   callStructured: vi.fn(),

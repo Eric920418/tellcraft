@@ -7,7 +7,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { ZodType } from 'zod'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
-import { getAnthropicClient, trackLlmUsage, type ModelId } from './anthropic'
+import { getAnthropicClient, trackLlmUsage, samplingParams, thinkingParams, type ModelId } from './anthropic'
 import { createLogger } from './logger'
 
 const logger = createLogger('structured-output')
@@ -56,8 +56,8 @@ export async function callStructured<T>(
         max_tokens: effectiveMaxTokens,
         system,
         messages,
-        ...(temperature !== undefined && !thinking && { temperature }),
-        ...(thinking && { thinking }),
+        ...(thinking ? {} : samplingParams(model, temperature)),
+        ...thinkingParams(model, thinking),
         output_config: { format: zodOutputFormat(schema) },
       }
 

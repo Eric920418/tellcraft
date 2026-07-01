@@ -1,5 +1,5 @@
 import * as yaml from 'js-yaml'
-import { getAnthropicHeaders, MODEL, trackLlmUsage } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage, samplingParams, thinkingParams } from '../lib/anthropic'
 import { LlmTrackingContext } from './classifier'
 import { createLogger } from '../lib/logger'
 
@@ -82,7 +82,8 @@ async function callClaude(
         body: JSON.stringify({
           model: MODEL.SONNET,
           max_tokens: options.maxTokens || 8192,
-          temperature: options.temperature || 0.2,
+          ...samplingParams(MODEL.SONNET, options.temperature || 0.2),
+          ...thinkingParams(MODEL.SONNET),  // Sonnet 5：pin thinking disabled，避免 adaptive 吃掉額度截斷 YAML
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
         }),

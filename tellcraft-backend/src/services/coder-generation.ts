@@ -9,7 +9,7 @@
 
 import * as yaml from 'js-yaml'
 import { z } from 'zod'
-import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, type CacheableSystemPrompt } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, samplingParams, thinkingParams, type CacheableSystemPrompt } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import { callStructured } from '../lib/structured-output'
 import type { GeneratedComponent } from './uiux-generation'
@@ -145,10 +145,10 @@ async function callClaude(
         body: JSON.stringify({
           model: MODEL.SONNET,
           max_tokens: effectiveMaxTokens,
-          ...(options.thinking ? {} : { temperature: options.temperature || 0.2 }),
+          ...(options.thinking ? {} : samplingParams(MODEL.SONNET, options.temperature || 0.2)),
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
-          ...(options.thinking && { thinking: options.thinking }),
+          ...thinkingParams(MODEL.SONNET, options.thinking),
         }),
       })
 

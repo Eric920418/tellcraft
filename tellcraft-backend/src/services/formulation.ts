@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { createLogger } from '../lib/logger'
-import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, type CacheableSystemPrompt } from '../lib/anthropic'
+import { getAnthropicHeaders, MODEL, trackLlmUsage, buildCacheableSystem, samplingParams, thinkingParams, type CacheableSystemPrompt } from '../lib/anthropic'
 import { getEnv } from '../lib/env'
 import type { SkeletonTable } from './cms-skeleton/schemas'
 import { callStructured } from '../lib/structured-output'
@@ -227,7 +227,8 @@ async function callClaude(
         body: JSON.stringify({
           model: MODEL.SONNET,
           max_tokens: options.maxTokens || 8192,
-          temperature: options.temperature || 0.2,
+          ...samplingParams(MODEL.SONNET, options.temperature || 0.2),
+          ...thinkingParams(MODEL.SONNET),  // Sonnet 5：pin thinking disabled，避免 adaptive 吃掉額度截斷 Gherkin
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
         }),

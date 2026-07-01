@@ -15,11 +15,60 @@ const logger = createLogger('anthropic')
 // ============================================================
 
 export const MODEL = {
-  SONNET: 'claude-sonnet-4-6',
+  SONNET: 'claude-sonnet-5',
   HAIKU: 'claude-haiku-4-5-20251001',
 } as const
 
 export type ModelId = (typeof MODEL)[keyof typeof MODEL]
+
+// ============================================================
+// 模型能力 gate（Sonnet 5 / Opus 4.7+ / Fable 這一代的 API 契約變更）
+//
+// 這一代移除了兩樣舊模型接受、傳了會直接回 400 的參數：
+//   1. 非預設 sampling 參數（temperature / top_p / top_k）
+//   2. extended thinking 的 budget_tokens（{type:'enabled'} 改成 adaptive）
+// Haiku 4.5 等舊模型仍支援。目前 codebase 只有 SONNET(=sonnet-5) 與 HAIKU。
+//
+// 所有 API 組裝點（callStructured / 各 callClaude wrapper）一律用下面的 helper
+// 過濾參數，避免散落各處手動 if；未來換模型只改這裡一處。
+// ============================================================
+
+/** 該模型是否接受非預設 sampling 參數（Haiku 4.5 等舊模型 true；Sonnet 5 這一代 false） */
+export function supportsSampling(model: string): boolean {
+  return model === MODEL.HAIKU
+}
+
+/** 回傳可安全展開進 request body 的 sampling 參數；不支援的模型回 {}（不傳 → 用預設，不 400） */
+export function samplingParams(model: string, temperature?: number): { temperature?: number } {
+  return temperature !== undefined && supportsSampling(model) ? { temperature } : {}
+}
+
+/**
+ * 回傳可安全展開進 request body 的 thinking 參數。針對 Sonnet 5 這一代的兩個變化：
+ *   (a) 移除了 {type:'enabled', budget_tokens}（傳了 → 400）
+ *   (b) 「省略 thinking」= 預設跑 adaptive thinking（4.6 是不跑）
+ *
+ * 因此對 Sonnet 5：
+ *   - 呼叫端「有」要 thinking（如 coder 修復想加推理）→ 回 {}，讓其吃預設 adaptive（(b) 的紅利，
+ *     相當於舊 extended thinking 的現代版；SDK 0.72.1 無 adaptive 型別，靠「省略即 adaptive」達成）
+ *   - 呼叫端「沒」要 thinking（deterministic 生成 / structured）→ pin {type:'disabled'} 對齊 4.6 行為，
+ *     避免 (b) 的 adaptive 吃掉小 max_tokens 額度造成 JSON 截斷、或推高成本
+ *
+ * 舊模型（Haiku 等）不受 (a)(b) 影響：requested → 原樣 enabled；否則不設。
+ *
+ * 註：此 helper 只被「有 spread thinkingParams」的組裝點消費（structured-output funnel + coder），
+ *     free-text wrapper（uiux/actions/formulation）不 spread 它，故它們的 Sonnet 5 呼叫維持 adaptive
+ *     預設開啟（大 max_tokens、graceful，視為品質升級）。要改變此分工只需在對應組裝點增減 spread。
+ */
+export function thinkingParams(
+  model: string,
+  thinking?: { type: 'enabled'; budget_tokens: number },
+): { thinking?: { type: 'enabled'; budget_tokens: number } | { type: 'disabled' } } {
+  if (supportsSampling(model)) {
+    return thinking ? { thinking } : {}
+  }
+  return thinking ? {} : { thinking: { type: 'disabled' } }
+}
 
 // ============================================================
 // 定價（USD per 1M tokens）— 全 codebase 唯一來源

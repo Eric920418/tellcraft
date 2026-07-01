@@ -48,11 +48,11 @@ echo "Running pre-commit checks..."
 echo ""
 
 # ── 1. Dated Sonnet/Opus model IDs ──
-# CLAUDE.md: 一律用 claude-sonnet-4-6（不加日期後綴），claude-sonnet-4-6-20250514 不存在會 404
+# CLAUDE.md: 一律用 claude-sonnet-5（不加日期後綴），claude-sonnet-5-20xxxxxx 不存在會 404
 # Note: claude-haiku-4-5-20251001 IS correct (Haiku requires date suffix)
 check \
-  "Dated Sonnet/Opus model ID (use claude-sonnet-4-6 or claude-opus-4-6 without date)" \
-  'claude-sonnet-4-6-[0-9]\|claude-opus-4-6-[0-9]' \
+  "Dated Sonnet/Opus model ID (use claude-sonnet-5 or claude-opus-4-6 without date)" \
+  'claude-sonnet-5-[0-9]\|claude-sonnet-4-6-[0-9]\|claude-opus-4-6-[0-9]' \
   "$ROOT_DIR" \
   '*.ts' \
   'node_modules\|__tests__\|\.next\|dist'
@@ -99,7 +99,7 @@ check \
 # ── 6. Hardcoded model strings outside constants file ──
 # CLAUDE.md: 全 codebase 用 semantic-gateway.ts 定義的常數而非手打
 # Only check tellcraft-backend (frontend has its own llm.ts with intentional model strings)
-HARDCODED_MODELS=$(grep -rn "'claude-sonnet-4-6'\|\"claude-sonnet-4-6\"" "$ROOT_DIR/tellcraft-backend/src/" --include='*.ts' 2>/dev/null \
+HARDCODED_MODELS=$(grep -rn "'claude-sonnet-5'\|\"claude-sonnet-5\"" "$ROOT_DIR/tellcraft-backend/src/" --include='*.ts' 2>/dev/null \
   | grep -v 'anthropic.ts' \
   | grep -v '__tests__' \
   | grep -v 'node_modules' \
@@ -107,7 +107,7 @@ HARDCODED_MODELS=$(grep -rn "'claude-sonnet-4-6'\|\"claude-sonnet-4-6\"" "$ROOT_
   | grep -v 'dist/' \
   || true)
 if [ -n "$HARDCODED_MODELS" ]; then
-  echo -e "${RED}FAIL${NC} Hardcoded model ID 'claude-sonnet-4-6' (use MODEL.SONNET from lib/anthropic.ts)"
+  echo -e "${RED}FAIL${NC} Hardcoded model ID 'claude-sonnet-5' (use MODEL.SONNET from lib/anthropic.ts)"
   echo "$HARDCODED_MODELS" | head -10
   echo ""
   ERRORS=$((ERRORS + 1))
