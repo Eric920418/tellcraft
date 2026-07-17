@@ -33,7 +33,7 @@ import { toVercelSlug, deleteVercelProject } from '../services/deployer'
 import { deleteNeonProject } from '../services/neon-service'
 import { repairProjectFiles, applyFixersToContent } from '../services/code-repair'
 import { buildDownloadBundle } from '../services/download-bundler'
-import { getProjectLimit } from '../config/plans'
+import { getProjectLimit, resolveEffectivePlan } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('project')
@@ -282,7 +282,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.post('/', requireAuth, requireActiveSubscription, validateBody(createProjectSchema), async (req, res) => {
   try {
     const userId = req.user!.id
-    const userPlan = req.user!.plan
+    const userPlan = resolveEffectivePlan(req.user!)
     const { name, description } = req.body
 
     // 檢查專案數量限制

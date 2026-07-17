@@ -25,6 +25,7 @@ import {
   updateDomainRecord, listUserDomains,
 } from '../../services/domain-service'
 import { extractDomain } from '../../workers/phase-handlers/domain-phases'
+import { resolveEffectivePlan } from '../../config/plans'
 import * as db from '../../db/client'
 import { createLogger } from '../../lib/logger'
 import type { FlowState } from '../../types/flow-state'
@@ -117,8 +118,8 @@ async function entryNode(state: TellcraftStateType): Promise<Partial<TellcraftSt
   }
 
   // 檢查用戶方案
-  const userRow = await db.queryOne<{ plan: string }>('SELECT plan FROM users WHERE id = $1', [userId])
-  const userPlan = userRow?.plan || 'free'
+  const userRow = await db.queryOne<{ plan: string; is_admin: boolean }>('SELECT plan, is_admin FROM users WHERE id = $1', [userId])
+  const userPlan = userRow ? resolveEffectivePlan(userRow) : 'free'
   if (userPlan === 'free') {
     await sendMessage(conversationId, io, {
       content: isChinese

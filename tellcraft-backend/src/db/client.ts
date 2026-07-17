@@ -133,8 +133,9 @@ export async function getUser(userId: string) {
     subscription_status: string
     credits_used_this_period: number
     message_count_this_period: number
+    is_admin: boolean
   }>(
-    'SELECT id, email, plan, subscription_status, credits_used_this_period, message_count_this_period FROM users WHERE id = $1',
+    'SELECT id, email, plan, subscription_status, credits_used_this_period, message_count_this_period, is_admin FROM users WHERE id = $1',
     [userId]
   )
 }

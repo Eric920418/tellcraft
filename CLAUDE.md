@@ -233,6 +233,13 @@ Feature 註解：`# Action: actionName` + `# [METHOD] /path` + `# Summary: xxx`
 - `[TEST]` Coder Handler `.md` 內容必須以 `\n` 開頭（匹配舊 const 模板），byte-identity 測試守
 - `[TEST]` 動畫庫是 `framer-motion` v12+（import from 'framer-motion'）
 
+### 配額與 admin 豁免
+
+- `[TEST]` **`SELECT plan FROM users` 之後拿 plan 去查配額 → 一律先經 `config/plans.ts:resolveEffectivePlan(user)`**。admin（`users.is_admin`）在執行期被解析成虛擬方案 `ADMIN_PLAN='admin'`（四張 limit 表皆 `Infinity`），`users.plan` 欄位永不寫入 'admin'。**新增任何配額檢查點卻直接用 raw `user.plan` = admin 對該點失效**（無聲漏接，不會有錯誤）。守護：`__tests__/admin-entitlements.test.ts`。SELECT 記得一起撈 `is_admin`，helper 同時吃 `is_admin`(DB row) 與 `isAdmin`(req.user/JWT) 避免 snake/camel 漂移
+- `[ARCH]` **`UNLIMITED = Infinity` 禁止直接當 SQL 參數**：node-postgres 會序列化成 `"Infinity"` 丟進 INTEGER 欄位 → SQL 錯誤。必須先 `isUnlimitedPlan()` 分支（見 `orchestrator-utils.ts:deductCredits` admin 走無 CAS guard 的 UPDATE）。**admin 用量照常累加只是不設上限** — 拿掉 gate ≠ 拿掉觀測性
+- `[ARCH]` **不看 plan 的 gate 必須個別處理**（`resolveEffectivePlan` 涵蓋不到）：`middleware/auth.ts` 的 `requireActiveSubscription` / `requirePlan`（看 subscription_status）、`routes/conversation.ts` 精細模式 402 `PRECISION_PAYMENT_REQUIRED`、`services/iteration-skill.ts` 迭代次數 paywall（皆看 `precision_orders`）、`routes/operations.ts` 訂閱檢查。另 `PLAN_PRIORITY_WEIGHTS` 這類 `WEIGHTS[plan] || 0` 查表**必須列 admin**，否則 admin 落到 free 的最低優先級
+- `[ARCH]` **`is_admin` 無 bootstrap 途徑**：預設 FALSE，`POST /admin/users/:userId/admin` 自身需 `requireAdmin` 且禁止改自己 → 第一個 admin 只能手動 SQL `UPDATE users SET is_admin = true WHERE email = '...'`。**配額豁免改完即時生效不必重登**（gate 全走 `requireAuth`→`getUser` 每次現查 DB，不讀 JWT）；重登只影響前端 dashboard admin 選單（`app/[locale]/dashboard/layout.tsx` 讀 JWT payload.isAdmin，`/me` 偵測漂移會回 `refreshedToken`）
+
 ### 流程編排與 phase 狀態
 
 - **新增 phase 必須五處同步**：`handleContinueFlow` 路由（含超時）+ `FlowState` 型別 + `flowstate-recovery.ts` RECOVERABLE_PHASES + 前端 `richContent.type` union + `graph/nodes/phase-router.ts`

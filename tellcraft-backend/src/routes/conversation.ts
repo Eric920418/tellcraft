@@ -6,7 +6,7 @@ import { optionalAuth } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
 import { sendMessageSchema, replyMessageSchema } from '../schemas/conversation'
 import * as db from '../db/client'
-import { getCreditLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
+import { getCreditLimit, isCreditExhausted, resolveEffectivePlan, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 import { acquireUserActiveLock, releaseUserActiveLock, USER_ACTIVE_TTL_SECONDS } from '../services/conversation-lock'
 import { enqueuePreviewDeploy } from '../workers/preview-deploy-worker'
 import { repairCodePreviewInMessages } from '../services/code-repair'
@@ -110,20 +110,31 @@ async function getUserCreditQuotaStatus(userId: string): Promise<{
   const user = await db.queryOne<{
     plan: string
     credits_used_this_period: number
+    is_admin: boolean
   }>(
-    'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
+    'SELECT plan, credits_used_this_period, is_admin FROM users WHERE id = $1',
     [userId]
   )
 
   if (!user) return null
 
-  const creditLimit = getCreditLimit(user.plan)
+  const effectivePlan = resolveEffectivePlan(user)
+  const creditLimit = getCreditLimit(effectivePlan)
   const creditsUsed = user.credits_used_this_period || 0
   return {
     creditsUsed,
     creditLimit,
-    limitReached: isCreditExhausted(user.plan, creditsUsed),
+    limitReached: isCreditExhausted(effectivePlan, creditsUsed),
   }
+}
+
+/** 該用戶是否為 admin（不受任何配額／付費限制） */
+async function isAdminUser(userId: string): Promise<boolean> {
+  const row = await db.queryOne<{ is_admin: boolean }>(
+    'SELECT is_admin FROM users WHERE id = $1',
+    [userId]
+  )
+  return row?.is_admin === true
 }
 
 // ============================================================
@@ -211,7 +222,8 @@ router.post('/:id/message', optionalAuth, validateBody(sendMessageSchema), async
     // 後續迭代訊息不帶 mode（由 iteration-skill 的配額 gate 管），故此 gate 剛好只在「啟動」那刻觸發。
     // 認領式：有未綁定的已付訂單 → 原子綁到本專案放行；完全沒有可用訂單 → 402 導去單次付款。
     // 對 fast/clone 模式、creator/pro/business 訂閱用戶完全無影響。
-    if (mode === 'fine' && conversation.project_id) {
+    // Admin 不受單次付費限制：直接放行，不認領訂單（避免佔用真實訂單額度）
+    if (mode === 'fine' && conversation.project_id && !(await isAdminUser(userId))) {
       const usableOrder = await claimPrecisionOrderForStart(userId, conversation.project_id)
       if (!usableOrder) {
         logger.info(

@@ -8,6 +8,7 @@ import { requireAuth } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
 import { createGenerationSchema, createDeploymentSchema, createTaskSchema, createWebhookSchema } from '../schemas/operations'
 import crypto from 'crypto'
+import { ADMIN_PLAN, resolveEffectivePlan } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('operations')
@@ -299,11 +300,13 @@ router.get('/tasks/:id', requireAuth, async (req: Request, res: Response) => {
 })
 
 // 方案優先級權重
+// admin 必須列在這裡：查表是 `WEIGHTS[plan] || 0`，漏了會讓 admin 落到 free 的最低優先級
 const PLAN_PRIORITY_WEIGHTS: Record<string, number> = {
   free: 0,
   creator: 10,
   pro: 50,
-  business: 100
+  business: 100,
+  [ADMIN_PLAN]: 1000
 }
 
 /**
@@ -326,17 +329,18 @@ router.post('/tasks/full', requireAuth, async (req: Request, res: Response) => {
     }
 
     // 查詢用戶訂閱狀態
-    const user = await queryOne<{ plan: string; subscription_status: string }>(
-      'SELECT plan, subscription_status FROM users WHERE id = $1',
+    const user = await queryOne<{ plan: string; subscription_status: string; is_admin: boolean }>(
+      'SELECT plan, subscription_status, is_admin FROM users WHERE id = $1',
       [userId]
     )
 
-    if (!user || user.subscription_status !== 'active') {
+    // Admin 不受訂閱狀態限制
+    if (!user || (!user.is_admin && user.subscription_status !== 'active')) {
       return res.status(403).json({ error: '訂閱狀態必須為 active' })
     }
 
     // 計算優先級
-    const calculatedPriority = PLAN_PRIORITY_WEIGHTS[user.plan] || 0
+    const calculatedPriority = PLAN_PRIORITY_WEIGHTS[resolveEffectivePlan(user)] || 0
 
     // 建立任務
     const taskId = crypto.randomUUID()

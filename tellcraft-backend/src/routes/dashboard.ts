@@ -9,7 +9,7 @@ import { query, queryOne } from '../db/client'
 import { requireAuth, requireAdmin } from '../middleware/auth'
 import { parseLogLine, sanitizeLogLine, isNoiseLine, type ParsedLogLine } from '../utils/log-parser'
 import type Redis from 'ioredis'
-import { getCreditLimit, isFairUsePlan } from '../config/plans'
+import { getCreditLimit, isFairUsePlan, resolveEffectivePlan } from '../config/plans'
 import { cached, invalidateCache } from '../lib/cache'
 import { createLogger } from '../lib/logger'
 import { generateThumbnailsForSeedTemplates } from '../services/thumbnail-recapture'
@@ -38,8 +38,9 @@ router.get('/stats', requireAuth, async (req, res) => {
       const user = await queryOne<{
         plan: string
         credits_used_this_period: number
+        is_admin: boolean
       }>(
-        'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
+        'SELECT plan, credits_used_this_period, is_admin FROM users WHERE id = $1',
         [userId]
       )
 
@@ -112,7 +113,7 @@ router.get('/stats', requireAuth, async (req, res) => {
         })
       }
 
-      const plan = user.plan || 'free'
+      const plan = user ? resolveEffectivePlan(user) : 'free'
       const stats = {
         totalProjects: projectCount,
         totalConversations: convCount,

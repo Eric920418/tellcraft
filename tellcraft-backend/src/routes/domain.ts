@@ -17,7 +17,7 @@ import {
   deleteDnsRecord,
   removeDomainBinding,
 } from '../services/domain-service'
-import { getDomainLimit } from '../config/plans'
+import { getDomainLimit, resolveEffectivePlan } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('domain-routes')
@@ -39,7 +39,7 @@ router.use(requirePlan('creator', 'pro', 'business'))
 router.post('/check', validateBody(checkDomainSchema), async (req, res) => {
   try {
     const { domain } = req.body as { domain: string }
-    const quota = await checkDomainQuota(req.user!.id, req.user!.plan)
+    const quota = await checkDomainQuota(req.user!.id, resolveEffectivePlan(req.user!))
     const result = await checkDomainAvailability(domain)
     res.json({ success: true, data: result, quota: { allowed: quota.allowed, current: quota.current, limit: quota.limit } })
   } catch (err) {
@@ -73,7 +73,7 @@ router.get('/pricing', async (_req, res) => {
 router.get('/list', async (req, res) => {
   try {
     const userId = req.user!.id
-    const plan = req.user!.plan
+    const plan = resolveEffectivePlan(req.user!)
     const domains = await listUserDomains(userId)
     const limit = getDomainLimit(plan)
     res.json({ success: true, data: domains, quota: { current: domains.length, limit } })

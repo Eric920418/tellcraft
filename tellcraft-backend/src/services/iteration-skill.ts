@@ -450,6 +450,20 @@ async function getPrecisionOrderQuota(projectId: string): Promise<{
   }
 }
 
+/** 該用戶是否為 admin（不受配額／付費限制）。fail-closed：查詢失敗視為非 admin */
+async function isAdminUserId(userId: string): Promise<boolean> {
+  try {
+    const row = await db.queryOne<{ is_admin: boolean }>(
+      'SELECT is_admin FROM users WHERE id = $1',
+      [userId]
+    )
+    return row?.is_admin === true
+  } catch (err) {
+    logger.warn({ err, userId }, 'is_admin 查詢失敗，視為非 admin')
+    return false
+  }
+}
+
 async function incrementPrecisionOrderIteration(orderId: string): Promise<void> {
   try {
     await db.query(
@@ -482,8 +496,10 @@ export async function executeIteration(input: {
 
   // 0a. 精細模式訂單配額檢查（必須在 MAX_ITERATIONS_PER_SESSION 之前，
   //     避免 starter 3 次配額被 50 次 hard cap 覆蓋）
+  // Admin 不受訂單迭代次數限制（訂單仍照常計數，保持資料一致）
+  const iterationQuotaExempt = await isAdminUserId(userId)
   const precisionOrder = await getPrecisionOrderQuota(projectId)
-  if (precisionOrder && precisionOrder.iterationsUsed >= precisionOrder.iterationsTotal) {
+  if (!iterationQuotaExempt && precisionOrder && precisionOrder.iterationsUsed >= precisionOrder.iterationsTotal) {
     const isChinese = state.locale !== 'en'
     await sendMessage(conversationId, io, {
       content: isChinese

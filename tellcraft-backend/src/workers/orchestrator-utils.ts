@@ -15,7 +15,7 @@ import { sendLineNotifyIfNeeded } from '../services/line-notify'
 import { sendLineFullMessage } from '../services/line-full-push'
 import { sendTelegramNotifyIfNeeded } from '../services/telegram-notify'
 import { sendTelegramFullMessage } from '../services/telegram-full-push'
-import { getCreditLimit } from '../config/plans'
+import { getCreditLimit, resolveEffectivePlan, isUnlimitedPlan } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('orchestrator-utils')
@@ -582,8 +582,12 @@ export async function deductCredits(
   amount: number
 ): Promise<{ success: boolean; creditsUsed: number; creditLimit: number }> {
   // 查詢用戶 plan
-  const user = await db.queryOne<{ plan: string; credits_used_this_period: number }>(
-    'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
+  const user = await db.queryOne<{
+    plan: string
+    credits_used_this_period: number
+    is_admin: boolean
+  }>(
+    'SELECT plan, credits_used_this_period, is_admin FROM users WHERE id = $1',
     [userId]
   )
 
@@ -591,7 +595,25 @@ export async function deductCredits(
     return { success: false, creditsUsed: 0, creditLimit: 0 }
   }
 
-  const creditLimit = getCreditLimit(user.plan)
+  const effectivePlan = resolveEffectivePlan(user)
+  const creditLimit = getCreditLimit(effectivePlan)
+
+  // Admin：不設上限，但用量照常累加（保留 dashboard 觀測性）。
+  // 必須在進 SQL 前分支 — creditLimit 是 Infinity，直接當參數會被序列化成 "Infinity"
+  // 丟進 INTEGER 欄位比較而爆 SQL 錯誤。
+  if (isUnlimitedPlan(effectivePlan)) {
+    const adminResult = await db.queryOne<{ credits_used_this_period: number }>(
+      `UPDATE users SET credits_used_this_period = credits_used_this_period + $1
+       WHERE id = $2
+       RETURNING credits_used_this_period`,
+      [amount, userId]
+    )
+    return {
+      success: true,
+      creditsUsed: adminResult?.credits_used_this_period ?? user.credits_used_this_period,
+      creditLimit,
+    }
+  }
 
   // CAS 原子更新：確保不超額
   const result = await db.queryOne<{ credits_used_this_period: number }>(

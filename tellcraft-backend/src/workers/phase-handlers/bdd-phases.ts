@@ -32,7 +32,7 @@ import { deriveSchemaFromBdd } from '../../services/schema-derivation'
 import { checkDbQuota, provisionNeonDatabase } from '../../services/neon-service'
 import { checkInputQuality } from '../../services/prefilter'
 import { sendMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, deductCredits, touchFlowActivity } from '../orchestrator-utils'
-import { CREDIT_COSTS } from '../../config/plans'
+import { CREDIT_COSTS, resolveEffectivePlan } from '../../config/plans'
 import { sanitizeClarifyForDisplay, sanitizeForDisplay } from '../../utils/white-text-sanitizer'
 import { semanticGateway } from '../../services/semantic-gateway'
 import { createLogger } from '../../lib/logger'
@@ -2958,11 +2958,11 @@ async function _completeSpecPhaseInner(
   try {
     const env = (await import('../../lib/env')).getEnv()
     if (schemaSql && state.userId && env.NEON_API_KEY) {
-      const userRow = await db.query<{ plan: string }>(
-        'SELECT plan FROM users WHERE id = $1',
+      const userRow = await db.query<{ plan: string; is_admin: boolean }>(
+        'SELECT plan, is_admin FROM users WHERE id = $1',
         [state.userId]
       )
-      const userPlan = userRow.rows[0]?.plan || 'free'
+      const userPlan = userRow.rows[0] ? resolveEffectivePlan(userRow.rows[0]) : 'free'
       const quota = await checkDbQuota(state.userId, userPlan)
 
       // L27.A: 配額耗盡 — 不再靜默跳過，主動告知用戶

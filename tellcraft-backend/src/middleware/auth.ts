@@ -35,6 +35,8 @@ declare global {
         email: string
         plan: string
         subscriptionStatus: string
+        /** 來自 DB users.is_admin（每次 requireAuth 現查，非 JWT payload 快照） */
+        isAdmin: boolean
       }
     }
   }
@@ -134,6 +136,7 @@ export async function requireExtensionAuth(
       email: user.email,
       plan: user.plan,
       subscriptionStatus: user.subscription_status,
+      isAdmin: user.is_admin === true,
     }
     // 附加 extension scope info 給 endpoint 用
     ;(req as Request & { extension?: { conversationId: string; projectId: string } }).extension = {
@@ -198,6 +201,7 @@ export async function requireAuth(
       email: user.email,
       plan: user.plan,
       subscriptionStatus: user.subscription_status,
+      isAdmin: user.is_admin === true,
     }
 
     next()
@@ -234,6 +238,7 @@ export async function optionalAuth(
           email: user.email,
           plan: user.plan,
           subscriptionStatus: user.subscription_status,
+          isAdmin: user.is_admin === true,
         }
       }
     }
@@ -259,6 +264,12 @@ export function requireActiveSubscription(
     return
   }
 
+  // Admin 不受訂閱狀態限制
+  if (req.user.isAdmin) {
+    next()
+    return
+  }
+
   if (req.user.subscriptionStatus !== 'active') {
     res.status(403).json({ error: 'Active subscription required' })
     return
@@ -274,6 +285,12 @@ export function requirePlan(...allowedPlans: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {
       res.status(401).json({ error: 'Authentication required' })
+      return
+    }
+
+    // Admin 不受方案限制（domain 路由、程式碼下載、import-design 等付費限定功能）
+    if (req.user.isAdmin) {
+      next()
       return
     }
 

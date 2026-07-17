@@ -8,7 +8,7 @@ import { requireAuth, optionalAuth } from '../middleware/auth'
 import { validateBody } from '../middleware/validate'
 import { initializeSessionSchema } from '../schemas/session'
 import crypto from 'crypto'
-import { getCreditLimit, getProjectLimit, isCreditExhausted, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
+import { getCreditLimit, getProjectLimit, isCreditExhausted, resolveEffectivePlan, CREDIT_LIMIT_ERROR_CODE } from '../config/plans'
 import { createLogger } from '../lib/logger'
 
 const logger = createLogger('session')
@@ -58,8 +58,9 @@ router.post('/initialize', optionalAuth, validateBody(initializeSessionSchema), 
     const user = await queryOne<{
       plan: string
       credits_used_this_period: number
+      is_admin: boolean
     }>(
-      'SELECT plan, credits_used_this_period FROM users WHERE id = $1',
+      'SELECT plan, credits_used_this_period, is_admin FROM users WHERE id = $1',
       [userId]
     )
 
@@ -67,7 +68,8 @@ router.post('/initialize', optionalAuth, validateBody(initializeSessionSchema), 
       return res.status(404).json({ error: '用戶不存在' })
     }
 
-    const quotaReached = isCreditExhausted(user.plan, user.credits_used_this_period)
+    const effectivePlan = resolveEffectivePlan(user)
+    const quotaReached = isCreditExhausted(effectivePlan, user.credits_used_this_period)
 
     // 如果指定了 conversationId，嘗試恢復
     if (conversationId && !createNew) {
@@ -97,7 +99,7 @@ router.post('/initialize', optionalAuth, validateBody(initializeSessionSchema), 
           readOnly: quotaReached,
           lockReason: quotaReached ? 'credit_limit' : undefined,
           creditsUsed: user.credits_used_this_period,
-          creditLimit: getCreditLimit(user.plan),
+          creditLimit: getCreditLimit(effectivePlan),
         })
       }
     }
@@ -138,7 +140,7 @@ router.post('/initialize', optionalAuth, validateBody(initializeSessionSchema), 
         readOnly: true,
         lockReason: 'credit_limit',
         creditsUsed: user.credits_used_this_period,
-        creditLimit: getCreditLimit(user.plan),
+        creditLimit: getCreditLimit(effectivePlan),
       })
     }
 
@@ -162,7 +164,7 @@ router.post('/initialize', optionalAuth, validateBody(initializeSessionSchema), 
         'SELECT COUNT(*) as count FROM projects WHERE user_id = $1',
         [userId]
       )
-      const projectLimit = getProjectLimit(user.plan)
+      const projectLimit = getProjectLimit(effectivePlan)
 
       if (parseInt(projectCount?.count || '0', 10) >= projectLimit && !createNew) {
         // 達到限制，複用最近的專案

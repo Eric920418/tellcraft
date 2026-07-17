@@ -38,7 +38,7 @@ import { semanticGateway } from '../../services/semantic-gateway'
 import { freezeDesignSystem, convertVendoredToDesignSystem } from '../../services/design-system-freeze'
 import { detectFastModeIntent, getFaqReply, answerWithSonnet } from '../../services/customer-service'
 import { sendMessage, streamLlmMessage, saveFlowState, saveFlowStateLight, getFlowState, deleteFlowState, makeStreamingCallback, generatedCodeToFileRows, deductCredits, hasRecentFlowActivity, touchFlowActivity, snapshotCodeToGeneration } from '../orchestrator-utils'
-import { CREDIT_COSTS } from '../../config/plans'
+import { CREDIT_COSTS, resolveEffectivePlan } from '../../config/plans'
 import {
   hasDeployIntent, hasRejectDeployIntent, hasUndoIntent,
   hasChangeIntent, hasRollbackSpecIntent, hasCoderIntent,
@@ -789,8 +789,8 @@ export async function handleUiuxMixedPhaseRouting(
           if (state.userId) {
             try {
               const { checkDbQuota } = await import('../../services/neon-service')
-              const userRow = await db.queryOne<{ plan: string }>('SELECT plan FROM users WHERE id = $1', [state.userId])
-              const userPlan = userRow?.plan || 'free'
+              const userRow = await db.queryOne<{ plan: string; is_admin: boolean }>('SELECT plan, is_admin FROM users WHERE id = $1', [state.userId])
+              const userPlan = userRow ? resolveEffectivePlan(userRow) : 'free'
               const quota = await checkDbQuota(state.userId, userPlan)
               if (!quota.allowed) {
                 state.dbProvisionStatus = 'quota_exceeded'
